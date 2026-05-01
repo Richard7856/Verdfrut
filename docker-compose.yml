@@ -1,0 +1,131 @@
+# VerdFrut — Docker Compose para producción en VPS.
+# Levanta: Traefik (reverse proxy + SSL), platform, driver, control-plane, optimizer.
+# Las apps Next.js se buildean fuera de compose (via CI o manual) y compose solo las corre.
+
+services:
+  # --------------------------------------------------------------------------
+  # Traefik — reverse proxy con wildcard SSL para *.verdfrut.com
+  # --------------------------------------------------------------------------
+  traefik:
+    image: traefik:v3.1
+    container_name: verdfrut-traefik
+    restart: unless-stopped
+    command:
+      - --api.dashboard=false
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      # Wildcard cert via Let's Encrypt DNS challenge.
+      # Configurar el provider DNS según tu registrar (cloudflare, route53, etc.)
+      - --certificatesresolvers.letsencrypt.acme.email=${LETSENCRYPT_EMAIL}
+      - --certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge=true
+      - --certificatesresolvers.letsencrypt.acme.dnschallenge.provider=cloudflare
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_letsencrypt:/letsencrypt
+    environment:
+      # Token de Cloudflare con permisos DNS para wildcard ACME.
+      CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN}
+    networks:
+      - verdfrut
+
+  # --------------------------------------------------------------------------
+  # Optimizer — FastAPI + VROOM (servicio interno, no expuesto al exterior)
+  # --------------------------------------------------------------------------
+  optimizer:
+    build: ./services/optimizer
+    container_name: verdfrut-optimizer
+    restart: unless-stopped
+    environment:
+      OPTIMIZER_API_KEY: ${OPTIMIZER_API_KEY}
+      VROOM_BIN_PATH: /usr/local/bin/vroom
+      LOG_LEVEL: info
+    networks:
+      - verdfrut
+    # SIN labels de Traefik — solo accesible internamente desde la red verdfrut.
+
+  # --------------------------------------------------------------------------
+  # Platform — panel logístico + dashboard (uno por tenant en producción)
+  # En este compose sirve como template — para production multi-tenant,
+  # duplicar este service por tenant con sus propios envs.
+  # --------------------------------------------------------------------------
+  platform:
+    build:
+      context: .
+      dockerfile: ./apps/platform/Dockerfile
+    container_name: verdfrut-platform
+    restart: unless-stopped
+    env_file:
+      - ./apps/platform/.env.production
+    environment:
+      OPTIMIZER_URL: http://optimizer:8000
+      OPTIMIZER_API_KEY: ${OPTIMIZER_API_KEY}
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.platform.rule=HostRegexp(`{slug:[a-z0-9-]+}.verdfrut.com`)
+      - traefik.http.routers.platform.entrypoints=websecure
+      - traefik.http.routers.platform.tls.certresolver=letsencrypt
+      - traefik.http.routers.platform.tls.domains[0].main=verdfrut.com
+      - traefik.http.routers.platform.tls.domains[0].sans=*.verdfrut.com
+      - traefik.http.services.platform.loadbalancer.server.port=3000
+    networks:
+      - verdfrut
+    depends_on:
+      - optimizer
+
+  # --------------------------------------------------------------------------
+  # Driver — PWA chofer + supervisor zona (subdomain "driver")
+  # --------------------------------------------------------------------------
+  driver:
+    build:
+      context: .
+      dockerfile: ./apps/driver/Dockerfile
+    container_name: verdfrut-driver
+    restart: unless-stopped
+    env_file:
+      - ./apps/driver/.env.production
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.driver.rule=Host(`driver.verdfrut.com`)
+      - traefik.http.routers.driver.entrypoints=websecure
+      - traefik.http.routers.driver.tls.certresolver=letsencrypt
+      - traefik.http.services.driver.loadbalancer.server.port=3000
+    networks:
+      - verdfrut
+
+  # --------------------------------------------------------------------------
+  # Control Plane — super admin VerdFrut (admin.verdfrut.com)
+  # --------------------------------------------------------------------------
+  control-plane:
+    build:
+      context: .
+      dockerfile: ./apps/control-plane/Dockerfile
+    container_name: verdfrut-control-plane
+    restart: unless-stopped
+    env_file:
+      - ./apps/control-plane/.env.production
+    volumes:
+      # tenants.json: registro de tenants con credenciales Supabase
+      - /etc/verdfrut/tenants.json:/etc/verdfrut/tenants.json:ro
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.control-plane.rule=Host(`admin.verdfrut.com`)
+      - traefik.http.routers.control-plane.entrypoints=websecure
+      - traefik.http.routers.control-plane.tls.certresolver=letsencrypt
+      - traefik.http.services.control-plane.loadbalancer.server.port=3000
+    networks:
+      - verdfrut
+
+networks:
+  verdfrut:
+    driver: bridge
+
+volumes:
+  traefik_letsencrypt:

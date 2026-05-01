@@ -1,0 +1,159 @@
+/* VerdFrut Design Tokens — identidad oficial extraída del HTML standalone.
+ *
+ * Este archivo es el ÚNICO punto donde se define la identidad visual.
+ * Cambias aquí, se propaga a todas las apps.
+ *
+ * Convención `vf-*` heredada del HTML de identidad.
+ * Espacio de color: oklch (perceptualmente uniforme — dark mode "se siente igual" que light).
+ * Fuente: Geist (Vercel) + Geist Mono.
+ * Tema: el sidebar SIEMPRE es oscuro (incluso en light mode); el resto cambia con [data-theme].
+ */
+
+@import 'tailwindcss';
+
+:root {
+  /* Brand greens */
+  --vf-green-900: oklch(0.28 0.06 155);
+  --vf-green-800: oklch(0.34 0.08 155);
+  --vf-green-700: oklch(0.42 0.11 155);  /* primary */
+  --vf-green-600: oklch(0.50 0.13 155);
+  --vf-green-500: oklch(0.62 0.14 155);
+  --vf-green-100: oklch(0.94 0.04 155);
+  --vf-green-50:  oklch(0.97 0.02 155);
+
+  /* Accent (uso muy puntual) */
+  --vf-accent: oklch(0.66 0.17 50);
+  --vf-accent-soft: oklch(0.94 0.05 60);
+
+  /* Estado */
+  --vf-ok:   oklch(0.62 0.14 155);
+  --vf-warn: oklch(0.74 0.15 80);
+  --vf-crit: oklch(0.58 0.20 25);
+  --vf-info: oklch(0.58 0.13 240);
+
+  /* Neutros (cálidos) — light theme defaults */
+  --vf-bg:        oklch(0.985 0.003 95);
+  --vf-bg-elev:   oklch(1 0 0);
+  --vf-bg-sub:    oklch(0.965 0.004 95);
+  --vf-bg-side:   oklch(0.21 0.012 155);
+  --vf-bg-side-elev: oklch(0.25 0.014 155);
+  --vf-line:      oklch(0.92 0.005 95);
+  --vf-line-soft: oklch(0.95 0.004 95);
+  --vf-line-strong: oklch(0.86 0.006 95);
+  --vf-text:      oklch(0.20 0.01 155);
+  --vf-text-mute: oklch(0.46 0.008 155);
+  --vf-text-faint:oklch(0.62 0.006 155);
+  --vf-text-on-dark: oklch(0.96 0.004 155);
+  --vf-text-on-dark-mute: oklch(0.72 0.008 155);
+
+  /* Type — usa las CSS variables que next/font inyecta. Si no están (ej: scripts
+     fuera de Next), cae a "Geist" como string. */
+  --vf-font-sans: var(--font-geist-sans, "Geist"), ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --vf-font-mono: var(--font-geist-mono, "Geist Mono"), ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Radius */
+  --vf-r-sm: 6px;
+  --vf-r:    8px;
+  --vf-r-lg: 12px;
+  --vf-r-xl: 16px;
+
+  /* Sombras (sutiles, premium) */
+  --vf-sh-1: 0 1px 0 rgba(20,30,20,0.04), 0 1px 2px rgba(20,30,20,0.04);
+  --vf-sh-2: 0 1px 0 rgba(20,30,20,0.04), 0 4px 12px rgba(20,30,20,0.06);
+  --vf-sh-3: 0 8px 24px rgba(20,30,20,0.08), 0 1px 0 rgba(20,30,20,0.04);
+
+  /* Density */
+  --vf-pad: 16px;
+  --vf-pad-sm: 10px;
+  --vf-row-h: 36px;
+
+  /* Layout */
+  --vf-side-w: 220px;
+  --vf-top-h: 56px;
+}
+
+[data-theme="dark"] {
+  --vf-bg:        oklch(0.18 0.012 155);
+  --vf-bg-elev:   oklch(0.22 0.014 155);
+  --vf-bg-sub:    oklch(0.20 0.012 155);
+  --vf-bg-side:   oklch(0.14 0.010 155);
+  --vf-bg-side-elev: oklch(0.18 0.012 155);
+  --vf-line:      oklch(0.28 0.012 155);
+  --vf-line-soft: oklch(0.24 0.010 155);
+  --vf-line-strong: oklch(0.34 0.014 155);
+  --vf-text:      oklch(0.96 0.004 155);
+  --vf-text-mute: oklch(0.72 0.008 155);
+  --vf-text-faint:oklch(0.56 0.006 155);
+  --vf-sh-1: 0 1px 0 rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+  --vf-sh-2: 0 1px 0 rgba(0,0,0,0.3), 0 4px 12px rgba(0,0,0,0.25);
+  --vf-sh-3: 0 8px 24px rgba(0,0,0,0.35), 0 1px 0 rgba(0,0,0,0.3);
+}
+
+/* ============================================================================
+ * Aliases semánticos para Tailwind theme — exponen los tokens vf-* como tokens
+ * Tailwind genéricos. Los componentes de @verdfrut/ui usan estos aliases.
+ * ============================================================================ */
+@theme {
+  /* Primary mapped a green-700 (el "primary" de la marca) */
+  --color-primary-50:  oklch(0.97 0.02 155);
+  --color-primary-100: oklch(0.94 0.04 155);
+  --color-primary-200: oklch(0.88 0.07 155);
+  --color-primary-300: oklch(0.78 0.10 155);
+  --color-primary-400: oklch(0.62 0.14 155);
+  --color-primary-500: oklch(0.50 0.13 155);
+  --color-primary-600: oklch(0.42 0.11 155); /* canonical primary */
+  --color-primary-700: oklch(0.34 0.08 155);
+  --color-primary-800: oklch(0.28 0.06 155);
+  --color-primary-900: oklch(0.21 0.04 155);
+
+  --color-surface:        var(--vf-bg-elev);
+  --color-surface-muted:  var(--vf-bg);
+  --color-surface-subtle: var(--vf-bg-sub);
+  --color-border:         var(--vf-line);
+  --color-border-strong:  var(--vf-line-strong);
+
+  --color-text:         var(--vf-text);
+  --color-text-muted:   var(--vf-text-mute);
+  --color-text-subtle:  var(--vf-text-faint);
+  --color-text-inverse: var(--vf-text-on-dark);
+
+  --color-success-bg:     color-mix(in oklch, var(--vf-ok) 14%, transparent);
+  --color-success-fg:     var(--vf-ok);
+  --color-success-border: color-mix(in oklch, var(--vf-ok) 30%, transparent);
+
+  --color-warning-bg:     color-mix(in oklch, var(--vf-warn) 18%, transparent);
+  --color-warning-fg:     oklch(0.40 0.13 80);
+  --color-warning-border: color-mix(in oklch, var(--vf-warn) 40%, transparent);
+
+  --color-danger-bg:      color-mix(in oklch, var(--vf-crit) 14%, transparent);
+  --color-danger-fg:      var(--vf-crit);
+  --color-danger-border:  color-mix(in oklch, var(--vf-crit) 35%, transparent);
+
+  --color-info-bg:        color-mix(in oklch, var(--vf-info) 14%, transparent);
+  --color-info-fg:        var(--vf-info);
+  --color-info-border:    color-mix(in oklch, var(--vf-info) 35%, transparent);
+
+  --font-sans: var(--vf-font-sans);
+  --font-mono: var(--vf-font-mono);
+
+  --radius-xs: 4px;
+  --radius-sm: var(--vf-r-sm);
+  --radius-md: var(--vf-r);
+  --radius-lg: var(--vf-r-lg);
+  --radius-xl: var(--vf-r-xl);
+
+  --shadow-sm: var(--vf-sh-1);
+  --shadow-md: var(--vf-sh-2);
+  --shadow-lg: var(--vf-sh-3);
+}
+
+/* Scrollbars sutiles (heredado del HTML de identidad) */
+.scroll::-webkit-scrollbar,
+.vf-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.scroll::-webkit-scrollbar-thumb,
+.vf-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--vf-text-faint) 30%, transparent);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
