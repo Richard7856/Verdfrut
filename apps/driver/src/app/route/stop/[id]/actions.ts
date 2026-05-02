@@ -6,6 +6,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { createServerClient } from '@verdfrut/supabase/server';
+import { haversineMeters } from '@verdfrut/utils';
 import type { TableUpdate } from '@verdfrut/supabase';
 import { getStopContext } from '@/lib/queries/stop';
 import { mapDeliveryReport } from '@/lib/queries/report';
@@ -17,6 +18,22 @@ import type {
   ResolutionType,
 } from '@verdfrut/types';
 
+/**
+ * Umbrales de cercanía a la tienda según tipo de visita.
+ * - 'entrega': 300m — el chofer DEBE estar literalmente afuera de la tienda.
+ * - 'tienda_cerrada' / 'bascula': 1000m — más permisivo porque el chofer puede
+ *   estar reportando desde el estacionamiento del centro comercial o similar,
+ *   pero NO desde su casa. 1km bloquea fraude evidente sin ser tan estricto que
+ *   bloquee operación legítima.
+ *
+ * Configurable por env si en el futuro hay que tunear por ciudad/cliente.
+ */
+const ARRIVAL_RADIUS_METERS: Record<ReportType, number> = {
+  entrega: 300,
+  tienda_cerrada: 1000,
+  bascula: 300,
+};
+
 export interface ActionOk<T = void> {
   ok: true;
   data: T;
@@ -27,14 +44,37 @@ export interface ActionErr {
 }
 export type Result<T = void> = ActionOk<T> | ActionErr;
 
+interface ArrivalCoords {
+  lat: number;
+  lng: number;
+  accuracy?: number;
+}
+
+export interface ArrivalRejection {
+  reason: 'too_far' | 'no_coords';
+  distanceMeters?: number;
+  thresholdMeters?: number;
+  message: string;
+}
+
 /**
- * Marca la llegada a la parada y abre un draft delivery_report con el flujo elegido.
- * Idempotente: si ya existe un report no-draft, lo devuelve. Si existe un draft, lo recicla.
+ * Marca la llegada a la parada y abre un draft delivery_report con el tipo elegido.
+ * Idempotente: si ya existe un report en curso lo devuelve. Si existe un draft, lo recicla.
+ *
+ * VALIDACIÓN GEO (anti-fraude):
+ * El chofer DEBE estar dentro del radio de la tienda según `ARRIVAL_RADIUS_METERS`.
+ * Si está más lejos, se rechaza con `reason='too_far'` + distancia exacta para
+ * que la UI pueda mostrar "estás a 2.3km — acércate". Si la lectura GPS no se
+ * pudo obtener, `reason='no_coords'`.
+ *
+ * El cliente debe pasar `coords`. Si no lo hace (browser sin geo, permiso denegado),
+ * se rechaza con `no_coords` — el chofer no puede arrivar sin GPS.
  */
 export async function arriveAtStop(
   stopId: string,
   type: ReportType = 'entrega',
-): Promise<Result<DeliveryReport>> {
+  coords?: ArrivalCoords | null,
+): Promise<Result<DeliveryReport> | { ok: false; rejection: ArrivalRejection }> {
   const supabase = await createServerClient();
   const ctx = await getStopContext(stopId);
   if (!ctx) return { ok: false, error: 'Parada no encontrada o sin acceso' };
@@ -42,6 +82,30 @@ export async function arriveAtStop(
   // Si ya hay un report en curso, devolverlo. No queremos doble insert.
   if (ctx.report) {
     return { ok: true, data: ctx.report };
+  }
+
+  // Validación geo — debe estar dentro del radio de la tienda.
+  if (!coords) {
+    return {
+      ok: false,
+      rejection: {
+        reason: 'no_coords',
+        message: 'No se pudo obtener tu ubicación GPS. Habilita el permiso e intenta de nuevo.',
+      },
+    };
+  }
+  const distance = haversineMeters(coords.lat, coords.lng, ctx.store.lat, ctx.store.lng);
+  const threshold = ARRIVAL_RADIUS_METERS[type];
+  if (distance > threshold) {
+    return {
+      ok: false,
+      rejection: {
+        reason: 'too_far',
+        distanceMeters: Math.round(distance),
+        thresholdMeters: threshold,
+        message: `Estás a ${(distance / 1000).toFixed(2)} km de la tienda. Acércate (máx. ${threshold} m).`,
+      },
+    };
   }
 
   // Marcar stop como arrived (RLS valida que el chofer pueda).
@@ -75,6 +139,12 @@ export async function arriveAtStop(
       type,
       status: 'draft',
       current_step: initialStep,
+      // Guardar las coords del arrival en metadata para audit + posible análisis
+      // de "lejanía típica" del chofer en cada tipo de visita.
+      metadata: {
+        arrival_coords: { lat: coords.lat, lng: coords.lng, accuracy: coords.accuracy ?? null },
+        arrival_distance_meters: Math.round(distance),
+      },
     })
     .select('*')
     .single();
@@ -225,4 +295,107 @@ export async function submitReport(
   revalidatePath(`/route/stop/${existing!.stop_id}`);
   revalidatePath('/route');
   return { ok: true, data: { stopId: existing!.stop_id } };
+}
+
+/**
+ * Convierte un report de tipo `tienda_cerrada` o `bascula` a `entrega`.
+ * Se llama cuando el chofer (o el comercial) determina que la tienda sí se abrió
+ * o la báscula sí funciona, y por tanto debe seguir el flujo de entrega normal.
+ *
+ * Reusa la foto de fachada/bascula como `arrival_exhibit` (mismo bucket, misma key).
+ * El chofer NO tiene que tomar una foto duplicada del mueble al llegar.
+ */
+export async function convertToEntregaAction(reportId: string): Promise<Result> {
+  const supabase = await createServerClient();
+  const { data: existing, error: readErr } = await supabase
+    .from('delivery_reports')
+    .select('id, type, evidence, status')
+    .eq('id', reportId)
+    .single();
+  if (readErr) return { ok: false, error: readErr.message };
+  if (existing.status !== 'draft') {
+    return { ok: false, error: 'No se puede convertir un reporte ya enviado' };
+  }
+  if (existing.type === 'entrega') {
+    // Idempotente — ya es entrega, no hacer nada.
+    return { ok: true, data: undefined };
+  }
+
+  // Reusar la foto previa (facade o scale) como arrival_exhibit.
+  const evidence = (existing.evidence ?? {}) as Record<string, string>;
+  const sourceKey = existing.type === 'tienda_cerrada' ? 'facade' : 'scale';
+  if (evidence[sourceKey] && !evidence['arrival_exhibit']) {
+    evidence['arrival_exhibit'] = evidence[sourceKey];
+  }
+
+  const { error } = await supabase
+    .from('delivery_reports')
+    .update({
+      type: 'entrega',
+      current_step: 'arrival_exhibit',
+      evidence,
+    })
+    .eq('id', reportId);
+  if (error) return { ok: false, error: error.message };
+
+  return { ok: true, data: undefined };
+}
+
+/**
+ * Cierra un reporte de tipo `tienda_cerrada` o `bascula` como sin entrega.
+ * Diferente a `submitReport` porque NO requiere tickets ni evidencia adicional.
+ * La parada queda como `skipped` y la ruta puede continuar.
+ */
+export async function submitNonEntregaAction(
+  reportId: string,
+  resolutionType: ResolutionType = 'sin_entrega',
+): Promise<Result<{ stopId: string }>> {
+  const supabase = await createServerClient();
+  const { data: existing, error: readErr } = await supabase
+    .from('delivery_reports')
+    .select('stop_id, route_id, type, status')
+    .eq('id', reportId)
+    .single();
+  if (readErr) return { ok: false, error: readErr.message };
+  if (existing.status !== 'draft') {
+    return { ok: false, error: 'Reporte ya enviado' };
+  }
+  if (existing.type === 'entrega') {
+    return { ok: false, error: 'Usa submitReport para reportes de tipo entrega' };
+  }
+
+  const nowIso = new Date().toISOString();
+  const { error: reportErr } = await supabase
+    .from('delivery_reports')
+    .update({
+      status: 'submitted',
+      current_step: 'finish',
+      resolution_type: resolutionType,
+      submitted_at: nowIso,
+    })
+    .eq('id', reportId);
+  if (reportErr) return { ok: false, error: `Report: ${reportErr.message}` };
+
+  const { error: stopErr } = await supabase
+    .from('stops')
+    .update({ status: 'skipped', actual_departure_at: nowIso })
+    .eq('id', existing.stop_id);
+  if (stopErr) return { ok: false, error: `Stop: ${stopErr.message}` };
+
+  // Auto-promover ruta a COMPLETED si todas las stops están done.
+  const { data: pendingStops } = await supabase
+    .from('stops')
+    .select('id')
+    .eq('route_id', existing.route_id)
+    .in('status', ['pending', 'arrived']);
+  if (!pendingStops || pendingStops.length === 0) {
+    await supabase
+      .from('routes')
+      .update({ status: 'COMPLETED', actual_end_at: nowIso })
+      .eq('id', existing.route_id);
+  }
+
+  revalidatePath(`/route/stop/${existing.stop_id}`);
+  revalidatePath('/route');
+  return { ok: true, data: { stopId: existing.stop_id } };
 }

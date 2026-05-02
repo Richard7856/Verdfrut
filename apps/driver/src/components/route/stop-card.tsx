@@ -1,6 +1,10 @@
+'use client';
+
 // Tarjeta de una parada en la lista del chofer.
 // Muestra: orden, código de tienda, nombre, dirección, ETA planeada, status badge.
-// Click → navegar a /route/stop/[id] (próximo sprint del vertical slice).
+// Click → navegar a /route/stop/[id].
+// Es Client Component porque el <a tel:...> usa onClick para stopPropagation
+// y evitar que el click en "llamar tienda" navegue al detalle de la parada.
 
 import Link from 'next/link';
 import { Badge, type BadgeTone } from '@verdfrut/ui';

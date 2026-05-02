@@ -12,6 +12,8 @@ import { StopCard } from '@/components/route/stop-card';
 import { EmptyRoute } from '@/components/route/empty-route';
 import { GpsBroadcastController } from '@/components/route/gps-broadcast-controller';
 import { PushOptIn } from '@/components/route/push-opt-in';
+import Link from 'next/link';
+import { Button } from '@verdfrut/ui';
 
 export const metadata = { title: 'Mi ruta' };
 // Esta página no debe cachearse — los stops cambian conforme el chofer avanza.
@@ -96,17 +98,26 @@ export default async function RoutePage() {
               Esta ruta no tiene paradas. Contacta a tu encargado.
             </p>
           ) : (
-            <ul className="flex flex-col gap-2 p-4">
-              {stops.map((item) => (
-                <li key={item.stop.id}>
-                  <StopCard
-                    item={item}
-                    isNext={item.stop.id === nextStopId}
-                    timezone={timezone}
-                  />
-                </li>
-              ))}
-            </ul>
+            <>
+              <div className="px-4 pt-4">
+                <Link href="/route/navigate" className="block">
+                  <Button type="button" variant="primary" size="lg" className="w-full">
+                    🧭 Iniciar navegación
+                  </Button>
+                </Link>
+              </div>
+              <ul className="flex flex-col gap-2 p-4">
+                {stops.map((item) => (
+                  <li key={item.stop.id}>
+                    <StopCard
+                      item={item}
+                      isNext={item.stop.id === nextStopId}
+                      timezone={timezone}
+                    />
+                  </li>
+                ))}
+              </ul>
+            </>
           )}
         </>
       )}

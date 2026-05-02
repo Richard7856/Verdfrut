@@ -191,6 +191,27 @@ Formato:
 **Solución propuesta:** Botón "Reasignar chofer" en PUBLISHED con confirmación. Server action: cancela push del anterior, asigna nuevo, manda push nuevo.
 **Estado:** abierto
 
+### #36 — Off-route detection usa distancia al vértice, no al segmento
+**Severidad:** cosmético
+**Fase afectada:** 2 (turn-by-turn)
+**Síntoma:** En curvas cerradas (vértices muy juntos) puede falsa-positivar el "te desviaste" cuando el chofer va por la calle correcta. Mitigación actual: 3 updates seguidos lejos antes de marcar off-route.
+**Solución propuesta:** Calcular distancia perpendicular al SEGMENTO más cercano del polyline. Trigonometría simple, ~15 líneas de código en `use-turn-by-turn.ts`.
+**Estado:** abierto
+
+### #37 — Hydration mismatch en StopCard (probable extensión del browser)
+**Severidad:** cosmético (no afecta funcionalidad — React regenera)
+**Fase afectada:** 2
+**Síntoma:** Console muestra "Hydration failed because the server rendered HTML didn't match the client" apuntando al `<Link>` dentro de `<StopCard>`. React regenera el árbol y la UI funciona normal.
+**Solución propuesta:** Reproducir en incógnito sin extensiones — si desaparece, era extensión (probable). Si persiste, agregar `suppressHydrationWarning` al Link como último recurso.
+**Estado:** abierto
+
+### #38 — Voz turn-by-turn en iOS Safari no garantiza es-MX
+**Severidad:** cosmético
+**Fase afectada:** 2
+**Síntoma:** Web Speech API en iOS Safari puede no tener voz `es-MX` instalada — cae a `es-ES` o `es` genérica. Acento distinto, instrucción igual de comprensible.
+**Solución propuesta:** Si el caso aparece, integrar TTS provider externo (Azure Speech, ElevenLabs) con voz consistente. Costo extra, requiere acuerdo con cliente.
+**Estado:** abierto
+
 ---
 
 ## Cosméticos (futuro, no urgente)
@@ -215,10 +236,12 @@ Formato:
 | Categoría | Abiertos |
 |---|---|
 | Críticos | 0 |
-| Importantes | 16 (#11–#19, #22, #24, #25, #31, #32, #33) |
-| Cosméticos | 9 (#9, #10, #20, #23, #26, #27, #28, #34, #35) |
+| Importantes | 16 (#11–#19, #22, #25, #31, #32, #33) |
+| Cosméticos | 13 (#9, #10, #20, #23, #26, #27, #28, #34, #35, #36, #37, #38) |
 
-**Última actualización:** 2026-05-02, tras implementar GPS broadcast + UI asignación chofer (ADR-013, ADR-014).
-**Resueltos en este ciclo:** #21 (GPS broadcast), #24 (drag-drop reorder de paradas — multi-route map view + sortable stops).
+**Última actualización:** 2026-05-02, tras Sprints 8 (tipo de visita + flujos cerrada/báscula), 9 (navegación in-app), 9b (turn-by-turn voz).
+**ADRs nuevos en este ciclo:** ADR-013 a ADR-018.
+**Resueltos en este ciclo:** Push real, replay del recorrido, asignación inline de chofer, navegación in-app, turn-by-turn con voz.
+**Issues nuevos:** #36 (off-route precision), #37 (hydration extension), #38 (es-MX voice fallback).
 **Issues nuevos:** #31 (iOS watchPosition), #32 (replay tardío), #33 (TTL breadcrumbs), #34 (interpolación marker), #35 (reasignar en PUBLISHED).
 **Total acumulado resuelto:** 6 críticos + 10 importantes + 4 fixes runtime = 20 issues cerrados.

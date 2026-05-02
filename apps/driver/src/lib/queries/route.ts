@@ -68,34 +68,60 @@ function toRoute(row: RouteRow): Route {
 }
 
 /**
- * Devuelve la ruta del chofer para una fecha dada, o null si no tiene asignada.
- * Si por alguna razón hay >1 (no debería por UNIQUE constraint), devuelve la
- * más reciente y loggea warning — los datos están corruptos.
+ * Devuelve la ruta más relevante para el chofer en este momento:
+ *   1. Si tiene una IN_PROGRESS hoy → esa (está trabajando ahora).
+ *   2. Si tiene PUBLISHED hoy → esa (lista para arrancar).
+ *   3. Si tiene PUBLISHED en el futuro → la más próxima (preview/preparación).
+ *   4. Si no tiene ninguna → null.
  *
- * El chofer solo verá rutas PUBLISHED+ por RLS. Si está en estado IN_PROGRESS
- * la app debe permitir continuar; si COMPLETED, solo lectura.
+ * Lógica anterior (`eq('date', today)`) fallaba si el dispatcher publicaba
+ * una ruta para mañana — el chofer no veía nada hoy. Esta versión es más útil
+ * porque le da contexto de qué viene + arranca al amanecer del día asignado.
+ *
+ * RLS de routes_select para drivers ya restringe a sus propias rutas con status
+ * PUBLISHED/IN_PROGRESS/COMPLETED. Acá filtramos solo por fecha.
  */
 export async function getDriverRouteForDate(date: string): Promise<Route | null> {
   const supabase = await createServerClient();
-  const { data, error } = await supabase
-    .from('routes')
-    .select(ROUTE_COLS)
-    .eq('date', date)
-    .order('updated_at', { ascending: false })
-    .limit(2);
+  // Buscar entre rutas con date >= hoy y orden por status (IN_PROGRESS primero)
+  // y luego por fecha ascendente (la más próxima).
+  // Postgres no permite "ORDER BY CASE" tipado limpio en supabase-js,
+  // así que hacemos dos consultas en paralelo y combinamos:
+  //   (a) IN_PROGRESS — cualquier fecha cercana
+  //   (b) PUBLISHED — hoy o futura
+  const [inProgressRes, publishedRes] = await Promise.all([
+    supabase
+      .from('routes')
+      .select(ROUTE_COLS)
+      .eq('status', 'IN_PROGRESS')
+      .order('date', { ascending: true })
+      .limit(1),
+    supabase
+      .from('routes')
+      .select(ROUTE_COLS)
+      .eq('status', 'PUBLISHED')
+      .gte('date', date)
+      .order('date', { ascending: true })
+      .order('updated_at', { ascending: false })
+      .limit(1),
+  ]);
 
-  if (error) throw new Error(`[driver.routes.forDate] ${error.message}`);
-
-  const rows = (data ?? []) as RouteRow[];
-  const first = rows[0];
-  if (!first) return null;
-  if (rows.length > 1) {
-    console.warn(
-      `[driver.routes.forDate] Chofer tiene ${rows.length} rutas el ${date} — usando la más reciente.`,
-      rows.map((r) => r.id),
-    );
+  if (inProgressRes.error) {
+    throw new Error(`[driver.routes.forDate] in_progress: ${inProgressRes.error.message}`);
   }
-  return toRoute(first);
+  if (publishedRes.error) {
+    throw new Error(`[driver.routes.forDate] published: ${publishedRes.error.message}`);
+  }
+
+  // Prioridad 1: IN_PROGRESS (chofer ya empezó esa ruta).
+  const inProgress = (inProgressRes.data ?? [])[0] as RouteRow | undefined;
+  if (inProgress) return toRoute(inProgress);
+
+  // Prioridad 2: PUBLISHED hoy o futura, la más próxima.
+  const next = (publishedRes.data ?? [])[0] as RouteRow | undefined;
+  if (next) return toRoute(next);
+
+  return null;
 }
 
 interface StopRow {

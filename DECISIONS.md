@@ -403,6 +403,105 @@ Por otro lado, onboardear un cliente nuevo requería crear manualmente decenas o
 
 ---
 
+## [2026-05-02] ADR-016: Tipo de visita al llegar + validación geo anti-fraude
+
+**Contexto:** El flujo del prototipo Verdefrut original tiene 3 tipos de visita que el chofer escoge al llegar a la tienda: **entrega normal**, **tienda cerrada**, **báscula no funciona**. Cada uno arranca un flow distinto. En VerdFrut hasta ahora `arriveAtStop` siempre asumía `type='entrega'` con un único botón "Llegué a la tienda". Además, sin validación de proximidad GPS, un chofer podría reportar "tienda cerrada" desde su casa y cobrar la jornada sin haberse movido.
+
+**Decisión:**
+1. **`<ArrivalTypeSelector>`** con 3 botones contextuales que reemplaza el botón único pre-arrival.
+2. **`arriveAtStop` exige `coords`** (lat/lng del chofer en el momento). Si no las recibe → rechaza con `reason='no_coords'`.
+3. **Validación haversine server-side** contra `store.lat/lng`. Umbrales por tipo:
+   - `entrega`: 300m (debe estar literalmente afuera)
+   - `tienda_cerrada`: 1000m (más permisivo — puede estar reportando desde estacionamiento)
+   - `bascula`: 300m
+   Si excede umbral → rechaza con `reason='too_far'` + distancia exacta para que UI muestre "estás a 2.3km — acércate".
+4. **Persistir coords del arrival en `delivery_reports.metadata`** para audit posterior + análisis de "lejanía típica" del chofer en cada tipo.
+5. **Steps `facade`, `scale`, `chat_redirect`, `tienda_abierta_check`** implementados (la flow-engine ya tenía las transiciones, faltaban componentes UI).
+6. **`convertToEntregaAction(reportId)`**: cuando el chofer (o comercial) determina que la tienda sí abrió o báscula sí funciona, convierte el report a `type='entrega'` reusando la foto previa (facade/scale) como `arrival_exhibit`. NO requiere foto duplicada del mueble.
+7. **`submitNonEntregaAction(reportId, resolution)`**: cierra reportes de cerrada/báscula sin entrega. Stop queda `skipped`. Distinto de `submitReport` porque no exige tickets.
+8. **`<ChatRedirectStep>` STUB** hasta Sprint 9 (chat realtime). Por ahora muestra mensaje "comunícate por WhatsApp/llamada con el comercial" + botón continuar.
+
+**Alternativas consideradas:**
+- *Validación GPS solo client-side:* atacante modifica el frontend y envía `coords` falsas. El server debe validar siempre.
+- *Sin umbrales diferenciados por tipo:* mismo umbral para los 3 → fricción innecesaria en cerrada (chofer puede estar legítimamente en estacionamiento del centro comercial sin estar pegado a la tienda).
+- *Hard-block sin opción de re-intentar:* causa frustración legítima si el GPS tiene mala precisión. Mostrar distancia + threshold permite al chofer entender y acercarse.
+
+**Riesgos / Limitaciones:**
+- **Tiendas dentro de centros comerciales o plazas grandes:** el polígono real puede estar a 200m de la coord registrada (cuya lat/lng apunta al centro de masa del building). Solución: si el caso aparece, ajustar coords manualmente al punto de recepción.
+- **GPS con accuracy >100m:** la lectura puede ubicar al chofer a 500m de donde está realmente. Si está en un sótano o área techada, el rechazo puede ser injusto. Mitigación: chofer puede salir al exterior y reintentar. Si crónico, pedir manualmente desactivar el lock para esa tienda específica.
+- **Atacante con jailbroken phone que falsea geo:** la API acepta lo que el OS le dé. Mitigación operativa, no técnica — auditar via breadcrumbs (el GPS broadcast continuo debería coincidir con que esté avanzando por calles reales).
+- **Conversión `tienda_cerrada → entrega` reutiliza fachada como arrival_exhibit:** si la fachada es lo único visible (cortina cerrada), la "evidencia del mueble al llegar" no existe — cuando la tienda abrió, el mueble probablemente ya estaba dentro. El flujo entrega normalmente pide DOS fotos de arrival_exhibit; aquí queda con una. Aceptable como compromiso para no exigir foto duplicada al chofer que ya esperó.
+
+**Oportunidades de mejora:**
+- **Threshold por tienda:** algunas tiendas en plazas grandes podrían necesitar 600m en lugar de 300m. Columna opcional `stores.arrival_threshold_meters` para override.
+- **Acuracy-aware:** si GPS reporta `accuracy=200m` y la distancia es 250m, técnicamente el chofer puede estar dentro del umbral. Considerar `effective_distance = max(0, distance - accuracy)`.
+- **Audit de patrones sospechosos:** alert si un chofer reporta `tienda_cerrada` >3 veces por semana en la misma tienda — patrón de fraude.
+
+---
+
+## [2026-05-02] ADR-017: Navegación in-app — el chofer no sale de la PWA
+
+**Contexto:** El chofer típicamente recibía la lista de paradas y abría Google Maps externo para navegar — interrumpiendo el flujo, perdiendo contexto y arriesgando que olvide volver a VerdFrut para reportar entregas. Además sin red en zonas muertas, los reportes fallan al instante en lugar de encolarse.
+
+**Decisión:**
+1. **Pantalla `/route/navigate` fullscreen** con mapa Mapbox, marker animado del chofer (`watchPosition`), polyline de la ruta planeada (Directions API cargada al inicio, queda en memoria toda la jornada), y card flotante abajo con la próxima parada.
+2. **Auto-detección de arrival (<100m)** con vibración táctil tipo tap-tap + highlight verde + texto "Estás aquí" + botón destacado "✓ Iniciar entrega". El chofer no tiene que adivinar cuándo decir "llegué" — la app lo sabe por GPS local.
+3. **Auto-follow del marker** que se desactiva si el chofer hace pan/zoom (botón "📍 Centrar en mí" para volver). Patrón estándar de apps de navegación.
+4. **Indicador GPS visible** en header (●/✕/◌) — el chofer sabe si está siendo trackeado.
+5. **Polyline + tiles cacheados** una vez al inicio. La navegación sigue funcionando sin red para ver dónde está y cuál es la próxima parada. Lo que requiere red es solo subir reportes — para eso la cola offline (#17) que viene después.
+6. **Botón "🧭 Iniciar navegación"** en `/route` (lista) lleva a la pantalla full. La lista queda como overview/respaldo.
+
+**Alternativas consideradas:**
+- *Embed Google Maps Directions:* turn-by-turn de calidad nativa pero requiere abrir la app de Google → contradice el objetivo "no salir de la app".
+- *Mapbox Navigation SDK:* es para nativo (React Native/iOS/Android), no PWA.
+- *Reemplazar `/route` directamente con el mapa:* perdería el contexto rápido de "ver lista de paradas" que el chofer necesita en algunos momentos. Mejor tener ambos modos.
+- *Self-host OSRM + tiles:* infra pesada para una mejora marginal a esta escala.
+
+**Riesgos / Limitaciones:**
+- **Polyline se cargó al inicio y no se refresca:** si el dispatcher re-optimiza la ruta mientras el chofer navega, el marker sigue la polyline vieja hasta recargar. Mitigación: detectar `route.updated_at` y mostrar banner "Tu ruta cambió, recarga".
+- **Sin tiles cacheados de la zona:** si el chofer arranca jornada con red mala, los tiles del mapa pueden quedar parciales. Una mejora futura: precachear tiles del bbox de la ruta al cargar.
+- **Wake Lock no garantizado en iOS:** el GPS puede pararse al bloquear pantalla (#31 ya documentado). Para navegación es CRÍTICO — Apple Safari es el riesgo principal. Mitigación: Wake Lock attempt + indicador GPS visible + ADR-004 anticipa migración nativa.
+- **Auto-arrival threshold fijo en 100m:** algunas tiendas en plazas grandes pueden requerir 150-200m. Override por tienda futura (#27 menciona algo similar para CEDIS default).
+- **Sin turn-by-turn voice instructions:** sólo polyline visual. Para chofer experimentado en su zona es suficiente; para chofer nuevo o ruta nueva quizás necesite. Postergar.
+- **Vibración háptica solo Android funcional:** iOS Safari ignora `navigator.vibrate`. Mitigación: el highlight verde + texto "Estás aquí" es feedback visual igualmente claro.
+
+**Oportunidades de mejora:**
+- Precache de tiles del bbox de la ruta al inicio para tolerar pérdida de red.
+- Voice-prompted turn-by-turn con Web Speech API (`speechSynthesis`).
+- "Modo nocturno" del mapa cuando es de noche (saving battery + visibilidad).
+- Override de `arrival_radius` por tienda (plazas grandes).
+- Detección de "te desviaste de la ruta" → recalcular silenciosamente.
+
+---
+
+## [2026-05-02] ADR-018: Turn-by-turn navigation con Mapbox + Web Speech API
+
+**Contexto:** Chofer pidió navegación turn-by-turn (instrucciones por voz "gira a la derecha en X calle") sin salir de la PWA. ADR-017 dejó el mapa fullscreen pero sin instrucciones. Tres opciones: Mapbox Navigation SDK (solo nativo), Mapbox Directions con `steps`+`voice_instructions` (PWA-compatible), Waze API (no es pública).
+
+**Decisión:** Mapbox Directions con `steps=true&voice_instructions=true&language=es`. Cero requests extras (mismo endpoint, params adicionales). Web Speech API (`speechSynthesis`) lee instrucciones en español.
+
+**Implementación:**
+- `getMapboxDirections` aplana `legs[].steps[]` a `NavStep[]` con instruction/type/modifier/voiceInstructions.
+- `useTurnByTurn(steps, position, onAnnounce)` calcula step actual, dispara anuncios según `distanceAlongGeometry`, detecta off-route a >50m durante 3 updates.
+- `useSpeech` wrap de Web Speech API con voz `es-MX` (fallback `es-*`), toggle persist localStorage.
+- `<TurnByTurnBanner>` arriba con flecha emoji + instrucción + distancia.
+- Off-route → auto-recalc + anuncia "Recalculando ruta".
+- Toggle 🔊/🔇 en header.
+
+**Riesgos / Limitaciones:**
+- Voz iOS Safari puede caer a es-ES si no hay es-MX (acento distinto, igual entendible).
+- Off-route detection usa vértice más cercano (no segmento) — falso positivo posible en curvas. Mitigación: 3 updates seguidos.
+- Sin SSML — voz robótica. TTS provider externo (ElevenLabs, Azure) si el cliente paga.
+- Web Speech requiere gesto previo del user (autoplay policy) — cubierto porque el chofer toca "Iniciar navegación".
+
+**Oportunidades de mejora:**
+- `banner_instructions=true` para pictogramas oficiales en lugar de emojis.
+- Lane guidance ("permanece en carril izquierdo").
+- Speed limit display por segmento.
+- TTS provider externo para voz natural.
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown
