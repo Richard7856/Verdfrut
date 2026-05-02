@@ -1,0 +1,45 @@
+@import '@verdfrut/ui/tokens.css';
+@import 'tailwindcss';
+
+/* Driver app está pensada para móvil — defaults agresivos. */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+html {
+  scroll-behavior: smooth;
+  font-family: var(--vf-font-sans);
+  /* Evita zoom accidental en inputs en iOS Safari. */
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background-color: var(--vf-bg);
+  color: var(--vf-text);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 15px;
+  line-height: 1.45;
+  /* Evita el bounce/rubber band en iOS cuando estás en el flujo y haces scroll. */
+  overscroll-behavior-y: contain;
+  /* Quita el highlight azul al tocar elementos en móvil. */
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--vf-green-500);
+  outline-offset: 2px;
+  border-radius: var(--vf-r-sm);
+}
+
+code, kbd, pre, samp { font-family: var(--vf-font-mono); }
+
+/* Targets táctiles cómodos. Apple HIG recomienda 44px mínimo. */
+button, a, [role="button"], input, select, textarea {
+  min-height: 44px;
+}
+
+/* Áreas safe en notch / home indicator (iPhone). */
+.safe-top { padding-top: env(safe-area-inset-top); }
+.safe-bottom { padding-bottom: env(safe-area-inset-bottom); }

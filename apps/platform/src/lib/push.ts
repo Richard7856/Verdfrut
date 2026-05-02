@@ -4,14 +4,14 @@
 // Uso:
 //   await notifyDriverOfPublishedRoute(routeId);
 //
-// Si VAPID no está configurado (env faltante) o el chofer no tiene suscripciones,
-// la función registra un warning y no hace nada — graceful degrade. La ruta queda
-// PUBLISHED en DB y el chofer la verá cuando abra la app.
+// Comportamiento sin VAPID configurado: graceful degrade — log warning y skip.
+// La ruta queda PUBLISHED en DB y el chofer la verá al abrir la PWA.
 //
-// La implementación real de web-push como dep se hace en Fase 2 (driver app).
-// Por ahora, este stub solo loggea para que el flujo de logística no falle.
+// Suscripciones inválidas (404, 410 del push service): se eliminan automático
+// para que la próxima vez no se vuelvan a intentar.
 
 import 'server-only';
+import webpush from 'web-push';
 import { createServiceRoleClient } from '@verdfrut/supabase/server';
 
 interface PushPayload {
@@ -22,58 +22,93 @@ interface PushPayload {
 }
 
 /**
+ * Configura las VAPID keys de web-push una sola vez por proceso.
+ * Las keys se leen del env. Si faltan, devuelve false y el caller debe abortar.
+ */
+let vapidConfigured = false;
+function ensureVapidConfigured(): boolean {
+  if (vapidConfigured) return true;
+  const vapidPublic = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+  const vapidPrivate = process.env.VAPID_PRIVATE_KEY;
+  const vapidSubject = process.env.VAPID_SUBJECT;
+  if (!vapidPublic || !vapidPrivate || !vapidSubject) return false;
+  webpush.setVapidDetails(vapidSubject, vapidPublic, vapidPrivate);
+  vapidConfigured = true;
+  return true;
+}
+
+/**
  * Lee las suscripciones push de un usuario y envía una notificación a cada device.
  * Sin VAPID configurado, solo loggea — no falla.
+ *
+ * Si el push service responde 404/410, esa subscription quedó muerta (usuario
+ * desinstaló, cambió device, revocó permiso) — la borramos para no acumular basura.
  */
 export async function sendPushToUser(
   userId: string,
   payload: PushPayload,
-): Promise<{ sent: number; failed: number }> {
-  const vapidPublic = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-  const vapidPrivate = process.env.VAPID_PRIVATE_KEY;
-  const vapidSubject = process.env.VAPID_SUBJECT;
-
-  if (!vapidPublic || !vapidPrivate || !vapidSubject) {
+): Promise<{ sent: number; failed: number; pruned: number }> {
+  if (!ensureVapidConfigured()) {
     console.warn('[push] VAPID keys no configuradas — push omitido', { userId, payload });
-    return { sent: 0, failed: 0 };
+    return { sent: 0, failed: 0, pruned: 0 };
   }
 
   const supabase = createServiceRoleClient();
   const { data: subs, error } = await supabase
     .from('push_subscriptions')
-    .select('endpoint, p256dh, auth')
+    .select('id, endpoint, p256dh, auth')
     .eq('user_id', userId);
 
   if (error) {
     console.error('[push] Error leyendo suscripciones:', error);
-    return { sent: 0, failed: 0 };
+    return { sent: 0, failed: 0, pruned: 0 };
   }
 
   if (!subs || subs.length === 0) {
     console.warn(`[push] Usuario ${userId} no tiene suscripciones — push omitido`);
-    return { sent: 0, failed: 0 };
+    return { sent: 0, failed: 0, pruned: 0 };
   }
 
-  // Implementación real con web-push: pendiente para Fase 2.
-  // Por ahora, hacemos un fetch directo al endpoint (limitado a Web Push protocol simple).
-  // Cuando se instale `web-push`, reemplazar este bloque por webpush.sendNotification.
   let sent = 0;
   let failed = 0;
+  let pruned = 0;
   const body = JSON.stringify(payload);
 
-  for (const sub of subs as Array<{ endpoint: string; p256dh: string; auth: string }>) {
+  for (const sub of subs as Array<{
+    id: string;
+    endpoint: string;
+    p256dh: string;
+    auth: string;
+  }>) {
     try {
-      // STUB: hasta integrar web-push en Fase 2, solo loggear.
-      // const result = await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, body);
-      console.info(`[push:stub] enviaría a ${sub.endpoint.slice(0, 40)}…`, { payload, body: body.length });
+      await webpush.sendNotification(
+        {
+          endpoint: sub.endpoint,
+          keys: { p256dh: sub.p256dh, auth: sub.auth },
+        },
+        body,
+        {
+          TTL: 3600, // 1 hora — si el chofer no recibe en 1h, la noti es irrelevante
+          urgency: 'high',
+        },
+      );
       sent++;
     } catch (err) {
-      console.error('[push] Falló envío a', sub.endpoint, err);
-      failed++;
+      const statusCode = (err as { statusCode?: number }).statusCode;
+      // 404 = endpoint no existe; 410 = endpoint dado de baja por el push service.
+      // En ambos casos, la subscription quedó muerta — borrar para no reintentar.
+      if (statusCode === 404 || statusCode === 410) {
+        await supabase.from('push_subscriptions').delete().eq('id', sub.id);
+        pruned++;
+        console.info(`[push] Suscripción ${sub.id} eliminada (statusCode=${statusCode})`);
+      } else {
+        failed++;
+        console.error('[push] Falló envío a', sub.endpoint.slice(0, 60), err);
+      }
     }
   }
 
-  return { sent, failed };
+  return { sent, failed, pruned };
 }
 
 /**

@@ -14,7 +14,7 @@ import json
 import os
 import subprocess
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -55,7 +55,9 @@ class Matrix(BaseModel):
 class OptimizeRequest(BaseModel):
     vehicles: list[Vehicle]
     jobs: list[Job]
-    matrix: Matrix | None = None
+    # Python 3.9-compatible: usamos Optional en lugar de `Matrix | None` (PEP 604,
+    # que requiere 3.10+). La imagen base es Bullseye con Python 3.9.
+    matrix: Optional[Matrix] = None
 
 
 class OptimizeStep(BaseModel):
@@ -145,36 +147,60 @@ def optimize(
 
 
 def build_vroom_input(req: OptimizeRequest) -> dict[str, Any]:
-    """Convierte el request a formato VROOM JSON."""
+    """Convierte el request a formato VROOM JSON.
+
+    Cuando viene `matrix`, VROOM espera índices (start_index/end_index/location_index)
+    que apuntan a posiciones de la matriz. Convención: indexamos en orden:
+      - vehicle[0].start, vehicle[0].end, vehicle[1].start, ..., job[0], job[1], ...
+    Sin matrix, VROOM consulta OSRM en localhost:5000 (que NO tenemos en el setup).
+    """
+    has_matrix = req.matrix is not None
+
+    # Construir mapeo de índices solo si vamos a pasar matrix.
+    vehicles_payload = []
+    next_idx = 0
+    for v in req.vehicles:
+        item: dict[str, Any] = {
+            "id": v.id,
+            "capacity": v.capacity,
+            "time_window": list(v.time_window),
+        }
+        if has_matrix:
+            item["start_index"] = next_idx
+            next_idx += 1
+            item["end_index"] = next_idx
+            next_idx += 1
+        else:
+            item["start"] = list(v.start)
+            item["end"] = list(v.end)
+        vehicles_payload.append(item)
+
+    jobs_payload = []
+    for j in req.jobs:
+        item = {
+            "id": j.id,
+            "service": j.service,
+        }
+        if j.time_windows:
+            item["time_windows"] = [list(w) for w in j.time_windows]
+        if j.amount:
+            item["amount"] = j.amount
+        if has_matrix:
+            item["location_index"] = next_idx
+            next_idx += 1
+        else:
+            item["location"] = list(j.location)
+        jobs_payload.append(item)
+
     payload: dict[str, Any] = {
-        "vehicles": [
-            {
-                "id": v.id,
-                "start": list(v.start),
-                "end": list(v.end),
-                "capacity": v.capacity,
-                "time_window": list(v.time_window),
-            }
-            for v in req.vehicles
-        ],
-        "jobs": [
-            {
-                "id": j.id,
-                "location": list(j.location),
-                "service": j.service,
-                "time_windows": [list(w) for w in j.time_windows] if j.time_windows else None,
-                "amount": j.amount or None,
-            }
-            for j in req.jobs
-        ],
+        "vehicles": vehicles_payload,
+        "jobs": jobs_payload,
     }
-    # Limpiar None de jobs.
-    for job in payload["jobs"]:
-        for k in list(job.keys()):
-            if job[k] is None:
-                del job[k]
 
     if req.matrix:
+        # VROOM v1.13 acepta `matrices` (con profile name) o `matrix` legacy.
+        # Usamos `matrices.car` con profile arbitrario — vehicles sin profile
+        # explícito caen al primero disponible.
         payload["matrices"] = {
             "car": {
                 "durations": req.matrix.durations,

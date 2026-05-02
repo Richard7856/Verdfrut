@@ -25,7 +25,7 @@ export async function requireProfile(): Promise<UserProfile> {
   const supabase = await createServerClient();
   const { data, error } = await supabase
     .from('user_profiles')
-    .select('id, email, full_name, role, zone_id, phone, is_active, created_at')
+    .select('id, email, full_name, role, zone_id, phone, is_active, must_reset_password, created_at')
     .eq('id', user.id)
     .single();
 
@@ -39,6 +39,7 @@ export async function requireProfile(): Promise<UserProfile> {
     zoneId: data.zone_id,
     phone: data.phone,
     isActive: data.is_active,
+    mustResetPassword: data.must_reset_password,
     createdAt: data.created_at,
   };
 }

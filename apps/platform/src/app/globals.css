@@ -1,4 +1,5 @@
 @import '@verdfrut/ui/tokens.css';
+@import 'mapbox-gl/dist/mapbox-gl.css';
 
 /* Reset y defaults globales */
 *, *::before, *::after { box-sizing: border-box; }

@@ -6,19 +6,15 @@
 //   const supabase = await createServerClient();
 
 import { createServerClient as createSSRServerClient } from '@supabase/ssr';
+import { cookies } from 'next/headers';
 import type { Database } from './database';
 import type { VerdFrutSupabaseClient } from './types';
-
-interface CookieStoreLike {
-  getAll(): Array<{ name: string; value: string }>;
-  set(name: string, value: string, options?: Record<string, unknown>): void;
-}
 
 /**
  * Crea un cliente Supabase para el server.
  *
- * Importa `cookies` de 'next/headers' dinámicamente para evitar romper SSR
- * cuando este package se importa desde código no-Next (ej: scripts).
+ * Solo válido dentro del runtime de Next.js (Server Components, Server Actions,
+ * Route Handlers, Proxy). Para scripts/cron/webhooks usar `createServiceRoleClient`.
  */
 export async function createServerClient(): Promise<VerdFrutSupabaseClient> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -30,7 +26,9 @@ export async function createServerClient(): Promise<VerdFrutSupabaseClient> {
     );
   }
 
-  const cookieStore = await getCookieStore();
+  // Turbopack (Next 16) no soporta el truco de webpackIgnore para next/headers.
+  // Import estático directo: este archivo solo corre en Next.
+  const cookieStore = await cookies();
 
   return createSSRServerClient<Database>(url, anonKey, {
     cookies: {
@@ -76,11 +74,3 @@ export function createServiceRoleClient(): VerdFrutSupabaseClient {
   });
 }
 
-async function getCookieStore(): Promise<CookieStoreLike> {
-  // Import dinámico para que este módulo se pueda compilar fuera de Next.
-  // El cast a unknown evita la dependencia de tipos en Next (que vive en la app).
-  const mod = (await import(/* webpackIgnore: true */ 'next/headers' as string)) as {
-    cookies: () => Promise<CookieStoreLike> | CookieStoreLike;
-  };
-  return mod.cookies();
-}

@@ -6,6 +6,7 @@ export * from './user';
 export * from './zone';
 export * from './store';
 export * from './vehicle';
+export * from './depot';
 export * from './driver';
 export * from './route';
 export * from './stop';

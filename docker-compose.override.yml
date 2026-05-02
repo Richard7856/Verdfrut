@@ -1,0 +1,14 @@
+# docker-compose.override.yml — Config sólo para desarrollo local.
+#
+# Compose merge este archivo automáticamente con docker-compose.yml cuando
+# corres `docker compose up`. NO se aplica en producción (en el VPS solo se
+# usa docker-compose.yml + variables de entorno).
+#
+# Propósito: exponer puertos internos al host para que las apps Next.js
+# corriendo en `pnpm dev` puedan conectarse al optimizer.
+
+services:
+  optimizer:
+    # Exponer 8000 al host (en prod queda solo en la red interna `verdfrut`).
+    ports:
+      - "8000:8000"

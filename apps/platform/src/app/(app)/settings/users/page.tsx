@@ -7,6 +7,8 @@ import { listUsers } from '@/lib/queries/users';
 import { listZones } from '@/lib/queries/zones';
 import { InviteUserButton } from './invite-user-button';
 import { ToggleUserActiveCell } from './toggle-user-active-cell';
+import { ForceResetButton } from './force-reset-button';
+import { TemplateDownloadButton } from '@/components/template-download-button';
 
 export const metadata = { title: 'Usuarios' };
 
@@ -63,7 +65,12 @@ export default async function UsersPage() {
       key: 'actions',
       header: '',
       align: 'right',
-      cell: (u) => <ToggleUserActiveCell user={u} />,
+      cell: (u) => (
+        <div className="flex items-center justify-end gap-3">
+          <ForceResetButton user={u} />
+          <ToggleUserActiveCell user={u} />
+        </div>
+      ),
     },
   ];
 
@@ -72,7 +79,12 @@ export default async function UsersPage() {
       <PageHeader
         title="Usuarios"
         description={`${users.length} usuario(s). Las invitaciones llegan por email.`}
-        action={<InviteUserButton zones={zones} />}
+        action={
+          <div className="flex gap-2">
+            <TemplateDownloadButton entity="users" />
+            <InviteUserButton zones={zones} />
+          </div>
+        }
       />
       <DataTable
         columns={columns}

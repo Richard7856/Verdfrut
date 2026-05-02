@@ -267,7 +267,7 @@ POST /api/control-plane/sync-tenant-kpis
 | Backend (apps) | Next.js Server Actions + Route Handlers | — |
 | DB / Auth / Storage / Realtime | Supabase | latest |
 | Mapas | Mapbox GL JS | 3.x |
-| Optimización | FastAPI + VROOM | VROOM v1.14+ |
+| Optimización | FastAPI + VROOM | VROOM v1.13.0 (última estable; v1.14 aún en RC) |
 | OCR tickets | Anthropic Claude Vision | claude-sonnet-4-6 |
 | Push notifications | VAPID web push | web-push 3.x |
 | Automaciones | n8n | latest |

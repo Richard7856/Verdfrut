@@ -7,6 +7,7 @@ import { listStores } from '@/lib/queries/stores';
 import { listZones } from '@/lib/queries/zones';
 import { CreateStoreButton } from './create-store-button';
 import { ToggleStoreActiveCell } from './toggle-store-active-cell';
+import { TemplateDownloadButton } from '@/components/template-download-button';
 
 export const metadata = { title: 'Tiendas' };
 
@@ -71,7 +72,12 @@ export default async function StoresPage() {
       <PageHeader
         title="Tiendas"
         description={`${stores.length} tienda(s) registradas en ${zones.length} zona(s).`}
-        action={<CreateStoreButton zones={zones} />}
+        action={
+          <div className="flex gap-2">
+            <TemplateDownloadButton entity="stores" />
+            <CreateStoreButton zones={zones} />
+          </div>
+        }
       />
       <DataTable
         columns={columns}

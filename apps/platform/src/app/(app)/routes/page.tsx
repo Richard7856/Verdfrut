@@ -8,6 +8,7 @@ import { requireRole } from '@/lib/auth';
 import { listRoutes, countStopsForRoutes } from '@/lib/queries/routes';
 import { listZones } from '@/lib/queries/zones';
 import { listVehicles } from '@/lib/queries/vehicles';
+import { MultiRouteMapServer } from '@/components/map/multi-route-map-server';
 
 export const metadata = { title: 'Rutas' };
 
@@ -153,6 +154,22 @@ export default async function RoutesPage({ searchParams }: PageProps) {
         currentZone={filterZone}
         currentDate={filterDate}
       />
+
+      {/* Mapa con todas las rutas visibles. Solo muestra rutas con paradas
+          asignadas (las DRAFT recién creadas sin paradas no tienen sentido en el mapa). */}
+      {(() => {
+        const routesWithStops = routes.filter((r) => {
+          const c = stopCounts.get(r.id);
+          return c && c.total > 0;
+        });
+        if (routesWithStops.length === 0) return null;
+        const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? '';
+        return (
+          <div className="my-4">
+            <MultiRouteMapServer routes={routesWithStops} mapboxToken={mapboxToken} />
+          </div>
+        );
+      })()}
 
       <DataTable
         columns={columns}

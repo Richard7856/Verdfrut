@@ -2,7 +2,10 @@
 // Server-only — no exponer OPTIMIZER_API_KEY al cliente.
 
 import 'server-only';
+import { localTimeToUnix } from '@verdfrut/utils';
+import { getMapboxMatrix } from './mapbox';
 import type {
+  Depot,
   OptimizerRequest,
   OptimizerResponse,
   OptimizerVehicle,
@@ -18,6 +21,22 @@ interface OptimizeContext {
   shiftStartUnix: number;
   /** Fin del turno operativo en UTC unix seconds. */
   shiftEndUnix: number;
+  /**
+   * Fecha del shift en formato YYYY-MM-DD (hora local del tenant).
+   * Necesaria para construir las time windows de cada tienda con la TZ correcta.
+   */
+  shiftDate: string;
+  /**
+   * IANA timezone del tenant (ej. "America/Mexico_City"). Usada al convertir
+   * las ventanas horarias HH:MM de las tiendas a unix seconds correctos.
+   */
+  timezone: string;
+  /**
+   * Mapa de depots disponibles, indexado por id. Si un vehículo tiene depotId,
+   * se usan las coords del depot correspondiente; si no, las coords manuales del
+   * propio vehículo (depotLat/depotLng).
+   */
+  depotsById?: Map<string, Depot>;
 }
 
 /**
@@ -36,6 +55,11 @@ export async function callOptimizer(
   }
 
   const payload = buildOptimizerRequest(vehicles, stores, ctx);
+  // Adjuntar matriz precomputada (VROOM no debe consultar OSRM público).
+  // Si MAPBOX_DIRECTIONS_TOKEN está configurado → Mapbox Matrix API (calidad prod,
+  // respeta calles reales y tráfico). Si no → fallback haversine + velocidad
+  // asumida (ETAs aproximados, OK para validar flujo).
+  payload.matrix = await buildOptimizerMatrix(vehicles, stores, ctx);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), OPTIMIZER_TIMEOUT_MS);
@@ -76,13 +100,19 @@ function buildOptimizerRequest(
   stores: Store[],
   ctx: OptimizeContext,
 ): OptimizerRequest {
-  const optVehicles: OptimizerVehicle[] = vehicles.map((v, idx) => ({
-    id: idx + 1,
-    capacity: v.capacity,
-    start: [v.depotLng ?? 0, v.depotLat ?? 0],
-    end: [v.depotLng ?? 0, v.depotLat ?? 0],
-    time_window: [ctx.shiftStartUnix, ctx.shiftEndUnix],
-  }));
+  const optVehicles: OptimizerVehicle[] = vehicles.map((v, idx) => {
+    // Resolver depot: preferir CEDIS asignado, fallback a coords manuales del vehículo.
+    const fromDepot = v.depotId ? ctx.depotsById?.get(v.depotId) : null;
+    const depotLng = fromDepot ? fromDepot.lng : v.depotLng ?? 0;
+    const depotLat = fromDepot ? fromDepot.lat : v.depotLat ?? 0;
+    return {
+      id: idx + 1,
+      capacity: v.capacity,
+      start: [depotLng, depotLat],
+      end: [depotLng, depotLat],
+      time_window: [ctx.shiftStartUnix, ctx.shiftEndUnix],
+    };
+  });
 
   // C5 — la demanda viene de la tienda, NO un valor genérico.
   const optJobs: OptimizerJob[] = stores.map((s, idx) => ({
@@ -108,14 +138,18 @@ function buildTimeWindows(store: Store, ctx: OptimizeContext): Array<[number, nu
     return [[ctx.shiftStartUnix, ctx.shiftEndUnix]];
   }
 
-  // Tomar la fecha base del shift y reemplazar las horas.
-  const shiftDate = new Date(ctx.shiftStartUnix * 1000);
-  const datePrefix = shiftDate.toISOString().slice(0, 10); // YYYY-MM-DD
+  // Postgres `time` se serializa como "HH:MM:SS" — recortamos a "HH:MM" para
+  // que `localTimeToUnix` lo parsee. Defensivo si el formato cambia.
+  const startTime = store.receivingWindowStart.slice(0, 5);
+  const endTime = store.receivingWindowEnd.slice(0, 5);
 
-  const startUnix = Math.floor(new Date(`${datePrefix}T${store.receivingWindowStart}:00Z`).getTime() / 1000);
-  const endUnix = Math.floor(new Date(`${datePrefix}T${store.receivingWindowEnd}:00Z`).getTime() / 1000);
+  // Convertir a unix con la TZ del tenant (no UTC). Sin esto, una tienda
+  // CDMX con ventana 07:00 quedaría a las 01:00 (UTC-6) en el optimizer.
+  const startUnix = localTimeToUnix(ctx.shiftDate, startTime, ctx.timezone);
+  const endUnix = localTimeToUnix(ctx.shiftDate, endTime, ctx.timezone);
 
-  // Clip al shift operativo.
+  // Clip al shift operativo. Si la ventana de la tienda es más amplia que el
+  // shift, el chofer no está disponible fuera de turno.
   return [[Math.max(startUnix, ctx.shiftStartUnix), Math.min(endUnix, ctx.shiftEndUnix)]];
 }
 
@@ -172,4 +206,145 @@ export function getUnassignedStoreIds(
   return optResponse.unassigned
     .map((u) => stores[u.job_id - 1]?.id)
     .filter((id): id is string => Boolean(id));
+}
+
+// ----------------------------------------------------------------------------
+// Matrix builder — haversine + velocidad asumida
+// ----------------------------------------------------------------------------
+//
+// Por qué precalculamos la matrix en lugar de dejar que VROOM consulte OSRM:
+// no tenemos OSRM levantado en el setup local, y consultar OSRM público no
+// es viable (rate limits + ToS). En producción la implementación correcta
+// es llamar Mapbox Directions Matrix API (issue #25).
+//
+// El haversine (gran círculo) calcula distancia en línea recta sobre la
+// superficie terrestre. Para CDMX, la distancia real por calle es
+// típicamente 1.3–1.5x la haversine. Aplicamos un factor de 1.4 como
+// compromiso. Velocidad asumida: 30 km/h (zona urbana CDMX promedio).
+// El optimizer encuentra una secuencia razonable; los ETAs son
+// optimistas pero permiten validar el flujo end-to-end.
+
+const URBAN_DETOUR_FACTOR = 1.4; // distancia real / haversine
+const ASSUMED_KMH = 30;
+const ASSUMED_MS = (ASSUMED_KMH * 1000) / 3600; // m/s
+
+/**
+ * Construye la matriz N×N de durations/distances en el orden esperado por
+ * `buildOptimizerRequest`: vehicle[i].start, vehicle[i].end (cada vehículo
+ * agrega 2 índices), luego cada job (1 índice).
+ */
+/**
+ * Construye la matriz de duraciones/distancias para VROOM.
+ *
+ * Estrategia:
+ *   1. Si MAPBOX_DIRECTIONS_TOKEN está set → Mapbox Matrix API (calidad prod).
+ *   2. Si no o falla → fallback haversine (calidad demo).
+ *
+ * El orden de coords es: vehicle[i].start, vehicle[i].end (1 entrada por
+ * dirección — los duplicamos en la matrix), luego stores en orden.
+ * Total puntos = 2 × N_vehicles + N_stores.
+ */
+async function buildOptimizerMatrix(
+  vehicles: Vehicle[],
+  stores: Store[],
+  ctx: OptimizeContext,
+): Promise<{ durations: number[][]; distances: number[][] }> {
+  const useMapbox = Boolean(process.env.MAPBOX_DIRECTIONS_TOKEN);
+
+  if (!useMapbox) {
+    return buildHaversineMatrix(vehicles, stores, ctx);
+  }
+
+  // Listar coords únicas; vehículos comparten depot a menudo → dedup.
+  const coords = listOptimizerCoords(vehicles, stores, ctx);
+
+  // Mapbox limita 25 coords por request (free tier). Si supera, fallback.
+  if (coords.length > 25) {
+    console.warn(
+      `[optimizer] ${coords.length} coords > 25 (límite Mapbox free). ` +
+      `Fallback a haversine. Implementar chunking si esto se vuelve común.`,
+    );
+    return buildHaversineMatrix(vehicles, stores, ctx);
+  }
+
+  try {
+    return await getMapboxMatrix(coords);
+  } catch (err) {
+    console.error('[optimizer] Mapbox Matrix falló — fallback haversine:', err);
+    return buildHaversineMatrix(vehicles, stores, ctx);
+  }
+}
+
+/**
+ * Devuelve las coords en el ORDEN exacto que `buildOptimizerRequest` indexa.
+ * Sin dedup — VROOM espera una posición por cada start/end/job.
+ */
+function listOptimizerCoords(
+  vehicles: Vehicle[],
+  stores: Store[],
+  ctx: OptimizeContext,
+): Array<[number, number]> {
+  const coords: Array<[number, number]> = [];
+  for (const v of vehicles) {
+    const fromDepot = v.depotId ? ctx.depotsById?.get(v.depotId) : null;
+    const lng = fromDepot ? fromDepot.lng : v.depotLng ?? 0;
+    const lat = fromDepot ? fromDepot.lat : v.depotLat ?? 0;
+    coords.push([lng, lat]); // start
+    coords.push([lng, lat]); // end
+  }
+  for (const s of stores) coords.push([s.lng, s.lat]);
+  return coords;
+}
+
+function buildHaversineMatrix(
+  vehicles: Vehicle[],
+  stores: Store[],
+  ctx: OptimizeContext,
+): { durations: number[][]; distances: number[][] } {
+  // Resolver coords del depot por vehículo (ya hecho en buildOptimizerRequest,
+  // pero lo repetimos aquí — se podría refactorizar a un helper compartido).
+  const points: Array<[number, number]> = []; // [lng, lat]
+  for (const v of vehicles) {
+    const fromDepot = v.depotId ? ctx.depotsById?.get(v.depotId) : null;
+    const lng = fromDepot ? fromDepot.lng : v.depotLng ?? 0;
+    const lat = fromDepot ? fromDepot.lat : v.depotLat ?? 0;
+    points.push([lng, lat]); // start
+    points.push([lng, lat]); // end (mismo punto)
+  }
+  for (const s of stores) {
+    points.push([s.lng, s.lat]);
+  }
+
+  const n = points.length;
+  const durations: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
+  const distances: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
+
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      const dHaversine = haversineMeters(points[i]!, points[j]!);
+      const dReal = Math.round(dHaversine * URBAN_DETOUR_FACTOR);
+      const dur = Math.round(dReal / ASSUMED_MS);
+      distances[i]![j] = dReal;
+      distances[j]![i] = dReal;
+      durations[i]![j] = dur;
+      durations[j]![i] = dur;
+    }
+  }
+
+  return { durations, distances };
+}
+
+/** Fórmula haversine — distancia gran círculo entre dos coords [lng, lat] en metros. */
+function haversineMeters(a: [number, number], b: [number, number]): number {
+  const R = 6_371_000; // radio Tierra en metros
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const [lng1, lat1] = a;
+  const [lng2, lat2] = b;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const φ1 = toRad(lat1);
+  const φ2 = toRad(lat2);
+  const h =
+    Math.sin(dLat / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
 }

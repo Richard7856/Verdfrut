@@ -11,8 +11,16 @@ import { getRoute } from '@/lib/queries/routes';
 import { listStopsForRoute } from '@/lib/queries/stops';
 import { getStoresByIds } from '@/lib/queries/stores';
 import { getVehiclesByIds } from '@/lib/queries/vehicles';
+import { getDepot } from '@/lib/queries/depots';
+import { listDrivers, getDriversByIds } from '@/lib/queries/drivers';
+import { listUsers, getUserProfile } from '@/lib/queries/users';
 import { listZones } from '@/lib/queries/zones';
 import { RouteActions } from './route-actions';
+import { SortableStops } from './sortable-stops';
+import { DriverAssignment } from './driver-assignment';
+import { RouteMapLoader } from '@/components/map/route-map-loader';
+import { LiveRouteMapLoader } from '@/components/map/live-route-map-loader';
+import type { RouteMapStop, RouteMapDepot } from '@/components/map/route-map';
 
 const STATUS_LABELS: Record<RouteStatus, string> = {
   DRAFT: 'Borrador',
@@ -75,8 +83,66 @@ export default async function RouteDetailPage({ params }: PageProps) {
   const vehicle = vehicles[0];
   const zone = zones.find((z) => z.id === route.zoneId);
 
+  // Cargar depot del vehículo (puede ser FK al CEDIS o coords manuales).
+  let mapDepot: RouteMapDepot | null = null;
+  if (vehicle?.depotId) {
+    const depot = await getDepot(vehicle.depotId);
+    if (depot) mapDepot = { code: depot.code, name: depot.name, lat: depot.lat, lng: depot.lng };
+  } else if (vehicle?.depotLat && vehicle?.depotLng) {
+    mapDepot = {
+      code: vehicle.plate,
+      name: `Salida de ${vehicle.alias ?? vehicle.plate}`,
+      lat: vehicle.depotLat,
+      lng: vehicle.depotLng,
+    };
+  }
+
+  // Build paradas para el mapa con coords de la tienda.
+  const mapStops: RouteMapStop[] = stops
+    .map((s) => {
+      const store = storesById.get(s.storeId);
+      if (!store) return null;
+      return {
+        storeId: s.storeId,
+        storeCode: store.code,
+        storeName: store.name,
+        sequence: s.sequence,
+        lat: store.lat,
+        lng: store.lng,
+        status: s.status,
+      };
+    })
+    .filter((s): s is RouteMapStop => s !== null);
+
+  const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? '';
+
   const completedStops = stops.filter((s) => s.status === 'completed').length;
   const skippedStops = stops.filter((s) => s.status === 'skipped').length;
+
+  // Cargar info de chofer (actual + opciones) para el selector inline.
+  // Drivers activos en la zona, joineados con su user_profile para mostrar nombre.
+  const [zoneDrivers, zoneDriverProfiles] = await Promise.all([
+    listDrivers({ zoneId: route.zoneId, activeOnly: true }),
+    listUsers({ role: 'driver', zoneId: route.zoneId }),
+  ]);
+  const profilesByUserId = new Map(zoneDriverProfiles.map((p) => [p.id, p]));
+  const availableDrivers = zoneDrivers
+    .map((d) => {
+      const profile = profilesByUserId.get(d.userId);
+      if (!profile || !profile.isActive) return null;
+      return { driver: d, profile };
+    })
+    .filter((x): x is { driver: typeof zoneDrivers[number]; profile: typeof zoneDriverProfiles[number] } => x !== null);
+
+  // Resolver chofer actual de la ruta (puede ser null si no se asignó al crear).
+  let currentDriver: typeof availableDrivers[number] | null = null;
+  if (route.driverId) {
+    const [driverRow] = await getDriversByIds([route.driverId]);
+    if (driverRow) {
+      const profile = await getUserProfile(driverRow.userId);
+      if (profile) currentDriver = { driver: driverRow, profile };
+    }
+  }
 
   return (
     <>
@@ -95,6 +161,30 @@ export default async function RouteDetailPage({ params }: PageProps) {
         action={<RouteActions route={route} />}
       />
 
+      {/* Mapa de la ruta — se renderiza encima de paradas/métricas en mobile, columna full en desktop.
+          Si la ruta está IN_PROGRESS usamos LiveRouteMap (suscribe al canal Realtime para el chofer);
+          si no, mapa estático normal. */}
+      {mapStops.length > 0 && (
+        <div className="mb-4">
+          {route.status === 'IN_PROGRESS' ? (
+            <LiveRouteMapLoader
+              routeId={route.id}
+              stops={mapStops}
+              depot={mapDepot}
+              mapboxToken={mapboxToken}
+              driverName={currentDriver?.profile.fullName}
+            />
+          ) : (
+            <RouteMapLoader
+              routeId={route.id}
+              stops={mapStops}
+              depot={mapDepot}
+              mapboxToken={mapboxToken}
+            />
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
         {/* COLUMNA PRINCIPAL — paradas */}
         <Card padded={false}>
@@ -109,42 +199,20 @@ export default async function RouteDetailPage({ params }: PageProps) {
                 Esta ruta no tiene paradas asignadas. Re-optimiza o agrega manualmente.
               </p>
             ) : (
-              <ol className="divide-y" style={{ borderColor: 'var(--vf-line-soft)' }}>
-                {stops.map((stop) => {
-                  const store = storesById.get(stop.storeId);
-                  return (
-                    <li key={stop.id} className="flex items-start gap-3 px-4 py-3">
-                      <SequenceMark sequence={stop.sequence} status={stop.status} />
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-baseline gap-2">
-                          <span className="font-mono text-[12px]" style={{ color: 'var(--vf-text)' }}>
-                            {store?.code ?? '—'}
-                          </span>
-                          <span className="text-sm font-medium" style={{ color: 'var(--vf-text)' }}>
-                            {store?.name ?? '(tienda eliminada)'}
-                          </span>
-                        </div>
-                        {store && (
-                          <p className="text-[11.5px]" style={{ color: 'var(--vf-text-mute)' }}>
-                            {store.address}
-                          </p>
-                        )}
-                      </div>
-                      <div className="text-right">
-                        <Badge tone={STOP_STATUS_TONES[stop.status]}>{STOP_STATUS_LABELS[stop.status]}</Badge>
-                        {stop.plannedArrivalAt && (
-                          <p
-                            className="mt-1 font-mono text-[11px] tabular-nums"
-                            style={{ color: 'var(--vf-text-mute)' }}
-                          >
-                            ETA {formatTime(stop.plannedArrivalAt)}
-                          </p>
-                        )}
-                      </div>
-                    </li>
-                  );
+              <SortableStops
+                routeId={route.id}
+                reorderable={['DRAFT', 'OPTIMIZED', 'APPROVED'].includes(route.status)}
+                timezone={TENANT_TZ}
+                initialStops={stops.map((s) => {
+                  const store = storesById.get(s.storeId);
+                  return {
+                    stop: s,
+                    storeCode: store?.code ?? '—',
+                    storeName: store?.name ?? '(tienda eliminada)',
+                    storeAddress: store?.address ?? '',
+                  };
                 })}
-              </ol>
+              />
             )}
           </div>
         </Card>
@@ -175,6 +243,12 @@ export default async function RouteDetailPage({ params }: PageProps) {
             <CardHeader title="Asignación" />
             <dl className="space-y-2.5 text-sm">
               <Metric label="Camión">{vehicle ? vehicle.alias ?? vehicle.plate : '—'}</Metric>
+              {/* Selector inline de chofer — editable solo en pre-publicación. */}
+              <DriverAssignment
+                route={route}
+                currentDriver={currentDriver}
+                availableDrivers={availableDrivers}
+              />
               <Metric label="Zona">{zone?.code ?? '—'}</Metric>
               <Metric label="Fecha operativa">
                 <span className="font-mono">{route.date}</span>

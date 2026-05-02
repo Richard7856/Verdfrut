@@ -38,6 +38,8 @@ export async function createVehicleAction(formData: FormData): Promise<ActionRes
       max: 10000,
       integer: true,
     });
+    const depotIdRaw = formData.get('depot_id');
+    const depotId = depotIdRaw && depotIdRaw !== '' ? String(depotIdRaw) : null;
     const depotLat = formData.get('depot_lat');
     const depotLng = formData.get('depot_lng');
 
@@ -46,12 +48,14 @@ export async function createVehicleAction(formData: FormData): Promise<ActionRes
       alias,
       zoneId,
       capacity: [weightKg, volumeM3, boxes],
+      depotId,
+      // Sólo aplican si depot_id es null (override por vehículo).
       depotLat:
-        depotLat !== null && depotLat !== ''
+        !depotId && depotLat !== null && depotLat !== ''
           ? requireNumber('latitud depósito', depotLat, { min: -90, max: 90 })
           : null,
       depotLng:
-        depotLng !== null && depotLng !== ''
+        !depotId && depotLng !== null && depotLng !== ''
           ? requireNumber('longitud depósito', depotLng, { min: -180, max: 180 })
           : null,
     });

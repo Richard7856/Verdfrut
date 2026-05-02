@@ -10,7 +10,12 @@ export interface Vehicle {
   zoneId: string;
   // Capacidad multidimensional. Convención: [peso_kg, volumen_m3, cajas].
   capacity: number[];
-  // Punto de partida y retorno (depósito). Si null, usa el del cliente.
+  /**
+   * FK opcional a depots(id). Si está set, el optimizer usa las coords del depot
+   * y los depotLat/depotLng del vehículo se ignoran.
+   */
+  depotId: string | null;
+  // Override per-vehículo de coords del depot. Solo se usa si depotId es null.
   depotLat: number | null;
   depotLng: number | null;
   status: VehicleStatus;

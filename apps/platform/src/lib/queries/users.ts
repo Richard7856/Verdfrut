@@ -17,10 +17,11 @@ interface ProfileRow {
   zone_id: string | null;
   phone: string | null;
   is_active: boolean;
+  must_reset_password: boolean;
   created_at: string;
 }
 
-const PROFILE_COLS = 'id, email, full_name, role, zone_id, phone, is_active, created_at';
+const PROFILE_COLS = 'id, email, full_name, role, zone_id, phone, is_active, must_reset_password, created_at';
 
 function toProfile(row: ProfileRow): UserProfile {
   return {
@@ -31,8 +32,19 @@ function toProfile(row: ProfileRow): UserProfile {
     zoneId: row.zone_id,
     phone: row.phone,
     isActive: row.is_active,
+    mustResetPassword: row.must_reset_password,
     createdAt: row.created_at,
   };
+}
+
+/**
+ * URL pública de la driver app para que el invite/recovery link
+ * apunte ahí y no al platform. En desarrollo: localhost:3001. En prod:
+ * driver.verdfrut.com.
+ */
+function getDriverAppUrl(): string {
+  // Permite override por env. Default razonable para desarrollo local.
+  return process.env.DRIVER_APP_URL ?? 'http://localhost:3001';
 }
 
 export async function listUsers(opts?: { role?: UserRole; zoneId?: string }): Promise<UserProfile[]> {
@@ -68,27 +80,87 @@ interface InviteUserInput {
   licenseNumber?: string | null;
 }
 
+interface InviteUserResult {
+  userId: string;
+  /**
+   * Link de invite que el chofer abre para establecer su contraseña.
+   * Apunta al `redirectTo` configurado (driver app o platform según rol).
+   * Útil para mostrarlo en UI y que el admin pueda copiar/compartir vía WhatsApp
+   * cuando el email no llega o el chofer no tiene email funcional.
+   */
+  inviteLink: string;
+}
+
+/**
+ * Determina a qué app debe apuntar el redirect del invite:
+ *   - driver / zone_manager → driver app (`/auth/callback`)
+ *   - admin / dispatcher    → platform (`/auth/callback` propio cuando exista,
+ *     por ahora `/login` que aceptará el token automáticamente vía Supabase SSR)
+ */
+function inviteRedirectFor(role: UserRole): string {
+  const driverApp = getDriverAppUrl();
+  const platform = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+  switch (role) {
+    case 'driver':
+    case 'zone_manager':
+      return `${driverApp}/auth/callback`;
+    case 'admin':
+    case 'dispatcher':
+      return `${platform}/login`;
+  }
+}
+
+/**
+ * Convierte el `action_link` que devuelve `auth.admin.generateLink` en un link
+ * directo a NUESTRO callback con `?token_hash=...&type=...` en query string.
+ *
+ * Por qué: el `action_link` apunta a `/auth/v1/verify` de Supabase, que verifica
+ * el token y redirige con `#access_token=...` (implicit flow, fragment). El fragment
+ * no llega al server, así que un Route Handler server-side no puede recuperarlo.
+ *
+ * Usando `verifyOtp({ token_hash, type })` desde nuestro callback, todo el flow
+ * es server-side y compatible con Server-Side Auth (SSR cookies). Patrón oficial
+ * de Supabase para PKCE/SSR. Ver:
+ * https://supabase.com/docs/guides/auth/server-side/email-based-auth-with-pkce-flow
+ */
+function buildServerCallbackLink(
+  properties: { hashed_token?: string | null; verification_type?: string | null } | null | undefined,
+  redirectTo: string,
+): string {
+  const hashedToken = properties?.hashed_token;
+  const verificationType = properties?.verification_type;
+  if (!hashedToken || !verificationType) return '';
+  const url = new URL(redirectTo);
+  url.searchParams.set('token_hash', hashedToken);
+  url.searchParams.set('type', verificationType);
+  return url.toString();
+}
+
 /**
  * Invita un usuario nuevo:
- *   1. Crea el auth.user via Supabase Auth Admin (envía magic-link/email de invitación)
- *   2. Inserta la fila en user_profiles
- *   3. Si role='driver', crea fila en drivers
+ *   1. Crea el auth.user via Supabase Auth Admin (envía magic-link/email de invitación).
+ *   2. Inserta la fila en user_profiles con must_reset_password=true.
+ *   3. Si role='driver', crea fila en drivers.
+ *   4. Genera un invite link copiable (paralelo al email) — útil cuando el chofer
+ *      no tiene email funcional, el admin puede mandárselo por WhatsApp.
  *
  * Si cualquier paso falla, intenta rollback del auth user. (Best effort — no es transaccional.)
  */
-export async function inviteUser(input: InviteUserInput): Promise<{ userId: string }> {
+export async function inviteUser(input: InviteUserInput): Promise<InviteUserResult> {
   const admin = createServiceRoleClient();
+  const redirectTo = inviteRedirectFor(input.role);
 
   // 1. Crear auth user con invite (envía email).
   const { data: invited, error: inviteError } = await admin.auth.admin.inviteUserByEmail(input.email, {
     data: { full_name: input.fullName },
+    redirectTo,
   });
   if (inviteError || !invited.user) {
     throw new Error(`[users.invite] ${inviteError?.message ?? 'No se pudo invitar'}`);
   }
   const userId = invited.user.id;
 
-  // 2. Insertar profile. Usamos service role para bypass RLS (la sesión del invitado aún no existe).
+  // 2. Insertar profile con must_reset_password=true (debe establecer password al entrar).
   const { error: profileError } = await admin.from('user_profiles').insert({
     id: userId,
     email: input.email,
@@ -96,9 +168,9 @@ export async function inviteUser(input: InviteUserInput): Promise<{ userId: stri
     role: input.role,
     zone_id: input.zoneId,
     phone: input.phone ?? null,
+    must_reset_password: true,
   });
   if (profileError) {
-    // Rollback best-effort.
     await admin.auth.admin.deleteUser(userId).catch(() => {});
     throw new Error(`[users.invite] Insert profile: ${profileError.message}`);
   }
@@ -115,14 +187,95 @@ export async function inviteUser(input: InviteUserInput): Promise<{ userId: stri
         licenseNumber: input.licenseNumber ?? null,
       });
     } catch (err) {
-      // Rollback best-effort de profile y auth.
       try { await admin.from('user_profiles').delete().eq('id', userId); } catch { /* ignore */ }
       try { await admin.auth.admin.deleteUser(userId); } catch { /* ignore */ }
       throw err;
     }
   }
 
-  return { userId };
+  // 4. Generar invite link paralelo (no manda email — sólo retorna URL para copiar).
+  const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
+    type: 'invite',
+    email: input.email,
+    options: { redirectTo },
+  });
+  if (linkErr) {
+    // No fatal — la invite por email ya salió. Logueamos y devolvemos string vacío.
+    console.error('[users.invite] No se pudo generar link copiable:', linkErr);
+    return { userId, inviteLink: '' };
+  }
+
+  return { userId, inviteLink: buildServerCallbackLink(linkData?.properties, redirectTo) };
+}
+
+/**
+ * Genera un nuevo recovery link para un usuario existente.
+ * Caso de uso: el invite original expiró o el chofer perdió la contraseña.
+ * También sirve para "forzar reset": el admin marca must_reset_password=true
+ * y le pasa este link al chofer.
+ */
+export async function generateRecoveryLink(email: string): Promise<string> {
+  const admin = createServiceRoleClient();
+  const platformDefault = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
+
+  // Buscar el rol para decidir redirectTo.
+  const { data: profile } = await admin
+    .from('user_profiles')
+    .select('role')
+    .eq('email', email)
+    .maybeSingle();
+
+  const redirectTo = profile?.role
+    ? inviteRedirectFor(profile.role as UserRole)
+    : `${platformDefault}/login`;
+
+  const { data, error } = await admin.auth.admin.generateLink({
+    type: 'recovery',
+    email,
+    options: { redirectTo },
+  });
+
+  if (error || !data?.properties) {
+    throw new Error(`[users.generateRecoveryLink] ${error?.message ?? 'Sin link'}`);
+  }
+
+  const link = buildServerCallbackLink(data.properties, redirectTo);
+  if (!link) {
+    throw new Error('[users.generateRecoveryLink] No se pudo construir el link de callback');
+  }
+  return link;
+}
+
+/**
+ * Marca a un usuario como "debe establecer contraseña nueva" en el próximo login.
+ * El admin lo usa cuando un chofer reporta que olvidó su contraseña, o cuando
+ * sospecha credenciales comprometidas.
+ *
+ * Devuelve el recovery link para que el admin se lo pase al chofer.
+ */
+export async function forcePasswordReset(userId: string): Promise<string> {
+  const admin = createServiceRoleClient();
+
+  const { data: profile, error: getErr } = await admin
+    .from('user_profiles')
+    .select('email')
+    .eq('id', userId)
+    .single();
+
+  if (getErr || !profile) {
+    throw new Error(`[users.forcePasswordReset] No se encontró el usuario`);
+  }
+
+  const { error: flagErr } = await admin
+    .from('user_profiles')
+    .update({ must_reset_password: true })
+    .eq('id', userId);
+
+  if (flagErr) {
+    throw new Error(`[users.forcePasswordReset] Flag: ${flagErr.message}`);
+  }
+
+  return generateRecoveryLink(profile.email);
 }
 
 export async function updateUser(

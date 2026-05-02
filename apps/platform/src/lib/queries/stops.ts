@@ -109,6 +109,59 @@ export async function reorderStop(stopId: string, newSequence: number): Promise<
 }
 
 /**
+ * Reordena TODAS las paradas de una ruta de golpe.
+ * `orderedStopIds[i]` recibirá `sequence = i + 1`.
+ *
+ * La constraint UNIQUE (route_id, sequence) impide hacer N updates directos
+ * (colisión durante el proceso). Estrategia: dos pasadas:
+ *   1. Set sequence = sequence + 10000 (mueve todas fuera del rango).
+ *   2. Set sequence = nuevo valor para cada id en orden.
+ *
+ * Sin transacción atómica explícita — supabase-js no las expone limpias.
+ * Si falla entre pasos, las stops quedan con sequence > 10000 (la UI se ve mal
+ * pero los datos no se corrompen). Aceptable V1; mover a RPC con BEGIN/COMMIT
+ * cuando importe garantizar atomicidad.
+ */
+export async function bulkReorderStops(
+  routeId: string,
+  orderedStopIds: string[],
+): Promise<void> {
+  if (orderedStopIds.length === 0) return;
+  const supabase = await createServerClient();
+
+  // Paso 1: mover todas las stops de la ruta a sequence > 10000 para liberar
+  // el rango 1..N. Usamos rpc-style via .update encadenado por id.
+  // Más simple: leemos los sequence actuales y los offseteamos.
+  const { data: current, error: readErr } = await supabase
+    .from('stops')
+    .select('id, sequence')
+    .eq('route_id', routeId);
+  if (readErr) throw new Error(`[stops.bulkReorder.read] ${readErr.message}`);
+
+  // Update individual a sequence + 10000 (no se puede hacer "+= 10000" en
+  // supabase-js sin RPC). Lo aceptamos como costo de simplicidad.
+  for (const row of current ?? []) {
+    const { error } = await supabase
+      .from('stops')
+      .update({ sequence: row.sequence + 10000 })
+      .eq('id', row.id);
+    if (error) throw new Error(`[stops.bulkReorder.offset] ${error.message}`);
+  }
+
+  // Paso 2: set sequence final basado en el orden recibido.
+  for (let i = 0; i < orderedStopIds.length; i++) {
+    const id = orderedStopIds[i];
+    if (!id) continue;
+    const { error } = await supabase
+      .from('stops')
+      .update({ sequence: i + 1 })
+      .eq('id', id)
+      .eq('route_id', routeId); // defensa: solo updateamos stops de esta ruta
+    if (error) throw new Error(`[stops.bulkReorder.set] ${error.message}`);
+  }
+}
+
+/**
  * Marca una parada como skipped (omitida sin visitar).
  * Solo válido si la parada está pending.
  */

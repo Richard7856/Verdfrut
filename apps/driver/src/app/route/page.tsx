@@ -1,0 +1,115 @@
+// Lista de paradas del día para el chofer.
+// Server Component: hace queries con la sesión del chofer y RLS hace el resto.
+// Si no hay ruta asignada, muestra estado vacío.
+
+import { requireDriverProfile } from '@/lib/auth';
+import { getDriverRouteForDate, getRouteStopsWithStores } from '@/lib/queries/route';
+import { createServerClient } from '@verdfrut/supabase/server';
+import { todayInZone } from '@verdfrut/utils';
+import { logoutAction } from '@/app/(auth)/login/actions';
+import { RouteHeader } from '@/components/route/route-header';
+import { StopCard } from '@/components/route/stop-card';
+import { EmptyRoute } from '@/components/route/empty-route';
+import { GpsBroadcastController } from '@/components/route/gps-broadcast-controller';
+import { PushOptIn } from '@/components/route/push-opt-in';
+
+export const metadata = { title: 'Mi ruta' };
+// Esta página no debe cachearse — los stops cambian conforme el chofer avanza.
+export const dynamic = 'force-dynamic';
+
+const DEFAULT_TZ = 'America/Mexico_City';
+
+export default async function RoutePage() {
+  const profile = await requireDriverProfile();
+  const timezone = process.env.NEXT_PUBLIC_TENANT_TIMEZONE ?? DEFAULT_TZ;
+  const today = todayInZone(timezone);
+
+  const route = await getDriverRouteForDate(today);
+  const stops = route ? await getRouteStopsWithStores(route.id) : [];
+
+  // Resolver driver_id (no user_id) para insertar breadcrumbs y broadcasts.
+  // RLS de drivers permite al usuario leer su propio row.
+  let driverId: string | null = null;
+  if (route) {
+    const supabase = await createServerClient();
+    const { data: driverRow } = await supabase
+      .from('drivers')
+      .select('id')
+      .eq('user_id', profile.id)
+      .maybeSingle();
+    driverId = driverRow?.id ?? null;
+  }
+
+  // GPS solo se activa cuando la ruta está en curso (no DRAFT/PUBLISHED solo).
+  // PUBLISHED = chofer vio pero no ha llegado a primera parada → todavía no.
+  // IN_PROGRESS = al menos una parada con arrived → empezó la jornada.
+  const gpsEnabled = route?.status === 'IN_PROGRESS' && Boolean(driverId);
+
+  const totalStops = stops.length;
+  const completedStops = stops.filter(
+    (s) => s.stop.status === 'completed' || s.stop.status === 'skipped',
+  ).length;
+
+  // La "próxima" parada pendiente — la primera por sequence con status=pending.
+  // Si todas están done, no hay next.
+  const nextStopId = stops.find((s) => s.stop.status === 'pending')?.stop.id ?? null;
+
+  return (
+    <main className="min-h-dvh bg-[var(--vf-bg)] safe-top safe-bottom">
+      <header className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
+        <div>
+          <h1 className="text-lg font-semibold text-[var(--color-text)]">VerdFrut</h1>
+          <p className="text-xs text-[var(--color-text-muted)]">{profile.fullName}</p>
+        </div>
+        <form action={logoutAction}>
+          <button
+            type="submit"
+            className="text-sm text-[var(--color-text-muted)] underline-offset-2 hover:underline"
+          >
+            Salir
+          </button>
+        </form>
+      </header>
+
+      {/* Opt-in de push notifications — visible siempre que browser soporte y no esté ya suscrito. */}
+      <PushOptIn />
+
+      {!route ? (
+        <EmptyRoute driverName={profile.fullName} todayLabel={today} />
+      ) : (
+        <>
+          {gpsEnabled && driverId && (
+            <GpsBroadcastController
+              routeId={route.id}
+              driverId={driverId}
+              enabled={gpsEnabled}
+            />
+          )}
+          <RouteHeader
+            route={route}
+            totalStops={totalStops}
+            completedStops={completedStops}
+            timezone={timezone}
+          />
+          {stops.length === 0 ? (
+            <p className="m-4 text-sm text-[var(--color-text-muted)]">
+              Esta ruta no tiene paradas. Contacta a tu encargado.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-2 p-4">
+              {stops.map((item) => (
+                <li key={item.stop.id}>
+                  <StopCard
+                    item={item}
+                    isNext={item.stop.id === nextStopId}
+                    timezone={timezone}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
+      )}
+    </main>
+  );
+}

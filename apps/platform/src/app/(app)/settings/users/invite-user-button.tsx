@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import { Button, Field, Input, Modal, Select, toast } from '@verdfrut/ui';
 import type { UserRole, Zone } from '@verdfrut/types';
 import { inviteUserAction } from './actions';
@@ -17,10 +17,32 @@ export function InviteUserButton({ zones }: { zones: Zone[] }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [role, setRole] = useState<UserRole>('dispatcher');
+  // Después del success, en vez de cerrar, mostramos el invite link copiable
+  // (caso C: chofer sin email funcional, admin lo manda por WhatsApp).
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const linkInputRef = useRef<HTMLInputElement>(null);
 
   const activeZones = zones.filter((z) => z.isActive);
   const requiresZone = role === 'zone_manager' || role === 'driver';
   const showLicense = role === 'driver';
+
+  function reset() {
+    setError(null);
+    setInviteLink(null);
+    setRole('dispatcher');
+  }
+
+  async function copyLink() {
+    if (!inviteLink) return;
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      toast.success('Link copiado');
+    } catch {
+      // Fallback: seleccionar el texto del input.
+      linkInputRef.current?.select();
+      toast.info('Copia manualmente con Ctrl+C / Cmd+C');
+    }
+  }
 
   return (
     <>
@@ -29,11 +51,59 @@ export function InviteUserButton({ zones }: { zones: Zone[] }) {
       </Button>
       <Modal
         open={open}
-        onClose={() => !pending && setOpen(false)}
-        title="Invitar usuario"
-        description="Recibirá un email con un link para crear su contraseña."
+        onClose={() => {
+          if (pending) return;
+          setOpen(false);
+          // Pequeño delay para que el reset no parpadee mientras cierra.
+          setTimeout(reset, 200);
+        }}
+        title={inviteLink ? 'Invitación enviada' : 'Invitar usuario'}
+        description={
+          inviteLink
+            ? 'El email salió. Si el usuario no lo recibe (spam, sin email funcional), copia este link y mándaselo por WhatsApp.'
+            : 'Recibirá un email con un link para crear su contraseña.'
+        }
         size="lg"
       >
+        {inviteLink ? (
+          <div className="flex flex-col gap-4">
+            <Field label="Link de invitación (válido por 24 h)" htmlFor="invite-link">
+              <div className="flex gap-2">
+                <Input
+                  ref={linkInputRef}
+                  id="invite-link"
+                  readOnly
+                  value={inviteLink}
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+                <Button type="button" variant="primary" onClick={copyLink}>
+                  Copiar
+                </Button>
+              </div>
+            </Field>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setOpen(false);
+                  setTimeout(reset, 200);
+                }}
+              >
+                Cerrar
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() => {
+                  reset();
+                }}
+              >
+                Invitar a otro
+              </Button>
+            </div>
+          </div>
+        ) : (
         <form
           action={(formData) => {
             setError(null);
@@ -41,7 +111,13 @@ export function InviteUserButton({ zones }: { zones: Zone[] }) {
               const res = await inviteUserAction(formData);
               if (res.ok) {
                 toast.success('Invitación enviada');
-                setOpen(false);
+                if (res.inviteLink) {
+                  setInviteLink(res.inviteLink);
+                } else {
+                  // Sin link — solo cerramos.
+                  setOpen(false);
+                  setTimeout(reset, 200);
+                }
               } else {
                 setError(res.error ?? 'Error al invitar');
               }
@@ -113,6 +189,7 @@ export function InviteUserButton({ zones }: { zones: Zone[] }) {
             </Button>
           </div>
         </form>
+        )}
       </Modal>
     </>
   );

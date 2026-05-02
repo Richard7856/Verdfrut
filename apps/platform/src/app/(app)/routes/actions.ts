@@ -16,10 +16,16 @@ import {
   assignDriverToRoute,
   resetRouteToDraft,
 } from '@/lib/queries/routes';
-import { createStops, deleteStopsForRoute, listStopsForRoute } from '@/lib/queries/stops';
+import {
+  bulkReorderStops,
+  createStops,
+  deleteStopsForRoute,
+  listStopsForRoute,
+} from '@/lib/queries/stops';
 import { getStoresByIds } from '@/lib/queries/stores';
 import { getVehiclesByIds } from '@/lib/queries/vehicles';
 import { getDriversByIds } from '@/lib/queries/drivers';
+import { listDepots } from '@/lib/queries/depots';
 import { callOptimizer, getUnassignedStoreIds } from '@/lib/optimizer';
 import { notifyDriverOfPublishedRoute } from '@/lib/push';
 import { requireUuid, runAction, ValidationError, type ActionResult } from '@/lib/validation';
@@ -104,8 +110,16 @@ export async function createAndOptimizeRoute(
       throw new ValidationError('shift', 'El fin del turno debe ser posterior al inicio');
     }
 
-    // 4. Llamar al optimizer con demand POR tienda (C5).
-    const optResponse = await callOptimizer(vehicles, stores, { shiftStartUnix, shiftEndUnix });
+    // 4. Llamar al optimizer con demand POR tienda (C5) y depots resueltos.
+    const depots = await listDepots({ zoneId });
+    const depotsById = new Map(depots.map((d) => [d.id, d]));
+    const optResponse = await callOptimizer(vehicles, stores, {
+      shiftStartUnix,
+      shiftEndUnix,
+      shiftDate: input.date,
+      timezone: TENANT_TIMEZONE,
+      depotsById,
+    });
 
     // 5. Crear una route DRAFT por vehículo y persistir sus stops.
     for (let i = 0; i < vehicles.length; i++) {
@@ -250,8 +264,16 @@ export async function reoptimizeRouteAction(
     const shiftStartUnix = localTimeToUnix(route.date, shiftStart, TENANT_TIMEZONE);
     const shiftEndUnix = localTimeToUnix(route.date, shiftEnd, TENANT_TIMEZONE);
 
-    // Llamar al optimizer
-    const optResponse = await callOptimizer([vehicle], stores, { shiftStartUnix, shiftEndUnix });
+    // Llamar al optimizer (con depots de la zona)
+    const depots = await listDepots({ zoneId: vehicle.zoneId });
+    const depotsById = new Map(depots.map((d) => [d.id, d]));
+    const optResponse = await callOptimizer([vehicle], stores, {
+      shiftStartUnix,
+      shiftEndUnix,
+      shiftDate: route.date,
+      timezone: TENANT_TIMEZONE,
+      depotsById,
+    });
     const optRoute = optResponse.routes.find((r) => r.vehicle_id === 1);
     if (!optRoute || optRoute.steps.length === 0) {
       throw new ValidationError(
@@ -365,5 +387,56 @@ export async function clearRouteStopsAction(routeId: string): Promise<ActionResu
     const id = requireUuid('routeId', routeId);
     await deleteStopsForRoute(id);
     revalidatePath(`/routes/${id}`);
+  });
+}
+
+/**
+ * Reordena las paradas de una ruta. Solo permitido si la ruta NO está
+ * publicada (DRAFT/OPTIMIZED/APPROVED). Una vez PUBLISHED, modificar paradas
+ * implicaría notificar al chofer y crear nueva versión — flujo separado.
+ *
+ * Las métricas de la ruta (distance, duration, ETAs) quedan obsoletas tras
+ * el reorder. La UI debe mostrar un warning sugiriendo re-optimizar para
+ * recomputarlas, pero NO se invalidan automáticamente — el dispatcher decide.
+ */
+export async function reorderStopsAction(
+  routeId: string,
+  orderedStopIds: string[],
+): Promise<ActionResult> {
+  await requireRole('admin', 'dispatcher');
+  return runAction(async () => {
+    const id = requireUuid('routeId', routeId);
+
+    const route = await getRoute(id);
+    if (!route) throw new ValidationError('routeId', 'Ruta no existe');
+    if (!['DRAFT', 'OPTIMIZED', 'APPROVED'].includes(route.status)) {
+      throw new ValidationError(
+        'status',
+        `No se puede reordenar una ruta en estado ${route.status}. Solo DRAFT/OPTIMIZED/APPROVED.`,
+      );
+    }
+
+    // Validar que orderedStopIds tenga TODAS las stops actuales (no parcial).
+    const current = await listStopsForRoute(id);
+    if (orderedStopIds.length !== current.length) {
+      throw new ValidationError(
+        'orderedStopIds',
+        `Esperadas ${current.length} stops, recibidas ${orderedStopIds.length}`,
+      );
+    }
+    const currentIds = new Set(current.map((s) => s.id));
+    for (const stopId of orderedStopIds) {
+      if (!currentIds.has(stopId)) {
+        throw new ValidationError(
+          'orderedStopIds',
+          `Stop ${stopId} no pertenece a esta ruta`,
+        );
+      }
+    }
+
+    await bulkReorderStops(id, orderedStopIds);
+
+    revalidatePath(`/routes/${id}`);
+    revalidatePath('/routes');
   });
 }

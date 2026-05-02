@@ -162,7 +162,17 @@ export async function createDraftRoute(input: CreateRouteInput): Promise<Route> 
     .select(ROUTE_COLS)
     .single();
 
-  if (error) throw new Error(`[routes.createDraft] ${error.message}`);
+  if (error) {
+    // Constraint UNIQUE(vehicle_id, date) cuando is_active — protege contra
+    // doble asignación del mismo camión el mismo día. Mensaje user-friendly:
+    if (error.code === '23505' && error.message.includes('idx_routes_vehicle_date_active')) {
+      throw new Error(
+        `Ya existe una ruta activa para este camión el ${input.date}. ` +
+        `Cancela la anterior o asigna otro camión.`,
+      );
+    }
+    throw new Error(`[routes.createDraft] ${error.message}`);
+  }
   return toRoute(data);
 }
 

@@ -1,0 +1,250 @@
+'use client';
+
+// Lista de paradas con drag-and-drop para reordenar.
+// Solo activa si la ruta está en DRAFT/OPTIMIZED/APPROVED. Una vez PUBLISHED
+// el orden queda congelado (cambiarlo requiere nueva versión + push al chofer).
+//
+// Tras un reorder, las métricas (distance/duration/ETAs) quedan obsoletas.
+// Mostramos un banner sugiriendo "Re-optimizar" para recomputarlas.
+
+import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { Badge, toast, type BadgeTone } from '@verdfrut/ui';
+import type { Stop, StopStatus } from '@verdfrut/types';
+import { reorderStopsAction } from '../actions';
+
+interface StopWithStore {
+  stop: Stop;
+  storeCode: string;
+  storeName: string;
+  storeAddress: string;
+}
+
+interface Props {
+  routeId: string;
+  /** Si false, render read-only sin drag handles. */
+  reorderable: boolean;
+  initialStops: StopWithStore[];
+  timezone: string;
+}
+
+const STOP_STATUS_LABELS: Record<StopStatus, string> = {
+  pending: 'Pendiente',
+  arrived: 'En sitio',
+  completed: 'Completada',
+  skipped: 'Omitida',
+};
+const STOP_STATUS_TONES: Record<StopStatus, BadgeTone> = {
+  pending: 'neutral',
+  arrived: 'warning',
+  completed: 'success',
+  skipped: 'danger',
+};
+
+export function SortableStops({ routeId, reorderable, initialStops, timezone }: Props) {
+  const router = useRouter();
+  const [items, setItems] = useState(initialStops);
+  const [pending, startTransition] = useTransition();
+  const [dirty, setDirty] = useState(false);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = items.findIndex((s) => s.stop.id === active.id);
+    const newIndex = items.findIndex((s) => s.stop.id === over.id);
+    if (oldIndex < 0 || newIndex < 0) return;
+    const reordered = arrayMove(items, oldIndex, newIndex);
+    // Renumeramos sequence en local para feedback visual inmediato.
+    setItems(
+      reordered.map((s, i) => ({ ...s, stop: { ...s.stop, sequence: i + 1 } })),
+    );
+    setDirty(true);
+  }
+
+  function persist() {
+    startTransition(async () => {
+      const orderedIds = items.map((s) => s.stop.id);
+      const res = await reorderStopsAction(routeId, orderedIds);
+      if (res.ok) {
+        toast.success('Orden guardado', 'Re-optimiza para actualizar ETAs.');
+        setDirty(false);
+        router.refresh();
+      } else {
+        toast.error('Error al guardar', res.error);
+        // Revertir UI al orden de DB.
+        setItems(initialStops);
+        setDirty(false);
+      }
+    });
+  }
+
+  function reset() {
+    setItems(initialStops);
+    setDirty(false);
+  }
+
+  return (
+    <div>
+      {dirty && (
+        <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--vf-warn-bg,#fef3c7)] px-4 py-2 text-xs">
+          <span className="text-[var(--color-text)]">
+            Cambiaste el orden. Las métricas (ETA, distancia) ya no son fiables — re-optimiza después de guardar.
+          </span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={reset}
+              disabled={pending}
+              className="text-[var(--color-text-muted)] underline-offset-2 hover:underline disabled:opacity-50"
+            >
+              Descartar
+            </button>
+            <button
+              type="button"
+              onClick={persist}
+              disabled={pending}
+              className="font-medium text-[var(--vf-green-600,#15803d)] underline-offset-2 hover:underline disabled:opacity-50"
+            >
+              {pending ? 'Guardando…' : 'Guardar orden'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={reorderable ? handleDragEnd : undefined}
+      >
+        <SortableContext
+          items={items.map((s) => s.stop.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          <ol className="divide-y" style={{ borderColor: 'var(--vf-line-soft)' }}>
+            {items.map((item) => (
+              <SortableRow
+                key={item.stop.id}
+                item={item}
+                reorderable={reorderable && !pending}
+                timezone={timezone}
+              />
+            ))}
+          </ol>
+        </SortableContext>
+      </DndContext>
+    </div>
+  );
+}
+
+function SortableRow({
+  item,
+  reorderable,
+  timezone,
+}: {
+  item: StopWithStore;
+  reorderable: boolean;
+  timezone: string;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: item.stop.id, disabled: !reorderable });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    cursor: reorderable ? 'grab' : 'default',
+  };
+
+  const formatTime = (iso: string) =>
+    new Intl.DateTimeFormat('es-MX', {
+      timeZone: timezone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date(iso));
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      {...(reorderable ? attributes : {})}
+      {...(reorderable ? listeners : {})}
+      className="flex items-start gap-3 px-4 py-3 hover:bg-[var(--vf-surface-2)]"
+    >
+      {reorderable && (
+        <span
+          aria-label="Arrastra para reordenar"
+          className="mt-1 select-none text-[var(--color-text-subtle)]"
+          style={{ fontFamily: 'system-ui' }}
+        >
+          ⋮⋮
+        </span>
+      )}
+      <div
+        className="grid h-7 w-7 shrink-0 place-items-center rounded-full font-mono text-[11px] font-semibold tabular-nums"
+        style={{
+          background:
+            item.stop.status === 'completed'
+              ? 'var(--vf-ok)'
+              : item.stop.status === 'skipped'
+                ? 'var(--vf-crit)'
+                : item.stop.status === 'arrived'
+                  ? 'var(--vf-warn)'
+                  : 'var(--vf-bg-sub)',
+          color: item.stop.status === 'pending' ? 'var(--vf-text-mute)' : 'white',
+          border: `1px solid ${item.stop.status === 'pending' ? 'var(--vf-line-strong)' : 'transparent'}`,
+        }}
+      >
+        {item.stop.sequence}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <span className="font-mono text-[12px]" style={{ color: 'var(--vf-text)' }}>
+            {item.storeCode}
+          </span>
+          <span className="text-sm font-medium" style={{ color: 'var(--vf-text)' }}>
+            {item.storeName}
+          </span>
+        </div>
+        <p className="text-[11.5px]" style={{ color: 'var(--vf-text-mute)' }}>
+          {item.storeAddress}
+        </p>
+      </div>
+      <div className="text-right">
+        <Badge tone={STOP_STATUS_TONES[item.stop.status]}>
+          {STOP_STATUS_LABELS[item.stop.status]}
+        </Badge>
+        {item.stop.plannedArrivalAt && (
+          <p
+            className="mt-1 font-mono text-[11px] tabular-nums"
+            style={{ color: 'var(--vf-text-mute)' }}
+          >
+            ETA {formatTime(item.stop.plannedArrivalAt)}
+          </p>
+        )}
+      </div>
+    </li>
+  );
+}

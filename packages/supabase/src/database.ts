@@ -447,6 +447,7 @@ export type Database = {
           full_name: string
           id: string
           is_active: boolean
+          must_reset_password: boolean
           phone: string | null
           role: Database["public"]["Enums"]["user_role"]
           zone_id: string | null
@@ -457,6 +458,7 @@ export type Database = {
           full_name: string
           id: string
           is_active?: boolean
+          must_reset_password?: boolean
           phone?: string | null
           role: Database["public"]["Enums"]["user_role"]
           zone_id?: string | null
@@ -467,17 +469,27 @@ export type Database = {
           full_name?: string
           id?: string
           is_active?: boolean
+          must_reset_password?: boolean
           phone?: string | null
           role?: Database["public"]["Enums"]["user_role"]
           zone_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "user_profiles_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "zones"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       vehicles: {
         Row: {
           alias: string | null
           capacity: number[]
           created_at: string
+          depot_id: string | null
           depot_lat: number | null
           depot_lng: number | null
           id: string
@@ -490,6 +502,7 @@ export type Database = {
           alias?: string | null
           capacity?: number[]
           created_at?: string
+          depot_id?: string | null
           depot_lat?: number | null
           depot_lng?: number | null
           id?: string
@@ -502,6 +515,7 @@ export type Database = {
           alias?: string | null
           capacity?: number[]
           created_at?: string
+          depot_id?: string | null
           depot_lat?: number | null
           depot_lng?: number | null
           id?: string
@@ -510,7 +524,68 @@ export type Database = {
           status?: Database["public"]["Enums"]["vehicle_status"]
           zone_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "vehicles_depot_id_fkey"
+            columns: ["depot_id"]
+            isOneToOne: false
+            referencedRelation: "depots"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      depots: {
+        Row: {
+          id: string
+          zone_id: string
+          code: string
+          name: string
+          address: string
+          lat: number
+          lng: number
+          contact_name: string | null
+          contact_phone: string | null
+          notes: string | null
+          is_active: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          zone_id: string
+          code: string
+          name: string
+          address: string
+          lat: number
+          lng: number
+          contact_name?: string | null
+          contact_phone?: string | null
+          notes?: string | null
+          is_active?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          zone_id?: string
+          code?: string
+          name?: string
+          address?: string
+          lat?: number
+          lng?: number
+          contact_name?: string | null
+          contact_phone?: string | null
+          notes?: string | null
+          is_active?: boolean
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "depots_zone_id_fkey"
+            columns: ["zone_id"]
+            isOneToOne: false
+            referencedRelation: "zones"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       zones: {
         Row: {

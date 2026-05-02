@@ -12,6 +12,7 @@ interface VehicleRow {
   alias: string | null;
   zone_id: string;
   capacity: number[];
+  depot_id: string | null;
   depot_lat: number | null;
   depot_lng: number | null;
   status: VehicleStatus;
@@ -20,7 +21,7 @@ interface VehicleRow {
 }
 
 const VEHICLE_COLS =
-  'id, plate, alias, zone_id, capacity, depot_lat, depot_lng, status, is_active, created_at';
+  'id, plate, alias, zone_id, capacity, depot_id, depot_lat, depot_lng, status, is_active, created_at';
 
 function toVehicle(row: VehicleRow): Vehicle {
   return {
@@ -29,6 +30,7 @@ function toVehicle(row: VehicleRow): Vehicle {
     alias: row.alias,
     zoneId: row.zone_id,
     capacity: row.capacity,
+    depotId: row.depot_id,
     depotLat: row.depot_lat,
     depotLng: row.depot_lng,
     status: row.status,
@@ -61,6 +63,7 @@ interface CreateVehicleInput {
   alias?: string | null;
   zoneId: string;
   capacity: number[];
+  depotId?: string | null;
   depotLat?: number | null;
   depotLng?: number | null;
 }
@@ -74,6 +77,7 @@ export async function createVehicle(input: CreateVehicleInput): Promise<Vehicle>
       alias: input.alias ?? null,
       zone_id: input.zoneId,
       capacity: input.capacity,
+      depot_id: input.depotId ?? null,
       depot_lat: input.depotLat ?? null,
       depot_lng: input.depotLng ?? null,
       status: 'available',
@@ -90,6 +94,7 @@ interface UpdateVehicleInput {
   alias?: string | null;
   zoneId?: string;
   capacity?: number[];
+  depotId?: string | null;
   depotLat?: number | null;
   depotLng?: number | null;
   status?: VehicleStatus;
@@ -103,6 +108,7 @@ export async function updateVehicle(id: string, input: UpdateVehicleInput): Prom
   if (input.alias !== undefined) update.alias = input.alias;
   if (input.zoneId !== undefined) update.zone_id = input.zoneId;
   if (input.capacity !== undefined) update.capacity = input.capacity;
+  if (input.depotId !== undefined) update.depot_id = input.depotId;
   if (input.depotLat !== undefined) update.depot_lat = input.depotLat;
   if (input.depotLng !== undefined) update.depot_lng = input.depotLng;
   if (input.status !== undefined) update.status = input.status;

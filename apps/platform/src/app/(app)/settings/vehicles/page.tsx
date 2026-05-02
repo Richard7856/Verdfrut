@@ -5,8 +5,10 @@ import type { Vehicle, VehicleStatus } from '@verdfrut/types';
 import { requireRole } from '@/lib/auth';
 import { listVehicles } from '@/lib/queries/vehicles';
 import { listZones } from '@/lib/queries/zones';
+import { listDepots } from '@/lib/queries/depots';
 import { CreateVehicleButton } from './create-vehicle-button';
 import { ToggleVehicleActiveCell } from './toggle-vehicle-active-cell';
+import { TemplateDownloadButton } from '@/components/template-download-button';
 
 export const metadata = { title: 'Camiones' };
 
@@ -27,8 +29,13 @@ const STATUS_TONES: Record<VehicleStatus, BadgeTone> = {
 export default async function VehiclesPage() {
   await requireRole('admin', 'dispatcher');
 
-  const [vehicles, zones] = await Promise.all([listVehicles(), listZones()]);
+  const [vehicles, zones, depots] = await Promise.all([
+    listVehicles(),
+    listZones(),
+    listDepots(),
+  ]);
   const zonesById = new Map(zones.map((z) => [z.id, z]));
+  const depotsById = new Map(depots.map((d) => [d.id, d]));
 
   if (zones.length === 0) {
     return (
@@ -53,6 +60,18 @@ export default async function VehiclesPage() {
       key: 'zone',
       header: 'Zona',
       cell: (v) => zonesById.get(v.zoneId)?.code ?? '—',
+    },
+    {
+      key: 'depot',
+      header: 'CEDIS',
+      cell: (v) =>
+        v.depotId ? (
+          depotsById.get(v.depotId)?.code ?? '—'
+        ) : v.depotLat && v.depotLng ? (
+          <span className="text-xs text-[var(--color-text-subtle)]">manual</span>
+        ) : (
+          <span className="text-[var(--color-text-subtle)]">—</span>
+        ),
     },
     {
       key: 'capacity',
@@ -84,7 +103,12 @@ export default async function VehiclesPage() {
       <PageHeader
         title="Camiones"
         description={`${vehicles.length} camión(es) en la flota.`}
-        action={<CreateVehicleButton zones={zones} />}
+        action={
+          <div className="flex gap-2">
+            <TemplateDownloadButton entity="vehicles" />
+            <CreateVehicleButton zones={zones} depots={depots} />
+          </div>
+        }
       />
       <DataTable
         columns={columns}
@@ -92,7 +116,7 @@ export default async function VehiclesPage() {
         rowKey={(v) => v.id}
         emptyTitle="Sin camiones registrados"
         emptyDescription="Agrega el primer camión con su capacidad por dimensión."
-        emptyAction={<CreateVehicleButton zones={zones} />}
+        emptyAction={<CreateVehicleButton zones={zones} depots={depots} />}
       />
     </>
   );

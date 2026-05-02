@@ -15,5 +15,11 @@ export interface UserProfile {
   zoneId: string | null;
   phone: string | null;
   isActive: boolean;
+  /**
+   * Si TRUE, el usuario debe establecer una contraseña nueva antes de continuar.
+   * Lo setea el flujo de invite y "forzar reset" del admin. Persistido en
+   * user_profiles.must_reset_password.
+   */
+  mustResetPassword: boolean;
   createdAt: string;
 }

@@ -1,16 +1,22 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useMemo, useState, useTransition } from 'react';
 import { Button, Field, Input, Modal, Select, toast } from '@verdfrut/ui';
-import type { Zone } from '@verdfrut/types';
+import type { Depot, Zone } from '@verdfrut/types';
 import { createVehicleAction } from './actions';
 
-export function CreateVehicleButton({ zones }: { zones: Zone[] }) {
+export function CreateVehicleButton({ zones, depots }: { zones: Zone[]; depots: Depot[] }) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [zoneId, setZoneId] = useState('');
+  const [depotId, setDepotId] = useState('');
 
   const activeZones = zones.filter((z) => z.isActive);
+  const depotsForZone = useMemo(
+    () => depots.filter((d) => d.isActive && d.zoneId === zoneId),
+    [depots, zoneId],
+  );
 
   return (
     <>
@@ -43,7 +49,17 @@ export function CreateVehicleButton({ zones }: { zones: Zone[] }) {
             <Input id="plate" name="plate" required maxLength={16} autoFocus disabled={pending} />
           </Field>
           <Field label="Zona" htmlFor="zone_id" required>
-            <Select id="zone_id" name="zone_id" required disabled={pending}>
+            <Select
+              id="zone_id"
+              name="zone_id"
+              required
+              value={zoneId}
+              onChange={(e) => {
+                setZoneId(e.target.value);
+                setDepotId('');
+              }}
+              disabled={pending}
+            >
               <option value="">Selecciona zona…</option>
               {activeZones.map((z) => (
                 <option key={z.id} value={z.id}>
@@ -94,16 +110,43 @@ export function CreateVehicleButton({ zones }: { zones: Zone[] }) {
             />
           </Field>
 
-          <div className="md:col-span-2 mt-2 rounded-[var(--radius-md)] bg-[var(--color-surface-subtle)] p-3 text-xs text-[var(--color-text-muted)]">
-            <strong>Depósito:</strong> dejar vacío usa el default de la zona. Sólo necesario si este camión sale desde un punto distinto.
-          </div>
+          <Field label="CEDIS / Hub" htmlFor="depot_id" className="md:col-span-2" hint="Punto físico desde donde sale y regresa el camión">
+            <Select
+              id="depot_id"
+              name="depot_id"
+              value={depotId}
+              onChange={(e) => setDepotId(e.target.value)}
+              disabled={pending || !zoneId}
+            >
+              <option value="">
+                {!zoneId
+                  ? 'Selecciona una zona primero'
+                  : depotsForZone.length === 0
+                    ? 'Sin CEDIS en esta zona — usar coords manuales abajo'
+                    : 'Selecciona CEDIS…'}
+              </option>
+              {depotsForZone.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.code} — {d.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
 
-          <Field label="Latitud depósito" htmlFor="depot_lat" hint="Opcional">
-            <Input id="depot_lat" name="depot_lat" type="number" step="0.000001" min={-90} max={90} disabled={pending} />
-          </Field>
-          <Field label="Longitud depósito" htmlFor="depot_lng" hint="Opcional">
-            <Input id="depot_lng" name="depot_lng" type="number" step="0.000001" min={-180} max={180} disabled={pending} />
-          </Field>
+          {!depotId && (
+            <>
+              <div className="md:col-span-2 rounded-[var(--radius-md)] bg-[var(--color-surface-subtle)] p-3 text-xs text-[var(--color-text-muted)]">
+                <strong>Override manual:</strong> sólo si el camión sale de un punto distinto al CEDIS de su zona.
+              </div>
+
+              <Field label="Latitud depósito" htmlFor="depot_lat" hint="Opcional">
+                <Input id="depot_lat" name="depot_lat" type="number" step="0.000001" min={-90} max={90} disabled={pending} />
+              </Field>
+              <Field label="Longitud depósito" htmlFor="depot_lng" hint="Opcional">
+                <Input id="depot_lng" name="depot_lng" type="number" step="0.000001" min={-180} max={180} disabled={pending} />
+              </Field>
+            </>
+          )}
 
           {error && (
             <div className="md:col-span-2 rounded-[var(--radius-md)] border border-[var(--color-danger-border)] bg-[var(--color-danger-bg)] px-3 py-2 text-sm text-[var(--color-danger-fg)]">
