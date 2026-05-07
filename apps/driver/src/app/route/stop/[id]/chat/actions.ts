@@ -8,10 +8,17 @@
 //  - sender = 'driver' AND current_user_role() = 'driver'
 //  - sender_user_id = auth.uid()
 // Por tanto el chofer no puede mentir sobre su rol.
+//
+// AI mediator (S18.8 / migración 027):
+// Tras insertar el mensaje del chofer (con texto), invocamos classifyDriverMessage.
+// - 'trivial' → AI inserta auto-reply como sender='system' y NO dispara push.
+// - 'real_problem' / 'unknown' → push fanout normal (admin + dispatcher + zone_manager).
+// Cada decisión queda en chat_ai_decisions para auditar y calibrar.
 
-import { createServerClient } from '@verdfrut/supabase/server';
+import { createServerClient, createServiceRoleClient } from '@verdfrut/supabase/server';
 import { sendChatPushToZoneManagers } from '@/lib/push-fanout';
 import { consume, LIMITS } from '@/lib/rate-limit';
+import { classifyDriverMessage } from '@verdfrut/ai';
 
 const MAX_CHAT_TEXT = 2_000; // Mismo cap que el composer — defensa server-side.
 
@@ -77,14 +84,95 @@ export async function sendDriverMessage(
     return { ok: false, error: error?.message ?? 'No se pudo enviar el mensaje' };
   }
 
-  // Push fanout solo en el primer mensaje, sin bloquear la respuesta.
-  if (isFirstMessage && zoneId) {
+  // AI mediator (S18.8) — solo aplica cuando hay texto. Si es solo imagen, escalamos siempre.
+  // El proceso: clasifica → si trivial inserta auto-reply, si no escala con push.
+  // Todo en background — no bloquea la respuesta al chofer.
+  if (body.text && body.text.trim().length > 0) {
+    void mediateChatMessage({
+      reportId,
+      messageId: data.id,
+      driverText: body.text,
+      isFirstMessage,
+      zoneId,
+    }).catch((err) => {
+      // Falla del mediator → escalar normal por seguridad.
+      console.error('[chat.mediator] falló:', err);
+      if (isFirstMessage && zoneId) {
+        void sendChatPushToZoneManagers({ reportId, zoneId });
+      }
+    });
+  } else if (isFirstMessage && zoneId) {
+    // Solo imagen sin texto → escalar siempre.
     void sendChatPushToZoneManagers({ reportId, zoneId }).catch((e) => {
       console.error('[chat.push] fanout falló:', e);
     });
   }
 
   return { ok: true, data: { id: data.id } };
+}
+
+interface MediateOpts {
+  reportId: string;
+  messageId: string;
+  driverText: string;
+  isFirstMessage: boolean;
+  zoneId: string | null;
+}
+
+/**
+ * AI mediator: clasifica mensaje, auto-respond si trivial, escala si real.
+ * Siempre escribe en chat_ai_decisions para audit (service-role para bypass RLS).
+ */
+async function mediateChatMessage(opts: MediateOpts): Promise<void> {
+  const { reportId, messageId, driverText, isFirstMessage, zoneId } = opts;
+  const result = await classifyDriverMessage(driverText);
+
+  // Service role para insertar auto-reply (sender='system' lo requiere) y audit.
+  const admin = createServiceRoleClient();
+
+  let autoReplyMessageId: string | null = null;
+  if (result.category === 'trivial' && result.autoReply) {
+    const { data: replyRow, error: replyErr } = await admin
+      .from('messages')
+      .insert({
+        report_id: reportId,
+        sender: 'system',
+        sender_user_id: null,
+        text: result.autoReply,
+        image_url: null,
+      })
+      .select('id')
+      .single();
+    if (replyErr) {
+      console.error('[chat.mediator.autoReply] insert falló:', replyErr.message);
+    } else {
+      autoReplyMessageId = replyRow?.id ?? null;
+    }
+  }
+
+  // Audit insert (sin bloquear si falla — no es crítico operativamente).
+  const { error: auditErr } = await admin.from('chat_ai_decisions').insert({
+    message_id: messageId,
+    report_id: reportId,
+    driver_message_text: driverText,
+    category: result.category,
+    auto_reply: result.autoReply,
+    confidence: result.confidence,
+    rationale: result.rationale,
+    auto_reply_message_id: autoReplyMessageId,
+  });
+  if (auditErr) {
+    console.error('[chat.mediator.audit] insert falló:', auditErr.message);
+  }
+
+  // Escalar a admin/dispatcher/zone_manager si NO es trivial. Solo en primer mensaje
+  // (resto va al chat normal sin push).
+  // 'unknown' → escalamos por seguridad.
+  if (result.category !== 'trivial' && isFirstMessage && zoneId) {
+    void sendChatPushToZoneManagers({ reportId, zoneId }).catch((e) => {
+      console.error('[chat.push] fanout falló:', e);
+    });
+  }
 }
 
 /**

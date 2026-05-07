@@ -17,6 +17,45 @@ export type Database = {
   }
   public: {
     Tables: {
+      chat_ai_decisions: {
+        Row: {
+          id: string
+          message_id: string
+          report_id: string
+          driver_message_text: string
+          category: 'trivial' | 'real_problem' | 'unknown'
+          auto_reply: string | null
+          confidence: number | null
+          rationale: string | null
+          auto_reply_message_id: string | null
+          classified_at: string
+        }
+        Insert: {
+          id?: string
+          message_id: string
+          report_id: string
+          driver_message_text: string
+          category: 'trivial' | 'real_problem' | 'unknown'
+          auto_reply?: string | null
+          confidence?: number | null
+          rationale?: string | null
+          auto_reply_message_id?: string | null
+          classified_at?: string
+        }
+        Update: {
+          id?: string
+          message_id?: string
+          report_id?: string
+          driver_message_text?: string
+          category?: 'trivial' | 'real_problem' | 'unknown'
+          auto_reply?: string | null
+          confidence?: number | null
+          rationale?: string | null
+          auto_reply_message_id?: string | null
+          classified_at?: string
+        }
+        Relationships: []
+      }
       delivery_reports: {
         Row: {
           chat_opened_at: string | null
