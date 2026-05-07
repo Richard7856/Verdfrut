@@ -1225,6 +1225,90 @@ Helper `cpClient()` en `apps/control-plane/src/lib/cp-client.ts` que retorna `cr
 
 ---
 
+## [2026-05-07] ADR-031: Deploy a producción — Vercel + Railway, 6 bugs encontrados, UX cambios
+
+**Contexto:** Demo hoy + field test mañana. Hasta esta sesión todo vivía en `localhost`. Necesidad: levantar las 4 piezas (3 apps Next + optimizer FastAPI/VROOM) en infra de producción reproducible y con auto-deploy desde GitHub. Sin tiempo para custom domain — `*.vercel.app` y `*.up.railway.app` para V1.
+
+**Decisión:**
+
+*Stack de deploy:*
+- **Vercel Hobby** (free) para las 3 apps Next.js: platform, driver, control-plane.
+- **Railway Hobby** (~$5-8/mes con uso) para el optimizer FastAPI + VROOM.
+- **Supabase** (paid existente) para BD + Auth + Storage + Realtime.
+- **GitHub** como Single Source of Truth con auto-deploy a Vercel + Railway en cada push a `main`.
+
+*Por qué Vercel + Railway en lugar de VPS único:*
+- Vercel Hobby = $0 los 3 Next + setup en minutos vs días de Caddy/Traefik.
+- Vercel automática gestiona HTTPS, CDN, Edge runtime, preview deployments.
+- Railway maneja Docker + healthchecks + redeploys en push sin tocar nada.
+- Total V1: $5-8/mes vs VPS $4-6/mes — diferencia mínima a cambio de cero mantenimiento.
+- Migración a VPS posible cuando crezca la operación, NO se pierde código.
+
+*3 nuevos proyectos Vercel (Opción A) en lugar de reusar `verdfrut`/`choferes`/`control` viejos:*
+- Los 3 viejos tenían código distinto, branches mezcladas, env vars stale. Riesgo de configs zombie en field test = inaceptable.
+- Decidimos crear `verdfrut-platform`, `verdfrut-driver`, `verdfrut-control-plane` desde cero. Los viejos quedan archivables.
+
+*Railway en lugar de Render para el optimizer:*
+- Render Starter = $7 fijo. Railway Hobby = pay-as-you-go (~$5-8 por carga V1).
+- Railway no se duerme; Render free se duerme tras 15 min (1er request post-sleep tarda 30s).
+- Both auto-deploy desde GitHub. Decisión por costo + latency consistency.
+
+*6 bugs encontrados durante deploy (todos resueltos en commits):*
+
+1. `vercel.json` con `installCommand: "echo skip"` rompía detección de Next.js. Fix: install command corre `pnpm install --frozen-lockfile` desde la raíz. Commit `4e65dac`.
+
+2. Dockerfile del optimizer en exec-form (`CMD ["uvicorn", ..., "--port", "8000"]`) no expandía `$PORT` que Railway inyecta dinámicamente → healthcheck failure. Fix: shell-form `CMD sh -c "uvicorn ... --port ${PORT:-8000}"`. Commit `d2d9f86`.
+
+3. PostgREST devolvía `Invalid schema control_plane` porque `pgrst.db_schemas` no incluía el nuevo schema. Fix: `ALTER ROLE authenticator SET pgrst.db_schemas = 'public, graphql_public, control_plane'` + `NOTIFY pgrst, 'reload config'`. Migration 001 del control plane actualizada para que un proyecto Supabase nuevo reciba la config.
+
+4. `get_dashboard_overview` plpgsql: ambiguous column reference (`total_distance_meters` chocaba con OUT param). Fix: cualificar con `rs.`/`sx.`/`dr.` en cada subquery. Documentado en ADR-028 como post-mortem.
+
+5. Mi guía DEPLOYMENT.md decía explícitamente que el driver NO necesitaba `MAPBOX_DIRECTIONS_TOKEN` — error mío. Sin él, el endpoint `/api/route/dynamic-polyline` retorna `geometry: null`, el cliente vuelve a pedir → loop infinito "Recalculando ruta". Fix: doc + agregar token al Vercel driver. Commit `aa30b16`.
+
+6. Off-route detection con threshold 50m + 3 updates consecutivos era demasiado agresiva con accuracy GPS típica de 20-40m → flap continuo del flag offRoute disparaba recalcs incluso cuando no había desviación real, multiplicando la causa raíz #5. Fix: threshold 50m→100m, consecutive 3→5, cooldown 30s entre recalcs por offRoute. Commit `26311b8`.
+
+*UX cambios introducidos durante demo prep:*
+
+- **Sidebar reordenado** (commit `5434cb5`): "Rutas" antes que "Tiros" — flujo correcto es crear rutas y agruparlas opcionalmente, no al revés. User feedback: "Está al revés lo de tiros". Empty state de `/dispatches` reescrito para clarificar que tiros son herramienta de agrupación opcional.
+
+- **Maps + Waze deeplinks** (commit `9d4ce75`): V1 prefiere reusar la infra de navegación de Maps/Waze (más pulida que la nuestra) en lugar de forzar el turn-by-turn in-app. Mantenemos in-app como respaldo desde "🧭 Iniciar navegación" para auditoría/visibilidad.
+
+- **"Reportar problema"** accesible desde 2 lugares (commit `9d4ce75`): stop-header (mientras está en una parada) Y `/route` lista (para averías ENTRE paradas). Resuelve user feedback: "las camionetas se quedan paradas, llantas, etc".
+
+- **Botón "Llamar tienda" REMOVIDO** (commit `dc166c6`): user clarificó que choferes NO deben poder marcar a gerentes de tienda — genera fricción operativa. Toda comunicación pasa por chat con zone_manager.
+
+- **`DEMO_MODE_BYPASS_GEO` env var** (commit `9dda9fd`): bypass server-only de validación geo en `arriveAtStop` para demos en oficina sin movimiento físico. ⚠ DEBE quitarse antes de field test real (anti-fraude reactivado). Documentado prominentemente en `PRE_FIELD_TEST_CHECKLIST.md`.
+
+**Alternativas consideradas:**
+
+*Custom domain hoy en lugar de `*.vercel.app`:* Suma 30 min de DNS + cert. Para mañana en campo no aporta. Lo dejamos para Sprint 19+.
+
+*Vercel Pro para los 3 Next:* $20/mes/team. No justificable hasta tener concurrencia real (10+ usuarios). Hobby es OK con tier limits actuales.
+
+*Render para el optimizer:* free tier duerme; Starter $7 fijo. Railway Hobby es comparable ($5-8 con uso real V1) y nunca duerme. Diferencia mínima.
+
+*Reusar proyectos Vercel viejos (`verdfrut`/`choferes`/`control`):* descartado — riesgo de configs zombie. Los nuevos son "limpios desde cero".
+
+**Riesgos / Limitaciones:**
+
+- *GPS broadcast NO funciona cuando chofer está en Waze/Maps* (PWA backgrounded). Aceptable para V1 porque el reporte de arrival es action-based (toca "Llegué") no GPS-polling. El supervisor pierde visibilidad del chofer DURANTE el transit pero no del arrival. Solución completa = native (Expo) — Sprint 20+ si se vuelve crítico operativo. Documentado.
+- *Si `DEMO_MODE_BYPASS_GEO` queda activo en producción real, anti-fraude está desactivado*. Mitigación: PRE_FIELD_TEST_CHECKLIST.md tiene el item #2 como crítico + el código loguea console.warn cada vez que el bypass se usa.
+- *Vercel Hobby tiene límites* (1000 invocations/día por function, 100GB/mes bandwidth). Para 1-3 choferes V1 sobra. Si el cliente firma con flota grande, migrar a Pro.
+- *Railway Hobby* depende de uso real — un mes con muchas optimizaciones puede subir a $10-15. Watching.
+- *6 bugs encontrados en deploy* sugieren que la guía de deployment necesitaba más testing antes. Mejora futura: armar un staging environment para validar antes de producción.
+
+**Oportunidades de mejora:**
+
+- Custom domains (`platform.verdfrut.com`, `driver.verdfrut.com`, `cp.verdfrut.com`) — Sprint 19.
+- Sentry / LogTail para error monitoring en producción.
+- Lighthouse audit del driver PWA — bundle size, time-to-interactive, performance score.
+- Migración a Vercel Pro si el cliente firma + escala.
+- Migración a VPS único cuando el costo Vercel+Railway supere $30/mes (cuando crezca a 5+ clientes).
+- Chat AI mediator (Sprint 18) para filtrar reportes triviales de choferes ("hay tráfico", "manifestación", "ya voy") antes de molestar al zone_manager.
+- Feature de "transferir paradas a otro chofer" cuando hay avería de camión (Sprint 18).
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown
