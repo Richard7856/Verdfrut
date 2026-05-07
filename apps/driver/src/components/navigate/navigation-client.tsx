@@ -38,6 +38,11 @@ export function NavigationClient({ routeId, stops, depot, geometry: initialGeome
   const [dynamicGeometry, setDynamicGeometry] = useState<GeoJSON.LineString | null>(null);
   const [steps, setSteps] = useState<NavStep[]>([]);
   const lastFetchedAtRef = useRef<{ lat: number; lng: number; stopId: string } | null>(null);
+  // Cooldown del recalc disparado por off-route: evita loop "Recalculando" cuando
+  // el GPS tiene accuracy variable y el chofer queda apenas dentro/fuera del threshold.
+  // Sin esto, cada flap del offRoute (false→true→false→true) dispara un fetch nuevo.
+  const lastRecalcAtRef = useRef(0);
+  const RECALC_COOLDOWN_MS = 30_000;
 
   const sorted = [...stops].sort((a, b) => a.sequence - b.sequence);
   const nextStop = sorted.find((s) => s.status === 'pending') ?? null;
@@ -95,12 +100,17 @@ export function NavigationClient({ routeId, stops, depot, geometry: initialGeome
     recalcRef.current();
   }, [position, nextStop]);
 
-  // Off-route → recalcular + anunciar.
+  // Off-route → recalcular + anunciar (con cooldown anti-loop).
   useEffect(() => {
-    if (offRoute) {
-      speak('Recalculando ruta');
-      recalcRef.current();
+    if (!offRoute) return;
+    const now = Date.now();
+    if (now - lastRecalcAtRef.current < RECALC_COOLDOWN_MS) {
+      // Reciente, ignorar este off-route. El usuario ya recibió un recalc hace <30s.
+      return;
     }
+    lastRecalcAtRef.current = now;
+    speak('Recalculando ruta');
+    recalcRef.current();
   }, [offRoute, speak]);
 
   const displayGeometry = dynamicGeometry ?? initialGeometry;

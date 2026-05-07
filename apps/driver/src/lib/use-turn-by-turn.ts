@@ -14,8 +14,12 @@ import { haversineMeters } from '@verdfrut/utils';
 import type { NavStep } from './mapbox';
 import type { DriverPosition } from './use-driver-position';
 
-const OFF_ROUTE_THRESHOLD_M = 50;
-const OFF_ROUTE_CONSECUTIVE = 3; // 3 GPS updates seguidos lejos antes de marcar off-route
+// 100m de tolerancia (GPS típico tiene 10-50m de accuracy, mejor margen).
+// 5 updates consecutivos en lugar de 3 (menos sensible a glitches).
+// Estos valores se calibraron para evitar el loop "Recalculando" que pasaba
+// con 50m + 3 updates en condiciones reales (ciudad con accuracy 20-40m).
+const OFF_ROUTE_THRESHOLD_M = 100;
+const OFF_ROUTE_CONSECUTIVE = 5;
 
 export interface TurnByTurnState {
   /** Index del step actual en el array recibido. */
