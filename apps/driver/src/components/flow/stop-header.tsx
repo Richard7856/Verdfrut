@@ -6,10 +6,16 @@
 //     que podríamos construir nosotros. Mantenemos turn-by-turn in-app como respaldo
 //     para flujos donde queremos visibilidad/auditoría (botón "🧭 Iniciar navegación"
 //     desde /route).
-//   - Llamar tienda: marca al contacto de la tienda (gerente). NO al admin/comercial.
 //   - Reportar problema: abre el chat realtime con el zone_manager. Útil para
 //     averías, incidencias, dudas durante el flujo (a diferencia del chat dentro
 //     del flow, este es accesible en cualquier momento del stop).
+//
+// DECISIÓN INTENCIONAL (no hay botón de llamar tienda):
+// Anteriormente hubo un botón "Llamar tienda" pero genera fricción operativa real
+// — choferes llaman a gerentes de tienda por cosas no relevantes (preguntas de la
+// app, dudas, etc.) y eso quema la relación con el cliente final. Toda comunicación
+// del chofer pasa por chat (con AI mediator a futuro — Sprint 18+) o por el zone
+// manager. La tienda nunca recibe llamada del chofer.
 
 import Link from 'next/link';
 import type { Stop, Store } from '@verdfrut/types';
@@ -62,14 +68,6 @@ export function StopHeader({ stop, store }: Props) {
         >
           🚗 Waze
         </a>
-        {store.contactPhone && (
-          <a
-            href={`tel:${store.contactPhone}`}
-            className="rounded-[var(--radius-md)] bg-[var(--vf-surface-2)] px-3 py-1.5 text-[var(--color-text)]"
-          >
-            📞 Llamar tienda
-          </a>
-        )}
         <Link
           href={`/route/stop/${stop.id}/chat`}
           className="rounded-[var(--radius-md)] bg-[var(--color-warning-bg)] px-3 py-1.5 text-[var(--color-warning-fg)] font-medium"

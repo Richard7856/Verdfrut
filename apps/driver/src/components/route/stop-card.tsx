@@ -69,18 +69,10 @@ export function StopCard({ item, isNext, timezone }: Props) {
 
           <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-[var(--color-text-muted)]">
             {eta && <span>ETA {eta}</span>}
-            {store.contactPhone && (
-              <span>
-                Tel{' '}
-                <a
-                  href={`tel:${store.contactPhone}`}
-                  className="underline-offset-2 hover:underline"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {store.contactPhone}
-                </a>
-              </span>
-            )}
+            {/* Decisión intencional: chofer NO marca a la tienda. Toda comunicación
+                pasa por chat con zone manager (con AI mediator a futuro). El número
+                contactPhone sigue almacenado en stores para uso del admin/dispatcher,
+                no se expone aquí. Ver comentario en stop-header.tsx. */}
             {store.receivingWindowStart && store.receivingWindowEnd && (
               <span>
                 Recibe {store.receivingWindowStart}–{store.receivingWindowEnd}
