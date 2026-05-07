@@ -1309,6 +1309,108 @@ Helper `cpClient()` en `apps/control-plane/src/lib/cp-client.ts` que retorna `cr
 
 ---
 
+## [2026-05-08] ADR-032: Sprint 18 — Admin como centro + GPS confiable + AI mediator
+
+**Contexto:** Cliente clarificó que GPS en tiempo real es crítico **solo cuando hay anomalías** (chofer silencioso, atraso, problema reportado), no como tracking continuo. Y que el zone_manager NO debe ver mapa/dashboard — solo recibir push del chofer y responder por chat. El admin es quien centraliza todo: ve mapa+chat juntos, recibe notificaciones de cualquier reporte nuevo. Implicación: NO migrar a Expo nativa todavía. Las mejoras de Sprint 18 cubren el caso real con la PWA actual.
+
+**Decisión:** 9 sub-sprints implementados consecutivamente.
+
+*S18.1 — Re-modelo de roles (commit `8ca0722`):*
+zone_manager pierde acceso a /map, /dashboard, /incidents (lista), /drivers, /routes detalle. Su única ruta es `/incidents/active-chat` que redirige al primer chat abierto. Si no tiene chats, muestra estado vacío explicativo. Defense in depth: sidebar filtra por rol + páginas usan `requireRole('admin', 'dispatcher')` + RLS sigue intacto. Nuevo helper `requireAdminOrDispatcher` en auth.ts. `homeForRole` redirige zone_manager a su chat activo.
+
+*S18.2 — Panel dual mapa+chat en `/incidents/[reportId]` (commit `4b6b10d`):*
+Layout grid 2 columnas (lg ≥ 1024px): mapa LIVE izquierda + chat derecha. Mobile stack vertical. Reusa `LiveRouteMapLoader` (ya implementaba subscribe a `gps:{routeId}` + carga breadcrumbs históricos para trail completo — resuelve issue #32 al pasar). Server-side carga route + stops + stores + vehicle + depot + driver para alimentar el mapa. Si falta data, fallback con placeholder.
+
+*S18.3 — 4 modalidades de notificación al admin (commits `27354c0`, `cfd67b5`):*
+1. **Badge realtime en sidebar** "Incidencias" — count de chats abiertos (delivery_reports.chat_status='open'), inicial server-side + actualizaciones via Supabase Realtime channel.
+2. **Toast in-app** — hook `useIncidentNotifications` mounted en (app)/layout.tsx. Suscribe a INSERT messages WHERE sender='driver' y UPDATE delivery_reports WHERE chat_status TRANSITIONS to 'open'. Toast con CTA "Ver" → /incidents/[reportId].
+3. **Sonido al recibir** — Web Audio API genera beep de 2 tonos (880Hz → 1320Hz, 200ms). Sin asset binario. Toggle 🔊/🔇 en topbar persistido en localStorage.
+4. **Push notification del browser** — Service Worker minimal `/sw-push.js` (sin Serwist, solo handler push), `apps/platform/src/lib/push-subscription.ts` (paralelo al driver), endpoint `/api/push/subscribe` (POST/DELETE). Banner `<PushOptIn>` en /dashboard que se auto-oculta tras suscribir. Push fanout extendido (driver `push-fanout.ts`) para incluir admin/dispatcher en addition al zone_manager.
+
+Toast extendido en `@verdfrut/ui` con `ToastOptions { action?: { label, onClick } }` backwards-compatible.
+
+*S18.4 — GPS gap detection / Waze handling (commit `a9e6727`, migración 023):*
+Cuando chofer abre Waze/Maps, la PWA pasa a background y `watchPosition` muere (especialmente iOS). Antes: el admin veía al chofer "congelado". Ahora: el cliente reporta `gap_start` (visibilitychange→hidden) con last_known_lat/lng, y `gap_end` (visibilitychange→visible) con duración. Persiste en `route_gap_events`. RLS: driver inserta/update suyos, admin/dispatcher leen todos, zone_manager lee de SU zona.
+
+*S18.5 — Detección de anomalías para admin (commit `57f962b`, migración 024):*
+SQL function `get_active_anomalies(zone_id_filter)` UNION ALL de 3 tipos:
+- **silent_driver:** ruta IN_PROGRESS sin breadcrumb >5 min (severity 'high' si >15 min)
+- **route_delayed:** ruta con `estimated_end_at` >15 min ago sin completar
+- **chat_open_long:** chat_status='open' >20 min sin resolver
+
+Página `/incidents/anomalies` (admin/dispatcher only) con cards agrupadas por tipo, CTA contextual (silent → /map, delayed → /routes/[id], chat → /incidents/[reportId]). Sidebar nuevo item "🔴 Anomalías".
+
+*S18.6 — Replay recorrido + audit + TTL breadcrumbs (commit `4ebc105`, migración 025):*
+Tres mejoras complementarias:
+- **`archive_old_breadcrumbs(retention_days)`** función SQL + cron `/api/cron/archive-breadcrumbs` (mensual). Resuelve issue #33 (tabla crecía sin tope).
+- **`routes.actual_distance_meters`** columna nueva. Trigger BEFORE UPDATE on routes que calcula al transitar a COMPLETED usando `calc_route_actual_distance(route_id)` (haversine SQL puro sumando breadcrumbs ordenados).
+- **Trail histórico ya estaba** vía `LiveRouteMapLoader` desde S18.2 — issue #32 resuelto sin trabajo extra.
+
+*S18.7 — Transferir paradas a otro chofer cuando avería (commit `80bf91a`, migración 026):*
+ALTER TYPE route_status ADD VALUE 'INTERRUPTED'. Tabla `route_transfers` para audit. Server action `transferRouteRemainderAction(sourceRouteId, targetVehicleId, targetDriverId, reason, inheritDispatch)`:
+1. Valida ruta origen PUBLISHED/IN_PROGRESS con stops pending.
+2. Crea ruta nueva PUBLISHED con vehículo + chofer destino.
+3. Mueve stops pending y RE-NUMERA sequence 1..N en la nueva.
+4. Marca origen como INTERRUPTED + `actual_end_at`.
+5. Insert audit en route_transfers.
+6. Best-effort rollback (delete ruta nueva) si falla mid-way.
+
+UI cliente `TransferRouteButton` + Modal con select vehículo (req) + chofer (opt) + razón preset + detalle. Banner amarillo "¿El camión no puede continuar?" en /routes/[id] solo cuando aplica.
+
+Tipos cascada: `RouteStatus` en `@verdfrut/types` + `route_status` enum en database.ts + 4 Records<RouteStatus, ...> en platform/driver para evitar exhaustiveness errors.
+
+*S18.8 — Chat AI mediator con Claude Haiku (commit `1dbcf7a`, migración 027):*
+`packages/ai/src/classify-driver-message.ts` — `classifyDriverMessage(text)` clasifica en 'trivial' | 'real_problem' | 'unknown'. System prompt define las 3 categorías + 2 few-shot examples (tráfico → trivial, llanta ponchada → real_problem). Si trivial, devuelve `autoReply` empático en español MX (max 200 chars, sin mencionar "AI"). Failsafe: API key missing o request falla → 'unknown' (sesgo a la seguridad).
+
+Integrado en `apps/driver/.../chat/actions.ts > sendDriverMessage`:
+- Tras insert del mensaje del chofer (siempre), `mediateChatMessage()` en background (no bloquea respuesta).
+- Si trivial: service-role insert auto-reply como `sender='system'`, NO push fanout.
+- Si real_problem o unknown: push fanout normal (ya extendido en S18.3 a admin/dispatcher).
+- Solo aplica a mensajes con texto. Imágenes-solo escalan siempre (vision = costoso/lento).
+- Audit en `chat_ai_decisions` con category, autoReply, confidence, rationale, auto_reply_message_id.
+
+Calibración futura: `SELECT category, COUNT(*) FROM chat_ai_decisions GROUP BY category` quincenal. Si % unknown > 20% → ajustar prompt.
+
+*S18.9 — Cleanup técnico:*
+Removido `DEMO_MODE_BYPASS_GEO` permanente del código de `arriveAtStop`. Era un riesgo latente: env var olvidada en producción = anti-fraude desactivado. Si se necesita demo en oficina otra vez, reintroducir en rama dedicada y revertir antes de mergear. Comentario histórico en el código documenta la decisión.
+
+**Alternativas consideradas:**
+
+*Migrar a Expo (React Native) ahora:* descartado. Tomaría 3-4 semanas y resolvería un caso (GPS continuo) que el cliente NO requiere. Las mejoras del PWA cubren el caso real (anomalies-driven supervision). Migración a Expo queda como Fase 7 condicional (ver ROADMAP.md).
+
+*Detección de anomalías con cron periódico (escribiendo a tabla):* Más eficiente para muchos clientes pero overkill para V1. Polling cada 60s desde el cliente es simple y suficiente. Mejora futura cuando el dataset crezca.
+
+*Toast/sonido/push del browser fueron 4 features distintas — alguna era redundante?* No: cubren casos distintos:
+- Badge: count visible siempre, sin distraer.
+- Toast: el admin está mirando otro tab del platform — alerta in-app sin notification permission.
+- Sonido: el admin está distraído en otra app, el sonido lo avisa.
+- Push browser: el admin tiene el platform en otra tab/cerrado — el sistema operativo se lo dice.
+
+*AI mediator con Claude Sonnet vs Haiku:* Haiku porque la tarea es clasificación binaria con few-shots, no requiere razonamiento profundo. ~10x más barato y ~3x más rápido.
+
+*Integrar AI mediator en server vs cliente:* server. El API key NO debe llegar al cliente y la lógica de `chat_ai_decisions` audit requiere service_role.
+
+**Riesgos / Limitaciones:**
+
+- *AI mediator clasifica trivialmente erróneamente* → reporte real queda sin escalar. Mitigación: 'unknown' siempre escala (sesgo a seguridad), confidence guardado, audit revisable. Calibrar prompt quincenalmente.
+- *route_transfers sin verificación de capacity del vehículo destino*: si chofer transfiere 6 stops pero el camión destino solo tiene capacity para 3, sigue creando la ruta. Validación futura cuando aparezca el caso. Por ahora warning en UI dejado al admin.
+- *Polling de anomalías cada 60s* desde cliente puede ser pesado si hay 100+ admins concurrentes. V1 con 1-3 admins no es problema. Sprint 19 puede agregar realtime channel para alerts.
+- *visibilitychange en iOS Safari* puede no dispararse en algunos edge cases (page suspended antes de fire). Mitigación: el cron `mark_timed_out_chats` ya cierra chats huérfanos; si gap_event queda sin `ended_at` indefinidamente, el admin lo ve como gap activo eterno. Sprint 19 puede agregar cron que cierre gaps con timeout >2h.
+- *`chat_ai_decisions` puede crecer mucho* (1 row por mensaje del chofer). Sprint 20+ agregar TTL similar al de breadcrumbs (90 días).
+- *Sound toggle en topbar es global* (no per-page). Si admin silencia, no recibe sonido en ninguna parte de la app. Decisión pragmática.
+
+**Oportunidades de mejora:**
+
+- AI mediator: agregar contexto de la ruta (ETA, paradas pendientes, hora del día) al prompt para mejor clasificación contextual.
+- Anomalías: convertir polling a realtime channel (push de nuevas anomalías).
+- Push notifications: agrupar (no spam si llegan 10 mensajes seguidos).
+- route_transfers: validación de capacity y depot compatibility.
+- Feature flag system para experimentos (variant del AI prompt, etc).
+- Migrar `chat_ai_decisions` audit a un dashboard `/incidents/ai-audit` (admin only).
+- Sprint 20+ revisitar la migración a Expo si los gaps de GPS se vuelven crítico operativo.
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown

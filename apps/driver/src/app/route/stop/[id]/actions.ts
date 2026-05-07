@@ -71,12 +71,10 @@ export interface ArrivalRejection {
  * El cliente debe pasar `coords`. Si no lo hace (browser sin geo, permiso denegado),
  * se rechaza con `no_coords` — el chofer no puede arrivar sin GPS.
  *
- * BYPASS DEMO (solo para grabar/probar el flujo sin moverse físicamente):
- * Setear env `DEMO_MODE_BYPASS_GEO=true` en el server salta la validación geo
- * Y la verificación de coords. Useful para demos en oficina donde el chofer no
- * puede ir físicamente a la tienda. NUNCA dejar prendido en producción real —
- * abre el sistema a fraude. Logueamos un warning bien visible cada vez que se
- * usa para que sea evidente en logs si quedó por error.
+ * NOTA HISTÓRICA: en pre-deploy hubo un bypass DEMO_MODE_BYPASS_GEO para grabar
+ * el demo sin moverse físicamente. Removido al cierre de Sprint 18 (S18.9) para
+ * no dejar superficie de fraude latente. Si se necesita demo en oficina otra
+ * vez, reintroducir TEMPORALMENTE en una rama dedicada y revertir antes de mergear.
  */
 export async function arriveAtStop(
   stopId: string,
@@ -92,20 +90,8 @@ export async function arriveAtStop(
     return { ok: true, data: ctx.report };
   }
 
-  const DEMO_BYPASS = process.env.DEMO_MODE_BYPASS_GEO === 'true';
-  if (DEMO_BYPASS) {
-    // Visible en runtime logs de Vercel — recordatorio de quitar el env var.
-    console.warn(
-      '[arriveAtStop] ⚠ DEMO_MODE_BYPASS_GEO=true — validación geo SALTADA. ' +
-        'QUITAR este env var antes de field test real.',
-    );
-  }
-
   // Validación geo — debe estar dentro del radio de la tienda.
-  // Con DEMO_BYPASS activo: aceptamos arrival sin coords y sin importar distancia.
-  // Si no llegan coords, usamos las de la tienda como sintéticas para no romper
-  // el insert de metadata.
-  if (!coords && !DEMO_BYPASS) {
+  if (!coords) {
     return {
       ok: false,
       rejection: {
@@ -114,18 +100,9 @@ export async function arriveAtStop(
       },
     };
   }
-  const effectiveCoords: ArrivalCoords = coords ?? {
-    lat: ctx.store.lat,
-    lng: ctx.store.lng,
-  };
-  const distance = haversineMeters(
-    effectiveCoords.lat,
-    effectiveCoords.lng,
-    ctx.store.lat,
-    ctx.store.lng,
-  );
+  const distance = haversineMeters(coords.lat, coords.lng, ctx.store.lat, ctx.store.lng);
   const threshold = ARRIVAL_RADIUS_METERS[type];
-  if (distance > threshold && !DEMO_BYPASS) {
+  if (distance > threshold) {
     return {
       ok: false,
       rejection: {
@@ -170,16 +147,9 @@ export async function arriveAtStop(
       current_step: initialStep,
       // Guardar las coords del arrival en metadata para audit + posible análisis
       // de "lejanía típica" del chofer en cada tipo de visita.
-      // Si DEMO_BYPASS estaba activo y no llegaron coords reales, usamos las de
-      // la tienda — el flag demo_bypass marca el row para excluirlo de análisis serio.
       metadata: {
-        arrival_coords: {
-          lat: effectiveCoords.lat,
-          lng: effectiveCoords.lng,
-          accuracy: effectiveCoords.accuracy ?? null,
-        },
+        arrival_coords: { lat: coords.lat, lng: coords.lng, accuracy: coords.accuracy ?? null },
         arrival_distance_meters: Math.round(distance),
-        ...(DEMO_BYPASS ? { demo_bypass: true } : {}),
       },
     })
     .select('*')
