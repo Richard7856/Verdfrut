@@ -47,19 +47,24 @@ export async function sendChatPushToZoneManagers(params: ChatPushParams): Promis
 
   const supabase = createServiceRoleClient();
 
-  // Subs de TODOS los zone_managers de esta zona. RLS bypaseada con service role.
+  // V2: fanout amplio — envía a TODOS los que pueden actuar sobre el reporte:
+  //   - zone_managers de la zona específica
+  //   - admin (sin filtro de zona — admin global ve todo)
+  //   - dispatcher (sin filtro de zona — operación full)
+  // RLS bypaseada con service role.
   const { data: subs, error } = await supabase
     .from('push_subscriptions')
-    .select('id, endpoint, p256dh, auth')
-    .eq('role', 'zone_manager')
-    .eq('zone_id', params.zoneId);
+    .select('id, endpoint, p256dh, auth, role, zone_id')
+    .or(
+      `and(role.eq.zone_manager,zone_id.eq.${params.zoneId}),role.eq.admin,role.eq.dispatcher`,
+    );
 
   if (error) {
     console.error('[chat.push] error leyendo subscriptions:', error);
     return;
   }
   if (!subs || subs.length === 0) {
-    console.warn(`[chat.push] zona ${params.zoneId} sin zone_managers suscritos`);
+    console.warn(`[chat.push] sin destinatarios suscritos para zona ${params.zoneId}`);
     return;
   }
 

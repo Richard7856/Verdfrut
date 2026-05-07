@@ -24,6 +24,7 @@ import { ExportButton } from './export-button';
 import { KpiGrid } from './kpi-grid';
 import { DailyChart } from './daily-chart';
 import { TopTables } from './top-tables';
+import { PushOptIn } from '@/components/notifications/push-opt-in';
 
 export const metadata = { title: 'Dashboard' };
 export const dynamic = 'force-dynamic';
@@ -88,6 +89,10 @@ export default async function DashboardPage({ searchParams }: Props) {
         description={`Métricas operativas del ${formatDateLabel(from)} al ${formatDateLabel(to)}`}
         action={<ExportButton defaultFrom={from} defaultTo={to} defaultZone={zoneId} />}
       />
+
+      {/* Banner discreto para activar push notifications del SO. Se auto-oculta
+          tras suscribir o si el browser rechazó. */}
+      <PushOptIn />
 
       <DashboardFilters
         zones={zones.map((z) => ({ id: z.id, name: z.name }))}
