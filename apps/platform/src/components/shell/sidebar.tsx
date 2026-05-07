@@ -19,21 +19,30 @@ interface NavItem {
   badge?: string | number;
 }
 
+// Modelo de roles V2 (post-clarificación cliente — ADR-031+):
+// - admin/dispatcher: supervisan + operan. Ven todo.
+// - zone_manager: SOLO chat activo. Su única navegación es "/incidents/active-chat"
+//   que lo redirige al chat más reciente abierto. No ve dashboard, mapa, listas, etc.
+//   Su sidebar muestra exclusivamente "Mi chat" — sin distractores.
 const NAV_ITEMS: NavItem[] = [
-  { href: '/dashboard', label: 'Overview', roles: ['admin', 'dispatcher', 'zone_manager'], group: 'GENERAL' },
-  { href: '/map', label: 'Mapa en vivo', roles: ['admin', 'dispatcher', 'zone_manager'], group: 'GENERAL' },
+  // Zone manager — solo 1 entry, su único trabajo
+  { href: '/incidents/active-chat', label: 'Mi chat', roles: ['zone_manager'], group: 'GENERAL' },
+
+  // Admin / dispatcher — supervisión global
+  { href: '/dashboard', label: 'Overview', roles: ['admin', 'dispatcher'], group: 'GENERAL' },
+  { href: '/map', label: 'Mapa en vivo', roles: ['admin', 'dispatcher'], group: 'GENERAL' },
 
   { href: '/routes', label: 'Rutas', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
   { href: '/dispatches', label: 'Tiros (agrupar rutas)', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
   { href: '/settings/vehicles', label: 'Flotilla', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
   { href: '/settings/depots', label: 'CEDIS / Hubs', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
-  { href: '/incidents', label: 'Incidencias', roles: ['admin', 'dispatcher', 'zone_manager'], group: 'OPERACIÓN' },
+  { href: '/incidents', label: 'Incidencias', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
 
   { href: '/settings/stores', label: 'Tiendas', roles: ['admin', 'dispatcher'], group: 'CATÁLOGO' },
   { href: '/drivers', label: 'Choferes', roles: ['admin', 'dispatcher'], group: 'CATÁLOGO' },
   { href: '/inventory', label: 'Inventario', roles: ['admin', 'dispatcher'], group: 'CATÁLOGO' },
 
-  { href: '/reports', label: 'Reportes', roles: ['admin', 'dispatcher', 'zone_manager'], group: 'SISTEMA' },
+  { href: '/reports', label: 'Reportes', roles: ['admin', 'dispatcher'], group: 'SISTEMA' },
   { href: '/settings/zones', label: 'Zonas', roles: ['admin'], group: 'SISTEMA' },
   { href: '/settings/users', label: 'Usuarios', roles: ['admin'], group: 'SISTEMA' },
 ];

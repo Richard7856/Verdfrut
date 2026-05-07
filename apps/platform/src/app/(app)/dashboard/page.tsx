@@ -54,7 +54,8 @@ interface Props {
 }
 
 export default async function DashboardPage({ searchParams }: Props) {
-  const profile = await requireRole('admin', 'dispatcher', 'zone_manager');
+  // V2: solo admin/dispatcher. zone_manager se queda solo con su chat activo.
+  const profile = await requireRole('admin', 'dispatcher');
   const params = await searchParams;
   const timezone = process.env.NEXT_PUBLIC_TENANT_TIMEZONE ?? DEFAULT_TZ;
 

@@ -80,7 +80,8 @@ function defaultRange(timezone: string): { from: string; to: string } {
 }
 
 export default async function DriversDashboardPage({ searchParams }: Props) {
-  const profile = await requireRole('admin', 'dispatcher', 'zone_manager');
+  // V2: solo admin/dispatcher.
+  const profile = await requireRole('admin', 'dispatcher');
   const params = await searchParams;
   const timezone = process.env.NEXT_PUBLIC_TENANT_TIMEZONE ?? DEFAULT_TZ;
 

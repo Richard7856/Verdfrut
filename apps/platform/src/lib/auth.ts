@@ -46,12 +46,27 @@ export async function requireProfile(): Promise<UserProfile> {
 
 /**
  * Restringe acceso a roles específicos. Si el usuario no tiene un rol permitido,
- * redirige a la home (que ya lo lleva al dashboard apropiado).
+ * redirige a la home apropiada de su rol (NO a `/`, porque para zone_manager
+ * eso causaría loop si pretende abrir una vista de admin).
  */
 export async function requireRole(...allowed: UserRole[]): Promise<UserProfile> {
   const profile = await requireProfile();
-  if (!allowed.includes(profile.role)) redirect('/');
+  if (!allowed.includes(profile.role)) redirect(homeForRole(profile.role));
   return profile;
+}
+
+/**
+ * Atajo: solo admin/dispatcher (excluye zone_manager y driver).
+ * Usar en páginas de supervisión global: /map, /dashboard, /incidents (lista),
+ * /routes, /dispatches, /settings, etc. — todo lo que NO sea el chat directo.
+ *
+ * Modelo de roles V2 (post-clarificación cliente):
+ * - admin / dispatcher: ven todo, supervisan, operan.
+ * - zone_manager: SOLO chat. Recibe push del chofer y responde. No ve mapa,
+ *   no ve dashboard, no ve listas. Su única página es /incidents/active-chat.
+ */
+export async function requireAdminOrDispatcher(): Promise<UserProfile> {
+  return requireRole('admin', 'dispatcher');
 }
 
 /**
@@ -64,7 +79,9 @@ export function homeForRole(role: UserRole): string {
     case 'dispatcher':
       return '/routes';
     case 'zone_manager':
-      return '/dashboard';
+      // Zone manager solo entra a su chat activo. Si no tiene chats abiertos,
+      // la página /incidents/active-chat muestra estado "sin chats hoy".
+      return '/incidents/active-chat';
     case 'driver':
       // El driver no debería entrar al platform — su home es la driver app.
       return '/login';

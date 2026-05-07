@@ -10,7 +10,8 @@ import { listZones } from '@/lib/queries/zones';
 export const metadata = { title: 'Choferes' };
 
 export default async function DriversPage() {
-  await requireRole('admin', 'dispatcher', 'zone_manager');
+  // V2: solo admin/dispatcher.
+  await requireRole('admin', 'dispatcher');
 
   const [drivers, zones] = await Promise.all([listDrivers(), listZones()]);
   const zonesById = new Map(zones.map((z) => [z.id, z]));
