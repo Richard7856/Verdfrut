@@ -8,10 +8,9 @@ import type { StepProps } from '../stop-detail-client';
 const MIN_LEN = 10;
 
 export function NoReceiptReasonStep(props: StepProps) {
-  const { report, route, userId, pending, error, advanceTo, nextOf, onPatch, onSaveEvidence } =
-    props;
+  const { report, route, userId, pending, error, advanceTo, nextOf, onPatch } = props;
   const [reason, setReason] = useState(report.noTicketReason ?? '');
-  const [photoUrl, setPhotoUrl] = useState<string | null>(report.noTicketReasonPhotoUrl);
+  const [hasPhoto, setHasPhoto] = useState(Boolean(report.noTicketReasonPhotoUrl));
   const ready = reason.trim().length >= MIN_LEN;
 
   return (
@@ -20,9 +19,10 @@ export function NoReceiptReasonStep(props: StepProps) {
       description="Describe el motivo. Foto opcional si tienes evidencia del problema."
       onContinue={async () => {
         if (!ready) return;
+        // Solo persistimos el texto en patch; la foto (si la hay) viaja por su
+        // propia operación del outbox que ya se encargará de la columna.
         await onPatch({
           noTicketReason: reason.trim(),
-          noTicketReasonPhotoUrl: photoUrl,
         });
         advanceTo(nextOf({}));
       }}
@@ -47,15 +47,17 @@ export function NoReceiptReasonStep(props: StepProps) {
         bucket="evidence"
         routeId={route.id}
         stopId={report.stopId}
+        reportId={report.id}
         slot="no_ticket_reason_photo"
         userId={userId}
-        existingUrl={photoUrl}
+        existingUrl={report.noTicketReasonPhotoUrl}
         label="Tomar foto"
-        onUploaded={async (url) => {
-          await onSaveEvidence('no_ticket_reason_photo', url);
-          setPhotoUrl(url);
-        }}
+        patchColumn="noTicketReasonPhotoUrl"
+        onQueued={() => setHasPhoto(true)}
       />
+      {hasPhoto && (
+        <p className="text-xs text-[var(--color-text-muted)]">Foto agregada.</p>
+      )}
     </StepShell>
   );
 }

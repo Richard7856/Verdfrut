@@ -12,6 +12,7 @@ import { StopCard } from '@/components/route/stop-card';
 import { EmptyRoute } from '@/components/route/empty-route';
 import { GpsBroadcastController } from '@/components/route/gps-broadcast-controller';
 import { PushOptIn } from '@/components/route/push-opt-in';
+import { OutboxBadge } from '@/components/outbox-badge';
 import Link from 'next/link';
 import { Button } from '@verdfrut/ui';
 
@@ -63,14 +64,18 @@ export default async function RoutePage() {
           <h1 className="text-lg font-semibold text-[var(--color-text)]">VerdFrut</h1>
           <p className="text-xs text-[var(--color-text-muted)]">{profile.fullName}</p>
         </div>
-        <form action={logoutAction}>
-          <button
-            type="submit"
-            className="text-sm text-[var(--color-text-muted)] underline-offset-2 hover:underline"
-          >
-            Salir
-          </button>
-        </form>
+        <div className="flex items-center gap-3">
+          {/* Badge solo aparece si hay items pendientes — ADR-019 */}
+          <OutboxBadge />
+          <form action={logoutAction}>
+            <button
+              type="submit"
+              className="text-sm text-[var(--color-text-muted)] underline-offset-2 hover:underline"
+            >
+              Salir
+            </button>
+          </form>
+        </div>
       </header>
 
       {/* Opt-in de push notifications — visible siempre que browser soporte y no esté ya suscrito. */}

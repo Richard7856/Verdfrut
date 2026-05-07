@@ -7,22 +7,27 @@
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button, Card, CardHeader, Field, Input, Select, toast, cn } from '@verdfrut/ui';
-import type { Driver, Store, Vehicle, Zone } from '@verdfrut/types';
+import type { Dispatch, Driver, Store, Vehicle, Zone } from '@verdfrut/types';
 import { createAndOptimizeRoute } from '../actions';
+import { assignRouteToDispatchAction } from '../../dispatches/actions';
 
 interface Props {
   zones: Zone[];
   stores: Store[];
   vehicles: Vehicle[];
   drivers: Driver[];
+  /** Si vino de /dispatches/[id], pre-fillea date/zone y al crear vincula la ruta. */
+  dispatch?: Dispatch | null;
 }
 
-export function NewRouteForm({ zones, stores, vehicles, drivers }: Props) {
+export function NewRouteForm({ zones, stores, vehicles, drivers, dispatch }: Props) {
   const router = useRouter();
 
-  // Default zona: la primera. Default fecha: mañana.
-  const [zoneId, setZoneId] = useState<string>(zones[0]?.id ?? '');
+  // Si hay dispatch, las propiedades zona/fecha quedan FIJAS (no editable) para
+  // garantizar consistencia con el tiro. Si no, default zona[0] y mañana.
+  const [zoneId, setZoneId] = useState<string>(dispatch?.zoneId ?? zones[0]?.id ?? '');
   const [date, setDate] = useState<string>(() => {
+    if (dispatch) return dispatch.date;
     const t = new Date();
     t.setDate(t.getDate() + 1);
     return t.toISOString().slice(0, 10);
@@ -97,6 +102,12 @@ export function NewRouteForm({ zones, stores, vehicles, drivers }: Props) {
       }
 
       const created = res.routeIds ?? [];
+      // Si esta creación viene desde un tiro, vincular cada ruta nueva al dispatch.
+      if (dispatch && created.length > 0) {
+        await Promise.all(
+          created.map((rid) => assignRouteToDispatchAction(dispatch.id, rid)),
+        );
+      }
       const totalSelected = selectedStores.size;
       const unassignedCount = res.unassignedStoreIds?.length ?? 0;
       const unassignedRatio = totalSelected > 0 ? unassignedCount / totalSelected : 0;
@@ -126,7 +137,10 @@ export function NewRouteForm({ zones, stores, vehicles, drivers }: Props) {
         toast.success('Ruta optimizada', `${created.length} ruta(s) generadas.`);
       }
 
-      if (created.length === 1 && created[0]) {
+      // Si vino de un tiro, regresamos al detalle del tiro (allí están listadas las rutas nuevas).
+      if (dispatch) {
+        router.push(`/dispatches/${dispatch.id}`);
+      } else if (created.length === 1 && created[0]) {
         router.push(`/routes/${created[0]}`);
       } else {
         router.push('/routes');

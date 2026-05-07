@@ -6,8 +6,7 @@ import { PhotoInput } from '../photo-input';
 import type { StepProps } from '../stop-detail-client';
 
 export function ReceiptUploadStep(props: StepProps) {
-  const { report, route, userId, pending, error, advanceTo, nextOf, onSaveEvidence, onPatch } =
-    props;
+  const { report, route, userId, pending, error, advanceTo, nextOf } = props;
   const [hasPhoto, setHasPhoto] = useState(Boolean(report.evidence['ticket_recibido']));
 
   return (
@@ -23,15 +22,14 @@ export function ReceiptUploadStep(props: StepProps) {
         bucket="ticket-images"
         routeId={route.id}
         stopId={report.stopId}
+        reportId={report.id}
         slot="ticket_recibido"
         userId={userId}
         existingUrl={report.evidence['ticket_recibido'] ?? null}
-        onUploaded={async (url) => {
-          await onSaveEvidence('ticket_recibido', url);
-          // También persistimos en columna dedicada para queries fáciles del encargado.
-          await onPatch({ ticketImageUrl: url });
-          setHasPhoto(true);
-        }}
+        // patchColumn=ticketImageUrl → outbox encadena patch_report a la columna
+        // dedicada cuando el upload termina (para queries del encargado).
+        patchColumn="ticketImageUrl"
+        onQueued={() => setHasPhoto(true)}
       />
     </StepShell>
   );

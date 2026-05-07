@@ -9,6 +9,7 @@ export * from './vehicle';
 export * from './depot';
 export * from './driver';
 export * from './route';
+export * from './dispatch';
 export * from './stop';
 export * from './report';
 export * from './message';

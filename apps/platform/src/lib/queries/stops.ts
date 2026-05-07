@@ -162,6 +162,115 @@ export async function bulkReorderStops(
 }
 
 /**
+ * Mueve una parada de una ruta a otra. ADR-025.
+ *
+ * Reglas:
+ *   - Ambas rutas deben estar en estado editable (DRAFT/OPTIMIZED/APPROVED).
+ *   - El stop debe estar en status `pending` (no `arrived` o más).
+ *   - Append al final de la ruta destino (sequence = max+1).
+ *   - Re-numera la origen para no dejar huecos.
+ *
+ * NO recalcula `planned_arrival_at` — el dispatcher debe re-optimizar el tiro
+ * después si quiere ETAs frescos.
+ */
+export async function moveStopToAnotherRoute(
+  stopId: string,
+  targetRouteId: string,
+): Promise<void> {
+  const supabase = await createServerClient();
+
+  // 1. Lee el stop, su ruta origen y la ruta destino.
+  const { data: stop, error: stopErr } = await supabase
+    .from('stops')
+    .select('id, route_id, status')
+    .eq('id', stopId)
+    .maybeSingle();
+  if (stopErr || !stop) throw new Error('Parada no encontrada.');
+  if (stop.status !== 'pending') {
+    throw new Error('Solo se pueden mover paradas en estado pending.');
+  }
+  const sourceRouteId = stop.route_id as string;
+  if (sourceRouteId === targetRouteId) {
+    return; // no-op
+  }
+
+  const { data: routes, error: routesErr } = await supabase
+    .from('routes')
+    .select('id, status')
+    .in('id', [sourceRouteId, targetRouteId]);
+  if (routesErr || !routes || routes.length !== 2) {
+    throw new Error('Una de las rutas no existe.');
+  }
+  const editable = new Set(['DRAFT', 'OPTIMIZED', 'APPROVED']);
+  for (const r of routes) {
+    if (!editable.has(r.status as string)) {
+      throw new Error(
+        `La ruta ${r.id} está en estado ${r.status}; no se permite mover paradas.`,
+      );
+    }
+  }
+
+  // 2. Calcula el siguiente sequence en la ruta destino (max + 1).
+  const { data: targetStops } = await supabase
+    .from('stops')
+    .select('sequence')
+    .eq('route_id', targetRouteId)
+    .order('sequence', { ascending: false })
+    .limit(1);
+  const nextSeq = ((targetStops?.[0]?.sequence as number | undefined) ?? 0) + 1;
+
+  // 3. Mueve el stop. UNIQUE(route_id, sequence) → primero offset arriba,
+  // luego asignamos al destino.
+  // 3a. Tirar el sequence a un valor temporal alto en el origen para liberar.
+  const { error: bumpErr } = await supabase
+    .from('stops')
+    .update({ sequence: 99999 })
+    .eq('id', stopId);
+  if (bumpErr) throw new Error(`[stops.move.bump] ${bumpErr.message}`);
+
+  // 3b. Cambiar route_id + sequence final.
+  const { error: moveErr } = await supabase
+    .from('stops')
+    .update({ route_id: targetRouteId, sequence: nextSeq })
+    .eq('id', stopId);
+  if (moveErr) throw new Error(`[stops.move.commit] ${moveErr.message}`);
+
+  // 4. Re-numera la ruta origen para cerrar el hueco que dejamos.
+  const { data: remaining } = await supabase
+    .from('stops')
+    .select('id, sequence')
+    .eq('route_id', sourceRouteId)
+    .order('sequence', { ascending: true });
+  if (remaining) {
+    // Solo re-numerar si hay huecos. Detectar si sequences = 1..N consecutivos.
+    let needsRenumber = false;
+    for (let i = 0; i < remaining.length; i++) {
+      if ((remaining[i]?.sequence as number) !== i + 1) {
+        needsRenumber = true;
+        break;
+      }
+    }
+    if (needsRenumber) {
+      // Mismo patrón que bulkReorderStops — offset y reasignar.
+      for (const row of remaining) {
+        await supabase
+          .from('stops')
+          .update({ sequence: (row.sequence as number) + 20000 })
+          .eq('id', row.id);
+      }
+      for (let i = 0; i < remaining.length; i++) {
+        const r = remaining[i];
+        if (!r) continue;
+        await supabase
+          .from('stops')
+          .update({ sequence: i + 1 })
+          .eq('id', r.id);
+      }
+    }
+  }
+}
+
+/**
  * Marca una parada como skipped (omitida sin visitar).
  * Solo válido si la parada está pending.
  */

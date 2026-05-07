@@ -17,7 +17,7 @@
 // Si no hay report (pre-arrival), <ArrivalTypeSelector> pide al chofer escoger tipo
 // + valida cercanía GPS antes de crear el report.
 
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card } from '@verdfrut/ui';
 import type {
@@ -28,6 +28,7 @@ import type {
   Route,
   Stop,
   Store,
+  ResolutionType,
 } from '@verdfrut/types';
 import {
   nextEntregaStep,
@@ -35,14 +36,15 @@ import {
   nextBasculaStep,
   type FlowContext,
 } from '@verdfrut/flow-engine';
-import {
-  advanceStep,
-  setReportEvidence,
-  patchReport,
-  submitReport,
-} from '@/app/route/stop/[id]/actions';
+// patchReport sigue importándose para tipado del payload — nunca se llama directo.
+import type { patchReport } from '@/app/route/stop/[id]/actions';
+// Mutaciones del flow ahora pasan por el outbox (ADR-019). El cliente no espera
+// confirmación del server: encola, actualiza UI optimista, sigue.
+import { enqueue } from '@/lib/outbox';
+import { useOutboxSnapshot } from '@/lib/outbox/use-outbox-snapshot';
 import { StopHeader } from './stop-header';
 import { ArrivalTypeSelector } from './arrival-type-selector';
+import { OutboxBadge } from '../outbox-badge';
 // Steps entrega
 import { ArrivalExhibitStep } from './steps/arrival-exhibit';
 import { IncidentCheckStep } from './steps/incident-check';
@@ -50,7 +52,7 @@ import { IncidentCartStep } from './steps/incident-cart';
 import { ProductArrangedStep } from './steps/product-arranged';
 import { WasteCheckStep } from './steps/waste-check';
 import { WasteTicketStep } from './steps/waste-ticket';
-import { ReviewPlaceholderStep } from './steps/review-placeholder';
+import { TicketReviewStep } from './steps/ticket-review';
 import { ReceiptCheckStep } from './steps/receipt-check';
 import { ReceiptUploadStep } from './steps/receipt-upload';
 import { NoReceiptReasonStep } from './steps/no-receipt-reason';
@@ -78,6 +80,29 @@ export function StopDetailClient({ stop, store, route, report, userId }: Props) 
   const [error, setError] = useState<string | null>(null);
   // Contexto del flujo: hasIncidents, hasMerma, etc.
   const [ctx, setCtx] = useState<FlowContext>({});
+
+  // UI optimista: el chofer avanza visualmente sin esperar al server (ADR-019).
+  // Si la red está caída, el outbox sube cuando vuelva. Mientras tanto, el chofer
+  // no se queda atorado.
+  //
+  //   optimisticStep:  step que el cliente eligió y aún no fue confirmado por el server.
+  //   optimisticType:  type cambiado por convert_to_entrega antes de que server confirme.
+  //
+  // Cuando el outbox queda en 0 pendientes y estamos online, hacemos router.refresh()
+  // para volver al server source of truth.
+  const [optimisticStep, setOptimisticStep] = useState<string | null>(null);
+  const [optimisticType, setOptimisticType] = useState<DeliveryReport['type'] | null>(null);
+  const outbox = useOutboxSnapshot();
+
+  // Sincronizar con server cuando se vacía la cola: ya hay confianza de que
+  // los advance/patch llegaron. Limpiar optimistic state también.
+  useEffect(() => {
+    if (outbox.pendingTotal === 0 && (optimisticStep || optimisticType)) {
+      setOptimisticStep(null);
+      setOptimisticType(null);
+      router.refresh();
+    }
+  }, [outbox.pendingTotal, optimisticStep, optimisticType, router]);
 
   // Pre-arrival — selector de tipo de visita con validación GPS.
   if (!report) {
@@ -107,24 +132,26 @@ export function StopDetailClient({ stop, store, route, report, userId }: Props) 
     );
   }
 
-  // Helper genérico de avance.
+  const effectiveStep = optimisticStep ?? report.currentStep;
+  const effectiveType = optimisticType ?? report.type;
+
+  // Avance: encola en outbox y mueve la UI inmediatamente.
+  // Si está offline, el badge mostrará el pending; si online, el worker procesa
+  // en milisegundos.
   function advance(next: string) {
     setError(null);
-    startTransition(async () => {
-      const res = await advanceStep(report!.id, next);
-      if (!res.ok) {
-        setError(res.error);
-        return;
-      }
-      router.refresh();
+    setOptimisticStep(next);
+    void enqueue({
+      type: 'advance_step',
+      payload: { reportId: report!.id, nextStep: next },
     });
   }
 
   function nextOf(localCtx: FlowContext): string | null {
     const merged = { ...ctx, ...localCtx };
     setCtx(merged);
-    const current = report!.currentStep;
-    switch (report!.type) {
+    const current = effectiveStep;
+    switch (effectiveType) {
       case 'entrega':
         return nextEntregaStep(current as EntregaStep, merged);
       case 'tienda_cerrada':
@@ -135,29 +162,46 @@ export function StopDetailClient({ stop, store, route, report, userId }: Props) 
   }
 
   const stepProps = {
-    report,
+    report: { ...report, currentStep: effectiveStep, type: effectiveType },
     route,
     store,
     userId,
     pending,
     error,
     setError,
-    onSaveEvidence: async (key: string, url: string) => {
-      const res = await setReportEvidence(report.id, key, url);
-      if (!res.ok) setError(res.error);
-    },
     onPatch: async (patch: Parameters<typeof patchReport>[1]) => {
-      const res = await patchReport(report.id, patch);
-      if (!res.ok) setError(res.error);
+      await enqueue({
+        type: 'patch_report',
+        payload: { reportId: report.id, patch },
+      });
     },
-    onSubmit: async (resolution: Parameters<typeof submitReport>[1]) => {
+    onSubmit: (resolution: ResolutionType) => {
+      // Encolar el submit y navegar — si falla, el badge avisa al chofer.
       startTransition(async () => {
-        const res = await submitReport(report.id, resolution);
-        if (!res.ok) {
-          setError(res.error);
-          return;
-        }
+        await enqueue({
+          type: 'submit_report',
+          payload: { reportId: report.id, resolution },
+        });
         router.replace('/route');
+      });
+    },
+    onSubmitNonEntrega: (resolution: ResolutionType) => {
+      startTransition(async () => {
+        await enqueue({
+          type: 'submit_non_entrega',
+          payload: { reportId: report.id, resolution },
+        });
+        router.replace('/route');
+      });
+    },
+    onConvertToEntrega: () => {
+      // El server (cuando procese): cambia type=entrega + current_step=arrival_exhibit
+      // y reusa la foto previa. Optimistamente, mismo cambio en cliente.
+      setOptimisticType('entrega');
+      setOptimisticStep('arrival_exhibit');
+      void enqueue({
+        type: 'convert_to_entrega',
+        payload: { reportId: report.id },
       });
     },
     advanceTo: (next: string | null) => {
@@ -170,7 +214,11 @@ export function StopDetailClient({ stop, store, route, report, userId }: Props) 
   return (
     <main className="min-h-dvh bg-[var(--vf-bg)] safe-top safe-bottom">
       <StopHeader stop={stop} store={store} />
-      {renderStep(report.type, report.currentStep, stepProps)}
+      {/* Banda discreta cuando hay pendientes — ADR-019. */}
+      <div className="flex justify-end px-4 pt-2">
+        <OutboxBadge />
+      </div>
+      {renderStep(effectiveType, effectiveStep, stepProps)}
     </main>
   );
 }
@@ -183,9 +231,10 @@ type StepProps = {
   pending: boolean;
   error: string | null;
   setError: (e: string | null) => void;
-  onSaveEvidence: (key: string, url: string) => Promise<void>;
   onPatch: (patch: Parameters<typeof patchReport>[1]) => Promise<void>;
-  onSubmit: (resolution: Parameters<typeof submitReport>[1]) => void;
+  onSubmit: (resolution: ResolutionType) => void;
+  onSubmitNonEntrega: (resolution: ResolutionType) => void;
+  onConvertToEntrega: () => void;
   advanceTo: (next: string | null) => void;
   nextOf: (ctx: FlowContext) => string | null;
 };
@@ -218,13 +267,13 @@ function renderStep(
     case 'waste_ticket':
       return <WasteTicketStep {...props} />;
     case 'waste_ticket_review':
-      return <ReviewPlaceholderStep {...props} kind="waste" />;
+      return <TicketReviewStep {...props} kind="waste" />;
     case 'receipt_check':
       return <ReceiptCheckStep {...props} />;
     case 'receipt_upload':
       return <ReceiptUploadStep {...props} />;
     case 'receipt_review':
-      return <ReviewPlaceholderStep {...props} kind="receipt" />;
+      return <TicketReviewStep {...props} kind="receipt" />;
     case 'no_receipt_reason':
       return <NoReceiptReasonStep {...props} />;
     case 'other_incident_check':

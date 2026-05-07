@@ -11,7 +11,7 @@ import { PhotoInput } from '../photo-input';
 import type { StepProps } from '../stop-detail-client';
 
 export function FacadeStep(props: StepProps) {
-  const { report, route, userId, pending, error, advanceTo, nextOf, onSaveEvidence } = props;
+  const { report, route, userId, pending, error, advanceTo, nextOf } = props;
   const [hasPhoto, setHasPhoto] = useState(Boolean(report.evidence['facade']));
 
   return (
@@ -28,14 +28,12 @@ export function FacadeStep(props: StepProps) {
         bucket="evidence"
         routeId={route.id}
         stopId={report.stopId}
+        reportId={report.id}
         slot="facade"
         userId={userId}
         existingUrl={report.evidence['facade'] ?? null}
         label="Tomar foto de fachada"
-        onUploaded={async (url) => {
-          await onSaveEvidence('facade', url);
-          setHasPhoto(true);
-        }}
+        onQueued={() => setHasPhoto(true)}
       />
     </StepShell>
   );

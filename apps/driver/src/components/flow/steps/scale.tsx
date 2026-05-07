@@ -10,7 +10,7 @@ import { PhotoInput } from '../photo-input';
 import type { StepProps } from '../stop-detail-client';
 
 export function ScaleStep(props: StepProps) {
-  const { report, route, userId, pending, error, advanceTo, nextOf, onSaveEvidence } = props;
+  const { report, route, userId, pending, error, advanceTo, nextOf } = props;
   const [hasPhoto, setHasPhoto] = useState(Boolean(report.evidence['scale']));
 
   return (
@@ -27,14 +27,12 @@ export function ScaleStep(props: StepProps) {
         bucket="evidence"
         routeId={route.id}
         stopId={report.stopId}
+        reportId={report.id}
         slot="scale"
         userId={userId}
         existingUrl={report.evidence['scale'] ?? null}
         label="Tomar foto de báscula"
-        onUploaded={async (url) => {
-          await onSaveEvidence('scale', url);
-          setHasPhoto(true);
-        }}
+        onQueued={() => setHasPhoto(true)}
       />
     </StepShell>
   );

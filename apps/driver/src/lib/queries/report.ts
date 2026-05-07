@@ -4,6 +4,7 @@
 import 'server-only';
 import { createServerClient } from '@verdfrut/supabase/server';
 import type {
+  ChatStatus,
   DeliveryReport,
   IncidentDetail,
   ReportStatus,
@@ -48,6 +49,8 @@ export function mapDeliveryReport(row: Record<string, unknown>): DeliveryReport 
     submittedAt: get<string | null>('submitted_at'),
     timeoutAt: get<string | null>('timeout_at'),
     resolvedAt: get<string | null>('resolved_at'),
+    chatOpenedAt: get<string | null>('chat_opened_at'),
+    chatStatus: get<ChatStatus | null>('chat_status'),
     createdAt: get<string>('created_at'),
   };
 }

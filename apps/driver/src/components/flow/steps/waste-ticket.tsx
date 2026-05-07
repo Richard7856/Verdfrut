@@ -6,7 +6,7 @@ import { PhotoInput } from '../photo-input';
 import type { StepProps } from '../stop-detail-client';
 
 export function WasteTicketStep(props: StepProps) {
-  const { report, route, userId, pending, error, advanceTo, nextOf, onSaveEvidence } = props;
+  const { report, route, userId, pending, error, advanceTo, nextOf } = props;
   const [hasPhoto, setHasPhoto] = useState(Boolean(report.evidence['ticket_merma']));
 
   return (
@@ -23,13 +23,11 @@ export function WasteTicketStep(props: StepProps) {
         bucket="ticket-images"
         routeId={route.id}
         stopId={report.stopId}
+        reportId={report.id}
         slot="ticket_merma"
         userId={userId}
         existingUrl={report.evidence['ticket_merma'] ?? null}
-        onUploaded={async (url) => {
-          await onSaveEvidence('ticket_merma', url);
-          setHasPhoto(true);
-        }}
+        onQueued={() => setHasPhoto(true)}
       />
     </StepShell>
   );

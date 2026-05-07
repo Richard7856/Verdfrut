@@ -1,5 +1,9 @@
 @import '@verdfrut/ui/tokens.css';
 @import 'tailwindcss';
+/* Tailwind v4 detecta clases solo en el paquete actual por default. Sin esto,
+   las clases arbitrarias usadas en @verdfrut/ui (ej. bg-[var(--color-primary-600)])
+   no generan CSS y los botones primary quedan transparentes. */
+@source "../../../../packages/ui/src/**/*.{ts,tsx}";
 
 /* Driver app está pensada para móvil — defaults agresivos. */
 *, *::before, *::after { box-sizing: border-box; }

@@ -28,13 +28,14 @@ interface RouteRow {
   created_by: string;
   created_at: string;
   updated_at: string;
+  dispatch_id: string | null;
 }
 
 const ROUTE_COLS = `
   id, name, date, vehicle_id, driver_id, zone_id, status, version,
   total_distance_meters, total_duration_seconds, estimated_start_at, estimated_end_at,
   actual_start_at, actual_end_at, published_at, published_by, approved_at, approved_by,
-  created_by, created_at, updated_at
+  created_by, created_at, updated_at, dispatch_id
 `;
 
 function toRoute(row: RouteRow): Route {
@@ -60,6 +61,7 @@ function toRoute(row: RouteRow): Route {
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    dispatchId: row.dispatch_id,
   };
 }
 
@@ -144,6 +146,8 @@ interface CreateRouteInput {
   driverId?: string | null;
   zoneId: string;
   createdBy: string;
+  /** Opcional — agrupa esta ruta dentro de un tiro. ADR-024. */
+  dispatchId?: string | null;
 }
 
 export async function createDraftRoute(input: CreateRouteInput): Promise<Route> {
@@ -158,6 +162,7 @@ export async function createDraftRoute(input: CreateRouteInput): Promise<Route> 
       zone_id: input.zoneId,
       status: 'DRAFT',
       created_by: input.createdBy,
+      dispatch_id: input.dispatchId ?? null,
     })
     .select(ROUTE_COLS)
     .single();

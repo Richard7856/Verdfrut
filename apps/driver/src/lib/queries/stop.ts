@@ -69,7 +69,7 @@ export async function getStopContext(stopId: string): Promise<StopContext | null
         `id, name, date, vehicle_id, driver_id, zone_id, status, version,
          total_distance_meters, total_duration_seconds, estimated_start_at, estimated_end_at,
          actual_start_at, actual_end_at, published_at, published_by, approved_at, approved_by,
-         created_by, created_at, updated_at`,
+         created_by, created_at, updated_at, dispatch_id`,
       )
       .eq('id', stopRow.route_id)
       .maybeSingle(),
@@ -139,6 +139,7 @@ export async function getStopContext(stopId: string): Promise<StopContext | null
       createdBy: routeRes.data.created_by,
       createdAt: routeRes.data.created_at,
       updatedAt: routeRes.data.updated_at,
+      dispatchId: routeRes.data.dispatch_id ?? null,
     },
     report: reportRes.data ? mapDeliveryReport(reportRes.data) : null,
     driverId: driverRow.id,

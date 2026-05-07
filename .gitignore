@@ -72,3 +72,6 @@ tenants.local.json
 # Para CI/automation, puede committearse si se valida que apunta al proyecto correcto.
 .mcp.json
 .claude/
+
+# Codex CLI (local tooling cache)
+.codex/

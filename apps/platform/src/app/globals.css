@@ -30,3 +30,14 @@ body {
 
 /* Tabular nums por default en código mono */
 code, kbd, pre, samp { font-family: var(--vf-font-mono); }
+
+/* Páginas con `data-fullbleed` (ej. /map) escapan el padding/max-width que
+   el shell aplica por default al área de contenido. */
+.vf-main:has([data-fullbleed]) {
+  overflow: hidden;
+}
+.vf-main-inner:has(> [data-fullbleed]),
+.vf-main-inner:has([data-fullbleed]) {
+  max-width: none;
+  padding: 0;
+}

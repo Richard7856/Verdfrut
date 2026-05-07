@@ -6,16 +6,15 @@
 //     reusar la foto previa (facade/scale) como `arrival_exhibit`.
 //   - No, sigue sin atender → cerrar como `sin_entrega`. La parada queda skipped.
 
-import { useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import { Button } from '@verdfrut/ui';
-import { convertToEntregaAction, submitNonEntregaAction } from '@/app/route/stop/[id]/actions';
 import type { StepProps } from '../stop-detail-client';
 
+// Las acciones de "sí abrieron" y "no, cerramos" ahora pasan por el outbox
+// (ADR-019). Encolamos y la UI optimista se actualiza desde stop-detail-client.
+
 export function TiendaAbiertaCheckStep(props: StepProps) {
-  const { report, setError } = props;
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const { report, setError, onConvertToEntrega, onSubmitNonEntrega } = props;
   const [localPending, setLocalPending] = useState<'yes' | 'no' | null>(null);
 
   const isClosedShop = report.type === 'tienda_cerrada';
@@ -25,29 +24,13 @@ export function TiendaAbiertaCheckStep(props: StepProps) {
   function handleYes() {
     setError(null);
     setLocalPending('yes');
-    startTransition(async () => {
-      const res = await convertToEntregaAction(report.id);
-      if (!res.ok) {
-        setError(res.error);
-        setLocalPending(null);
-        return;
-      }
-      router.refresh();
-    });
+    onConvertToEntrega();
   }
 
   function handleNo() {
     setError(null);
     setLocalPending('no');
-    startTransition(async () => {
-      const res = await submitNonEntregaAction(report.id, 'sin_entrega');
-      if (!res.ok) {
-        setError(res.error);
-        setLocalPending(null);
-        return;
-      }
-      router.replace('/route');
-    });
+    onSubmitNonEntrega('sin_entrega');
   }
 
   return (
@@ -75,8 +58,8 @@ export function TiendaAbiertaCheckStep(props: StepProps) {
           variant="primary"
           size="lg"
           onClick={handleYes}
-          isLoading={localPending === 'yes' && pending}
-          disabled={pending}
+          isLoading={localPending === 'yes'}
+          disabled={localPending !== null}
           className="w-full"
         >
           {yesLabel}
@@ -86,8 +69,8 @@ export function TiendaAbiertaCheckStep(props: StepProps) {
           variant="ghost"
           size="lg"
           onClick={handleNo}
-          isLoading={localPending === 'no' && pending}
-          disabled={pending}
+          isLoading={localPending === 'no'}
+          disabled={localPending !== null}
           className="w-full"
         >
           {noLabel}

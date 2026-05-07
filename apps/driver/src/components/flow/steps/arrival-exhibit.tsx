@@ -9,8 +9,9 @@ import { PhotoInput } from '../photo-input';
 import type { StepProps } from '../stop-detail-client';
 
 export function ArrivalExhibitStep(props: StepProps) {
-  const { report, route, store, userId, pending, error, advanceTo, nextOf, onSaveEvidence } =
-    props;
+  const { report, route, store, userId, pending, error, advanceTo, nextOf } = props;
+  // savedKeys mantiene qué slots fueron tomados en esta sesión, sin importar si
+  // el upload terminó. La cola garantiza upload eventual (ADR-019).
   const [savedKeys, setSavedKeys] = useState<Set<string>>(
     () => new Set(Object.keys(report.evidence)),
   );
@@ -31,27 +32,23 @@ export function ArrivalExhibitStep(props: StepProps) {
           bucket="evidence"
           routeId={route.id}
           stopId={report.stopId}
+          reportId={report.id}
           slot="arrival_exhibit"
           userId={userId}
           existingUrl={report.evidence['arrival_exhibit'] ?? null}
           label="Foto frontal"
-          onUploaded={async (url) => {
-            await onSaveEvidence('arrival_exhibit', url);
-            setSavedKeys((s) => new Set(s).add('arrival_exhibit'));
-          }}
+          onQueued={() => setSavedKeys((s) => new Set(s).add('arrival_exhibit'))}
         />
         <PhotoInput
           bucket="evidence"
           routeId={route.id}
           stopId={report.stopId}
+          reportId={report.id}
           slot="arrival_exhibit_2"
           userId={userId}
           existingUrl={report.evidence['arrival_exhibit_2'] ?? null}
           label="Foto general"
-          onUploaded={async (url) => {
-            await onSaveEvidence('arrival_exhibit_2', url);
-            setSavedKeys((s) => new Set(s).add('arrival_exhibit_2'));
-          }}
+          onQueued={() => setSavedKeys((s) => new Set(s).add('arrival_exhibit_2'))}
         />
       </div>
       <p className="text-xs text-[var(--color-text-muted)]">

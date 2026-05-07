@@ -1,26 +1,41 @@
 'use client';
 
-// PhotoInput — captura una foto desde la cámara del teléfono y la sube a Supabase.
-// Cuando termina, llama onUploaded(url, path) y guarda preview local.
+// PhotoInput — captura una foto desde la cámara y la encola al outbox para que
+// suba a Supabase Storage cuando haya red (ADR-019).
 //
-// Diseño: en móvil abre cámara directa (input capture=environment). En desktop
-// abre selector de archivo (sirve para QA con drag & drop).
+// Cambio respecto al diseño previo (V1): ya NO hace upload bloqueante. La foto
+// se comprime, se persiste el Blob en IndexedDB y `onQueued` se llama
+// inmediatamente para que el step pueda habilitar "Continuar" sin esperar red.
+//
+// El handler del outbox `upload_photo` se encarga de:
+//   1. subir el Blob a Storage,
+//   2. encolar set_evidence con la URL final,
+//   3. (si patchColumn está set) encolar patch_report a la columna dedicada.
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import { Button, Spinner } from '@verdfrut/ui';
-import { uploadEvidencePhoto, type EvidenceBucket } from '@/lib/storage';
+import { compressImage, type EvidenceBucket } from '@/lib/storage';
+import { enqueue } from '@/lib/outbox';
+import type { UploadPhotoPayload } from '@/lib/outbox';
 
 interface Props {
   bucket: EvidenceBucket;
   routeId: string;
   stopId: string;
+  reportId: string;
   /** Identificador de slot — se persiste como key en evidence JSON. */
   slot: string;
   userId: string;
   /** URL ya subida — si existe, muestra preview en vez de input. */
   existingUrl?: string | null;
-  onUploaded: (url: string) => void | Promise<void>;
+  /**
+   * Llamado cuando la foto se encoló (no necesariamente subida aún).
+   * El step usa esto para habilitar "Continuar" porque la cola garantiza upload eventual.
+   */
+  onQueued?: (localUrl: string) => void | Promise<void>;
+  /** Si la foto va a una columna dedicada del report, lo manejamos aquí. */
+  patchColumn?: UploadPhotoPayload['patchColumn'];
   /** Texto del botón cuando no hay foto. */
   label?: string;
 }
@@ -29,41 +44,81 @@ export function PhotoInput({
   bucket,
   routeId,
   stopId,
+  reportId,
   slot,
   userId,
   existingUrl,
-  onUploaded,
+  onQueued,
+  patchColumn,
   label = 'Tomar foto',
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(existingUrl ?? null);
+  // Track del object URL para limpiarlo al desmontar y evitar leaks.
+  const objectUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+    };
+  }, []);
 
   async function handleFile(file: File) {
     setError(null);
     setPending(true);
-    // Preview local instantáneo mientras sube.
-    const localUrl = URL.createObjectURL(file);
-    setPreviewUrl(localUrl);
-
     try {
-      const result = await uploadEvidencePhoto({
-        bucket,
-        routeId,
-        stopId,
-        key: slot,
-        file,
-        userId,
+      const compressed = await compressImage(file);
+      const localUrl = URL.createObjectURL(compressed);
+      // Limpiar preview anterior si la había.
+      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = localUrl;
+      setPreviewUrl(localUrl);
+
+      // Si es REEMPLAZO de foto de ticket (existingUrl ya estaba), invalidar
+      // la extracción OCR vieja antes de subir la nueva. Bug E + #45 / ADR-023.
+      // El siguiente entry al review step volverá a llamar Anthropic.
+      const isReplacement = Boolean(existingUrl);
+      if (isReplacement) {
+        if (slot === 'ticket_recibido') {
+          await enqueue({
+            type: 'patch_report',
+            payload: {
+              reportId,
+              patch: { ticketData: null, ticketExtractionConfirmed: false },
+            },
+          });
+        } else if (slot === 'ticket_merma') {
+          await enqueue({
+            type: 'patch_report',
+            payload: {
+              reportId,
+              patch: {
+                returnTicketData: null,
+                returnTicketExtractionConfirmed: false,
+              },
+            },
+          });
+        }
+      }
+
+      await enqueue({
+        type: 'upload_photo',
+        payload: {
+          bucket,
+          routeId,
+          stopId,
+          slot,
+          userId,
+          blob: compressed,
+          reportId,
+          patchColumn,
+        },
       });
-      // Reemplazar preview local por la URL final.
-      URL.revokeObjectURL(localUrl);
-      setPreviewUrl(result.url);
-      await onUploaded(result.url);
+      await onQueued?.(localUrl);
     } catch (err) {
-      URL.revokeObjectURL(localUrl);
-      setPreviewUrl(existingUrl ?? null);
-      setError(err instanceof Error ? err.message : 'Error al subir');
+      setError(err instanceof Error ? err.message : 'Error al procesar foto');
     } finally {
       setPending(false);
     }
@@ -80,7 +135,6 @@ export function PhotoInput({
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) handleFile(f);
-          // Reset para permitir reintento con la misma foto.
           e.target.value = '';
         }}
       />
@@ -95,11 +149,13 @@ export function PhotoInput({
           />
           {pending && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-white">
-              <Spinner /> <span className="ml-2 text-sm">Subiendo…</span>
+              <Spinner /> <span className="ml-2 text-sm">Procesando…</span>
             </div>
           )}
           <div className="flex items-center justify-between p-2">
-            <span className="text-xs text-[var(--color-text-muted)]">Foto cargada</span>
+            <span className="text-xs text-[var(--color-text-muted)]">
+              {existingUrl === previewUrl ? 'Foto cargada' : 'Foto en cola'}
+            </span>
             <Button
               type="button"
               variant="ghost"
@@ -121,7 +177,7 @@ export function PhotoInput({
           {pending ? (
             <>
               <Spinner />
-              <span className="text-sm">Subiendo…</span>
+              <span className="text-sm">Procesando…</span>
             </>
           ) : (
             <>

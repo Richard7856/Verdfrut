@@ -8,10 +8,9 @@ import type { StepProps } from '../stop-detail-client';
 const MIN_LEN = 10;
 
 export function OtherIncidentStep(props: StepProps) {
-  const { report, route, userId, pending, error, advanceTo, nextOf, onPatch, onSaveEvidence } =
-    props;
+  const { report, route, userId, pending, error, advanceTo, nextOf, onPatch } = props;
   const [desc, setDesc] = useState(report.otherIncidentDescription ?? '');
-  const [photoUrl, setPhotoUrl] = useState<string | null>(report.otherIncidentPhotoUrl);
+  const [hasPhoto, setHasPhoto] = useState(Boolean(report.otherIncidentPhotoUrl));
   const ready = desc.trim().length >= MIN_LEN;
 
   return (
@@ -20,9 +19,9 @@ export function OtherIncidentStep(props: StepProps) {
       description="Cualquier detalle adicional que el encargado deba saber. Foto opcional."
       onContinue={async () => {
         if (!ready) return;
+        // Solo el texto va por patch; la foto la persiste el outbox vía patchColumn.
         await onPatch({
           otherIncidentDescription: desc.trim(),
-          otherIncidentPhotoUrl: photoUrl,
         });
         advanceTo(nextOf({}));
       }}
@@ -47,15 +46,17 @@ export function OtherIncidentStep(props: StepProps) {
         bucket="evidence"
         routeId={route.id}
         stopId={report.stopId}
+        reportId={report.id}
         slot="other_incident_photo"
         userId={userId}
-        existingUrl={photoUrl}
+        existingUrl={report.otherIncidentPhotoUrl}
         label="Tomar foto"
-        onUploaded={async (url) => {
-          await onSaveEvidence('other_incident_photo', url);
-          setPhotoUrl(url);
-        }}
+        patchColumn="otherIncidentPhotoUrl"
+        onQueued={() => setHasPhoto(true)}
       />
+      {hasPhoto && (
+        <p className="text-xs text-[var(--color-text-muted)]">Foto agregada.</p>
+      )}
     </StepShell>
   );
 }

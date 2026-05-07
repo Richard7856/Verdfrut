@@ -35,6 +35,8 @@ export interface Route {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  /** Tiro al que pertenece (nullable para rutas huérfanas). ADR-024. */
+  dispatchId: string | null;
 }
 
 export interface RouteVersion {

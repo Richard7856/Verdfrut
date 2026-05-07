@@ -3,6 +3,7 @@
 
 import type { UserProfile } from '@verdfrut/types';
 import { LogoutButton } from './logout-button';
+import { ThemeToggle } from './theme-toggle';
 
 const ROLE_LABELS: Record<UserProfile['role'], string> = {
   admin: 'Administrador',
@@ -29,6 +30,7 @@ export function Topbar({ profile }: { profile: UserProfile }) {
 
       {/* Acciones a la derecha */}
       <div className="ml-auto flex items-center gap-2.5">
+        <ThemeToggle />
         <UserChip profile={profile} />
         <LogoutButton />
       </div>

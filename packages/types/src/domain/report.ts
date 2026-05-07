@@ -1,6 +1,8 @@
 // Reporte de una parada. Equivalente al "reporte" del prototipo Verdefrut Driver
 // pero ahora ligado a una stop dentro de una route.
 
+import type { ChatStatus } from './message';
+
 export type ReportType =
   | 'entrega'           // Flujo largo de entrega exitosa
   | 'tienda_cerrada'    // Tienda cerrada al llegar
@@ -85,5 +87,10 @@ export interface DeliveryReport {
   submittedAt: string | null;
   timeoutAt: string | null;
   resolvedAt: string | null;
+  // Sprint 11 / ADR-021: estado del chat asociado.
+  // chatOpenedAt se setea por trigger DB al primer mensaje. Mientras es null,
+  // el chat no ha sido abierto.
+  chatOpenedAt: string | null;
+  chatStatus: ChatStatus | null;
   createdAt: string;
 }

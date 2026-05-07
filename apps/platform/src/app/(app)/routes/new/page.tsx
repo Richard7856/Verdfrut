@@ -7,12 +7,21 @@ import { listZones } from '@/lib/queries/zones';
 import { listStores } from '@/lib/queries/stores';
 import { listVehicles } from '@/lib/queries/vehicles';
 import { listDrivers } from '@/lib/queries/drivers';
+import { getDispatch } from '@/lib/queries/dispatches';
 import { NewRouteForm } from './new-route-form';
 
 export const metadata = { title: 'Nueva ruta' };
 
-export default async function NewRoutePage() {
+interface Props {
+  searchParams: Promise<{ dispatchId?: string }>;
+}
+
+export default async function NewRoutePage({ searchParams }: Props) {
   await requireRole('admin', 'dispatcher');
+  const { dispatchId } = await searchParams;
+
+  // Si viene de un tiro, pre-fill date/zone con los del tiro.
+  const dispatch = dispatchId ? await getDispatch(dispatchId) : null;
 
   const [zones, stores, vehicles, drivers] = await Promise.all([
     listZones(),
@@ -27,13 +36,18 @@ export default async function NewRoutePage() {
     <>
       <PageHeader
         title="Nueva ruta"
-        description="Selecciona zona, fecha, camiones, tiendas y opcionalmente chofer. El optimizador asigna y ordena las paradas."
+        description={
+          dispatch
+            ? `Esta ruta se vinculará al tiro "${dispatch.name}".`
+            : 'Selecciona zona, fecha, camiones, tiendas y opcionalmente chofer. El optimizador asigna y ordena las paradas.'
+        }
       />
       <NewRouteForm
         zones={activeZones}
         stores={stores}
         vehicles={vehicles}
         drivers={drivers}
+        dispatch={dispatch}
       />
     </>
   );

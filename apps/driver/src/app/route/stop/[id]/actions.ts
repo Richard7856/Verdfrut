@@ -16,6 +16,7 @@ import type {
   IncidentDetail,
   ReportType,
   ResolutionType,
+  TicketData,
 } from '@verdfrut/types';
 
 /**
@@ -217,6 +218,11 @@ export async function patchReport(
     otherIncidentPhotoUrl?: string | null;
     incidentDetails?: IncidentDetail[];
     ticketImageUrl?: string | null;
+    // Sprint 12: persistencia de extracción OCR + edición manual.
+    ticketData?: TicketData | null;
+    ticketExtractionConfirmed?: boolean;
+    returnTicketData?: TicketData | null;
+    returnTicketExtractionConfirmed?: boolean;
   },
 ): Promise<Result> {
   const supabase = await createServerClient();
@@ -232,6 +238,14 @@ export async function patchReport(
   if (patch.incidentDetails !== undefined)
     update.incident_details = patch.incidentDetails as unknown as TableUpdate<'delivery_reports'>['incident_details'];
   if (patch.ticketImageUrl !== undefined) update.ticket_image_url = patch.ticketImageUrl;
+  if (patch.ticketData !== undefined)
+    update.ticket_data = patch.ticketData as unknown as TableUpdate<'delivery_reports'>['ticket_data'];
+  if (patch.ticketExtractionConfirmed !== undefined)
+    update.ticket_extraction_confirmed = patch.ticketExtractionConfirmed;
+  if (patch.returnTicketData !== undefined)
+    update.return_ticket_data = patch.returnTicketData as unknown as TableUpdate<'delivery_reports'>['return_ticket_data'];
+  if (patch.returnTicketExtractionConfirmed !== undefined)
+    update.return_ticket_extraction_confirmed = patch.returnTicketExtractionConfirmed;
 
   if (Object.keys(update).length === 0) return { ok: true, data: undefined };
 
