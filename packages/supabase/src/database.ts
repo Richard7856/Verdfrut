@@ -407,6 +407,7 @@ export type Database = {
         Row: {
           actual_end_at: string | null
           actual_start_at: string | null
+          actual_distance_meters: number | null
           approved_at: string | null
           approved_by: string | null
           created_at: string
@@ -431,6 +432,7 @@ export type Database = {
         Insert: {
           actual_end_at?: string | null
           actual_start_at?: string | null
+          actual_distance_meters?: number | null
           approved_at?: string | null
           approved_by?: string | null
           created_at?: string
@@ -455,6 +457,7 @@ export type Database = {
         Update: {
           actual_end_at?: string | null
           actual_start_at?: string | null
+          actual_distance_meters?: number | null
           approved_at?: string | null
           approved_by?: string | null
           created_at?: string
@@ -774,6 +777,14 @@ export type Database = {
       }
       is_admin_or_dispatcher: { Args: never; Returns: boolean }
       mark_timed_out_chats: { Args: never; Returns: number }
+      archive_old_breadcrumbs: {
+        Args: { retention_days?: number }
+        Returns: number
+      }
+      calc_route_actual_distance: {
+        Args: { target_route_id: string }
+        Returns: number
+      }
     }
     Enums: {
       message_sender: "driver" | "zone_manager" | "system"
