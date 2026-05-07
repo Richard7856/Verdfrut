@@ -2,13 +2,14 @@
 // Pasa por una máquina de estados estricta. Las modificaciones post-PUBLISHED crean nuevas versiones.
 
 export type RouteStatus =
-  | 'DRAFT'        // Dispatcher seleccionando paradas/camiones
-  | 'OPTIMIZED'    // Optimizer corrió, esperando aprobación humana
-  | 'APPROVED'     // Aprobada, lista para publicar
-  | 'PUBLISHED'    // Enviada al chofer (recibió push)
-  | 'IN_PROGRESS'  // Chofer empezó la primera parada
-  | 'COMPLETED'    // Todas las paradas reportadas
-  | 'CANCELLED';   // Cancelada por dispatcher
+  | 'DRAFT'         // Dispatcher seleccionando paradas/camiones
+  | 'OPTIMIZED'     // Optimizer corrió, esperando aprobación humana
+  | 'APPROVED'      // Aprobada, lista para publicar
+  | 'PUBLISHED'     // Enviada al chofer (recibió push)
+  | 'IN_PROGRESS'   // Chofer empezó la primera parada
+  | 'INTERRUPTED'   // Avería del camión / accidente. Paradas pendientes transferidas a otra ruta. (S18.7)
+  | 'COMPLETED'     // Todas las paradas reportadas
+  | 'CANCELLED';    // Cancelada por dispatcher
 
 export interface Route {
   id: string;

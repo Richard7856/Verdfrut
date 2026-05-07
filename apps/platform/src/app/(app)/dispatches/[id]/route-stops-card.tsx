@@ -18,6 +18,7 @@ const STATUS: Record<RouteStatus, { text: string; tone: 'neutral' | 'info' | 'su
   APPROVED: { text: 'Aprobada', tone: 'info' },
   PUBLISHED: { text: 'Publicada', tone: 'info' },
   IN_PROGRESS: { text: 'En curso', tone: 'success' },
+  INTERRUPTED: { text: 'Interrumpida', tone: 'danger' },
   COMPLETED: { text: 'Completada', tone: 'success' },
   CANCELLED: { text: 'Cancelada', tone: 'danger' },
 };

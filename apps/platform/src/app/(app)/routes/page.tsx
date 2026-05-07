@@ -18,6 +18,7 @@ const STATUS_LABELS: Record<RouteStatus, string> = {
   APPROVED: 'Aprobada',
   PUBLISHED: 'Publicada',
   IN_PROGRESS: 'En curso',
+  INTERRUPTED: 'Interrumpida',
   COMPLETED: 'Completada',
   CANCELLED: 'Cancelada',
 };
@@ -28,6 +29,7 @@ const STATUS_TONES: Record<RouteStatus, BadgeTone> = {
   APPROVED: 'primary',
   PUBLISHED: 'primary',
   IN_PROGRESS: 'warning',
+  INTERRUPTED: 'danger',
   COMPLETED: 'success',
   CANCELLED: 'danger',
 };

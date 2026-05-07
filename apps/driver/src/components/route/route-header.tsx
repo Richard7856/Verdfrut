@@ -20,6 +20,7 @@ const STATUS_LABEL: Record<Route['status'], { text: string; tone: BadgeTone }> =
   APPROVED: { text: 'Aprobada', tone: 'info' },
   PUBLISHED: { text: 'Lista para iniciar', tone: 'primary' },
   IN_PROGRESS: { text: 'En progreso', tone: 'success' },
+  INTERRUPTED: { text: 'Interrumpida', tone: 'danger' },
   COMPLETED: { text: 'Completada', tone: 'success' },
   CANCELLED: { text: 'Cancelada', tone: 'danger' },
 };

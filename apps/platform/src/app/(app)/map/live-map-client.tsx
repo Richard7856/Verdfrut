@@ -45,6 +45,7 @@ const STATUS_DOT: Record<RouteStatus, { color: string; tone: string }> = {
   APPROVED:    { color: '#94a3b8', tone: 'Inactivo' },
   PUBLISHED:   { color: '#22c55e', tone: 'Publicada' },
   IN_PROGRESS: { color: '#22c55e', tone: 'En ruta' },
+  INTERRUPTED: { color: '#ef4444', tone: 'Interrumpida' },
   COMPLETED:   { color: '#737373', tone: 'Completado' },
   CANCELLED:   { color: '#ef4444', tone: 'Crítico' },
 };

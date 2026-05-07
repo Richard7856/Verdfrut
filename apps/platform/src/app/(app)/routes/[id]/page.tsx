@@ -10,7 +10,7 @@ import { requireRole } from '@/lib/auth';
 import { getRoute } from '@/lib/queries/routes';
 import { listStopsForRoute } from '@/lib/queries/stops';
 import { getStoresByIds } from '@/lib/queries/stores';
-import { getVehiclesByIds } from '@/lib/queries/vehicles';
+import { getVehiclesByIds, listVehicles } from '@/lib/queries/vehicles';
 import { getDepot } from '@/lib/queries/depots';
 import { listDrivers, getDriversByIds } from '@/lib/queries/drivers';
 import { listUsers, getUserProfile } from '@/lib/queries/users';
@@ -18,6 +18,7 @@ import { listZones } from '@/lib/queries/zones';
 import { RouteActions } from './route-actions';
 import { SortableStops } from './sortable-stops';
 import { DriverAssignment } from './driver-assignment';
+import { TransferRouteButton } from './transfer-route-button';
 import { RouteMapLoader } from '@/components/map/route-map-loader';
 import { LiveRouteMapLoader } from '@/components/map/live-route-map-loader';
 import type { RouteMapStop, RouteMapDepot } from '@/components/map/route-map';
@@ -28,6 +29,7 @@ const STATUS_LABELS: Record<RouteStatus, string> = {
   APPROVED: 'Aprobada',
   PUBLISHED: 'Publicada',
   IN_PROGRESS: 'En curso',
+  INTERRUPTED: 'Interrumpida',
   COMPLETED: 'Completada',
   CANCELLED: 'Cancelada',
 };
@@ -38,6 +40,7 @@ const STATUS_TONES: Record<RouteStatus, BadgeTone> = {
   APPROVED: 'primary',
   PUBLISHED: 'primary',
   IN_PROGRESS: 'warning',
+  INTERRUPTED: 'danger',
   COMPLETED: 'success',
   CANCELLED: 'danger',
 };
@@ -135,6 +138,11 @@ export default async function RouteDetailPage({ params }: PageProps) {
     })
     .filter((x): x is { driver: typeof zoneDrivers[number]; profile: typeof zoneDriverProfiles[number] } => x !== null);
 
+  // Vehículos disponibles para transfer (excluye el actual).
+  // Filtrado client-side: vehículos activos cuyo depot esté en la zona.
+  const allVehicles = await listVehicles({ activeOnly: true });
+  const availableVehiclesForTransfer = allVehicles.filter((v) => v.id !== route.vehicleId);
+
   // Resolver chofer actual de la ruta (puede ser null si no se asignó al crear).
   let currentDriver: typeof availableDrivers[number] | null = null;
   if (route.driverId) {
@@ -161,6 +169,31 @@ export default async function RouteDetailPage({ params }: PageProps) {
         }
         action={<RouteActions route={route} />}
       />
+
+      {/* S18.7: Transfer paradas pendientes a otro chofer cuando hay avería del camión.
+          Solo aparece para PUBLISHED/IN_PROGRESS con stops pending. */}
+      {(route.status === 'PUBLISHED' || route.status === 'IN_PROGRESS') &&
+        stops.filter((s) => s.status === 'pending').length > 0 && (
+          <div className="mb-4 rounded-[var(--radius-lg)] border border-[var(--color-warning-border,#fbbf24)] bg-[var(--color-warning-bg,#fef3c7)] p-3">
+            <p className="mb-2 text-xs font-medium text-[var(--color-warning-fg,#92400e)]">
+              ¿El camión no puede continuar la ruta?
+            </p>
+            <TransferRouteButton
+              routeId={route.id}
+              routeStatus={route.status}
+              pendingStopsCount={stops.filter((s) => s.status === 'pending').length}
+              availableDrivers={availableDrivers.map((d) => ({
+                id: d.driver.id,
+                name: d.profile.fullName,
+              }))}
+              availableVehicles={availableVehiclesForTransfer.map((v) => ({
+                id: v.id,
+                label: `${v.plate}${v.alias ? ` · ${v.alias}` : ''}`,
+              }))}
+              hasDispatch={route.dispatchId !== null}
+            />
+          </div>
+        )}
 
       {/* Mapa de la ruta — se renderiza encima de paradas/métricas en mobile, columna full en desktop.
           Si la ruta está IN_PROGRESS usamos LiveRouteMap (suscribe al canal Realtime para el chofer);

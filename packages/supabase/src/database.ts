@@ -329,6 +329,36 @@ export type Database = {
         }
         Relationships: []
       }
+      route_transfers: {
+        Row: {
+          id: string
+          source_route_id: string
+          target_route_id: string
+          reason: string
+          transferred_stop_count: number
+          performed_by: string | null
+          performed_at: string
+        }
+        Insert: {
+          id?: string
+          source_route_id: string
+          target_route_id: string
+          reason: string
+          transferred_stop_count: number
+          performed_by?: string | null
+          performed_at?: string
+        }
+        Update: {
+          id?: string
+          source_route_id?: string
+          target_route_id?: string
+          reason?: string
+          transferred_stop_count?: number
+          performed_by?: string | null
+          performed_at?: string
+        }
+        Relationships: []
+      }
       route_gap_events: {
         Row: {
           id: string
@@ -803,6 +833,7 @@ export type Database = {
         | "APPROVED"
         | "PUBLISHED"
         | "IN_PROGRESS"
+        | "INTERRUPTED"
         | "COMPLETED"
         | "CANCELLED"
       stop_status: "pending" | "arrived" | "completed" | "skipped"
