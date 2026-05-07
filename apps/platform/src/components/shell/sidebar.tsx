@@ -23,8 +23,8 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/dashboard', label: 'Overview', roles: ['admin', 'dispatcher', 'zone_manager'], group: 'GENERAL' },
   { href: '/map', label: 'Mapa en vivo', roles: ['admin', 'dispatcher', 'zone_manager'], group: 'GENERAL' },
 
-  { href: '/dispatches', label: 'Tiros del día', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
-  { href: '/routes', label: 'Rutas (vista plana)', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
+  { href: '/routes', label: 'Rutas', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
+  { href: '/dispatches', label: 'Tiros (agrupar rutas)', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
   { href: '/settings/vehicles', label: 'Flotilla', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
   { href: '/settings/depots', label: 'CEDIS / Hubs', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
   { href: '/incidents', label: 'Incidencias', roles: ['admin', 'dispatcher', 'zone_manager'], group: 'OPERACIÓN' },

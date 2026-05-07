@@ -32,14 +32,22 @@ export default async function DispatchesPage() {
     <>
       <PageHeader
         title="Tiros"
-        description="Cada tiro agrupa las rutas que salen juntas en una operación. Agrega rutas a un tiro y publícalas en bloque."
+        description="Herramienta opcional para AGRUPAR rutas existentes que salen juntas (ej. mismo CEDIS, misma hora). Crea las rutas primero en Rutas; aquí las agrupas para publicarlas en bloque y monitorearlas como una sola operación."
         action={<CreateDispatchButton zones={zones} />}
       />
 
       {summaries.length === 0 ? (
         <EmptyState
-          title="Sin tiros"
-          description='Crea tu primer tiro (ej. "Tiro CDMX matutino") y dentro agrega las rutas. Las rutas existentes pueden vincularse a un tiro desde su detalle.'
+          title="Sin tiros aún"
+          description="Los tiros son opcionales. Lo normal: primero creas tus rutas en Rutas y, si quieres, las agrupas aquí. Para crear un tiro, primero asegúrate de tener rutas que vincular."
+          action={
+            <Link
+              href="/routes"
+              className="inline-flex h-10 items-center rounded-[var(--radius-md)] bg-[var(--vf-green-600,#15803d)] px-4 text-sm font-medium text-white hover:bg-[var(--vf-green-700,#14532d)]"
+            >
+              Ir a Rutas →
+            </Link>
+          }
         />
       ) : (
         <div className="flex flex-col gap-6">

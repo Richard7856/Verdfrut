@@ -140,7 +140,7 @@ export default async function RoutesPage({ searchParams }: PageProps) {
     <>
       <PageHeader
         title="Rutas"
-        description={`${total} ruta(s) ${filterStatus ? `en estado ${STATUS_LABELS[filterStatus].toLowerCase()}` : 'totales'}${total > PAGE_SIZE ? ` · página ${page + 1} de ${totalPages}` : ''}.`}
+        description={`Tu punto de partida para crear, optimizar y publicar rutas. ${total} ruta(s) ${filterStatus ? `en estado ${STATUS_LABELS[filterStatus].toLowerCase()}` : 'totales'}${total > PAGE_SIZE ? ` · página ${page + 1} de ${totalPages}` : ''}.`}
         action={
           <Link href="/routes/new">
             <Button variant="primary">Nueva ruta</Button>
