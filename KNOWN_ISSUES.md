@@ -186,13 +186,87 @@ Formato:
 
 ---
 
+## Riesgos / asumptions descubiertos en Sprint 18 (ADR-032)
+
+> Estos NO son bugs confirmados — son áreas de riesgo y assumptions a vigilar
+> conforme la app entre en uso real. Se ascienden a "issue" si se manifiestan.
+
+### #50 — AI mediator: clasificación errónea = mensaje real escalado como trivial
+**Severidad:** importante
+**Sprint:** S18.8
+**Síntoma:** Claude Haiku con few-shots puede equivocarse — un chofer escribe "todo está bien, ya casi" cuando en realidad acaba de tener un accidente leve. AI clasifica trivial → admin no recibe push → problema escala sin que nadie atienda.
+**Mitigaciones aplicadas:** sesgo a 'unknown' (escala), confidence guardado, audit completo en `chat_ai_decisions`.
+**Solución futura:** revisar `SELECT category, COUNT(*) FROM chat_ai_decisions GROUP BY category` quincenal. Si % unknown > 20% o reportan caso real mal clasificado → ajustar prompt/few-shots. Considerar threshold de confidence mínimo (e.g., trivial solo si confidence > 0.85).
+**Estado:** abierto
+
+### #51 — visibilitychange iOS Safari puede no dispararse → gap event eterno
+**Severidad:** importante
+**Sprint:** S18.4
+**Síntoma:** Si el chofer cierra abruptamente la PWA (kill app o crash), el listener `visibilitychange` puede no dispararse. Resultado: row en `route_gap_events` sin `ended_at`, queda activo indefinidamente. El admin ve al chofer en gris para siempre.
+**Mitigación parcial:** cleanup del effect cierra gap con `end_reason='route_completed'` si la ruta termina.
+**Solución propuesta:** cron horario que cierre gaps con `started_at < NOW() - INTERVAL '2 hours'` y `ended_at IS NULL` con `end_reason='timeout'`.
+**Estado:** abierto
+
+### #52 — route_transfer NO usa transacción Postgres → estado inconsistente posible
+**Severidad:** importante
+**Sprint:** S18.7
+**Síntoma:** Server action `transferRouteRemainderAction` hace 5 inserts/updates sin transacción. Si falla a mitad (ej. Supabase cae después de crear ruta nueva pero antes de mover stops), queda con ruta nueva + stops en ruta vieja → inconsistencia operativa.
+**Mitigación actual:** best-effort rollback (delete ruta nueva) en errores conocidos.
+**Solución propuesta:** mover la lógica a una función SQL plpgsql con BEGIN/COMMIT real. O al menos un savepoint Postgres. Sprint 19+.
+**Estado:** abierto
+
+### #53 — chat_ai_decisions table crece sin tope (TTL faltante)
+**Severidad:** cosmético (escala temporalmente)
+**Sprint:** S18.8
+**Síntoma:** Cada mensaje del chofer con texto crea un row de audit. ~50 choferes × 5 mensajes/día = 250 rows/día = 7.5K/mes = 90K/año.
+**Solución propuesta:** función `archive_old_chat_ai_decisions(retention_days)` similar a la de breadcrumbs. Cron mensual.
+**Estado:** abierto
+
+### #54 — No validación de capacity en route transfer destino
+**Severidad:** cosmético (V1 — capacity tracking ya es laxo)
+**Sprint:** S18.7
+**Síntoma:** Admin transfiere 8 paradas a un Kangoo (capacity 6 cajas). El sistema acepta la transferencia sin warning. Chofer destino recibe ruta imposible de cumplir.
+**Solución propuesta:** validar `SUM(stops.demand[2]) <= vehicle.capacity[2]` y mostrar warning en el modal antes de confirmar.
+**Estado:** abierto
+
+### #55 — Trigger calc_route_actual_distance puede ser lento con 10K+ breadcrumbs
+**Severidad:** cosmético
+**Sprint:** S18.6
+**Síntoma:** El trigger BEFORE UPDATE on routes itera todos los breadcrumbs de la ruta para calcular distancia haversine. Para una ruta de 12 horas con breadcrumb cada 90s = ~480 rows. Aceptable. Pero si en el futuro bajamos a 30s = 1440 rows → trigger empieza a tardar segundos en COMPLETE.
+**Solución propuesta:** mover el cálculo a un job async (cron post-completion en lugar de trigger BEFORE UPDATE). O usar PostGIS ST_LineLength.
+**Estado:** abierto
+
+### #56 — Sound API requiere user interaction previa en iOS Safari
+**Severidad:** cosmético
+**Sprint:** S18.3
+**Síntoma:** El primer beep tras cargar la página puede fallar silenciosamente en iOS Safari (autoplay policy — requiere interaction primero).
+**Mitigación implícita:** después del primer click del admin, los beeps subsecuentes funcionan.
+**Solución futura:** detectar autoplay policy + mostrar hint "click en cualquier parte para activar sonido" si la primera reproducción falla.
+**Estado:** abierto
+
+### #57 — Push browser puede entregar notif duplicada si chofer manda spam
+**Severidad:** cosmético
+**Sprint:** S18.3
+**Síntoma:** Si chofer envía 5 mensajes en 10s, push fanout dispara 5 notifs. Admin recibe 5 chimes seguidos → ruido.
+**Solución propuesta:** debounce de push fanout: si el último push fue <30s atrás para el mismo report, no disparar.
+**Estado:** abierto
+
+### #58 — zone_manager actual con sesión activa NO redirige al cambiar V2
+**Severidad:** cosmético (transitorio)
+**Sprint:** S18.1
+**Síntoma:** Si un zone_manager tenía sesión activa antes de deploy de S18.1 y estaba en /map cuando llega el deploy, va a ver UI antigua hasta que recargue. Al recargar redirige a /incidents/active-chat.
+**Mitigación:** transitorio, autoresuelve con refresh.
+**Estado:** cerrado por naturaleza
+
+---
+
 ## Resumen
 
 | Categoría | Abiertos |
 |---|---|
 | Críticos | 0 |
-| Importantes | 9 (#12, #22, #25, #29, #31, #32, #33) |
-| Cosméticos | 13 (#9, #10, #20, #23, #26, #27, #28, #34, #35, #36, #37, #38) |
+| Importantes | 12 (#12, #22, #25, #29, #31, #32, #33, #50, #51, #52) |
+| Cosméticos | 18 (#9, #10, #20, #23, #26, #27, #28, #34, #35, #36, #37, #38, #53, #54, #55, #56, #57) |
 
 **Última actualización:** 2026-05-02, tras Sprints 14-16 (Tiros ADR-024, Mover paradas ADR-025, Theme + Mapa en vivo ADR-026). Cierre limpio para nueva sesión. **26 ADRs, 20 migraciones, 13 importantes / 13 cosméticos abiertos.** Listo para Fase 3 (dashboard cliente).
 **ADRs nuevos en este ciclo:** ADR-013 a ADR-018.
