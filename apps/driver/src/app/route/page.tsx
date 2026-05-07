@@ -57,6 +57,11 @@ export default async function RoutePage() {
   // Si todas están done, no hay next.
   const nextStopId = stops.find((s) => s.stop.status === 'pending')?.stop.id ?? null;
 
+  // Para el botón "Reportar problema" desde la lista — si hay stop pendiente, abre
+  // SU chat. Si todas las paradas están done o no hay ruta, NO ofrecemos el botón
+  // (caso poco común — chofer sin paradas no tiene problema operativo que reportar).
+  const reportProblemStopId = nextStopId ?? stops[0]?.stop.id ?? null;
+
   return (
     <main className="min-h-dvh bg-[var(--vf-bg)] safe-top safe-bottom">
       <header className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
@@ -104,12 +109,20 @@ export default async function RoutePage() {
             </p>
           ) : (
             <>
-              <div className="px-4 pt-4">
+              <div className="px-4 pt-4 space-y-2">
                 <Link href="/route/navigate" className="block">
                   <Button type="button" variant="primary" size="lg" className="w-full">
                     🧭 Iniciar navegación
                   </Button>
                 </Link>
+                {reportProblemStopId && (
+                  <Link
+                    href={`/route/stop/${reportProblemStopId}/chat`}
+                    className="block w-full rounded-[var(--radius-md)] border border-[var(--color-warning-border,#f59e0b)] bg-[var(--color-warning-bg,#fef3c7)] px-4 py-2.5 text-center text-sm font-medium text-[var(--color-warning-fg,#92400e)]"
+                  >
+                    ⚠ Reportar problema (avería, dudas, etc.)
+                  </Link>
+                )}
               </div>
               <ul className="flex flex-col gap-2 p-4">
                 {stops.map((item) => (

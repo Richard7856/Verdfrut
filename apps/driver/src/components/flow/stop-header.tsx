@@ -1,4 +1,15 @@
-// Header del detalle de parada: regresar, código + nombre tienda, link maps, llamar tienda.
+// Header del detalle de parada: regresar, código + nombre tienda + acciones.
+//
+// Acciones (en orden de uso típico):
+//   - Maps / Waze: deeplinks para que el chofer use SU app de navegación favorita.
+//     Patrón intencional V1 — su infra de navegación está mucho más pulida que la
+//     que podríamos construir nosotros. Mantenemos turn-by-turn in-app como respaldo
+//     para flujos donde queremos visibilidad/auditoría (botón "🧭 Iniciar navegación"
+//     desde /route).
+//   - Llamar tienda: marca al contacto de la tienda (gerente). NO al admin/comercial.
+//   - Reportar problema: abre el chat realtime con el zone_manager. Útil para
+//     averías, incidencias, dudas durante el flujo (a diferencia del chat dentro
+//     del flow, este es accesible en cualquier momento del stop).
 
 import Link from 'next/link';
 import type { Stop, Store } from '@verdfrut/types';
@@ -9,7 +20,12 @@ interface Props {
 }
 
 export function StopHeader({ stop, store }: Props) {
-  const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${store.lat},${store.lng}`;
+  // Google Maps directions con travel mode driving (mejor que /search/ porque
+  // arranca turn-by-turn directo sin que el chofer tenga que tocar "Iniciar").
+  const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${store.lat},${store.lng}&travelmode=driving`;
+  // Waze deep link — abre Waze app si está instalada, sino su web.
+  const wazeUrl = `https://waze.com/ul?ll=${store.lat},${store.lng}&navigate=yes`;
+
   return (
     <header className="border-b border-[var(--color-border)] bg-[var(--vf-surface-1)]">
       <div className="flex items-center gap-3 px-4 py-3">
@@ -29,23 +45,37 @@ export function StopHeader({ stop, store }: Props) {
           </p>
         </div>
       </div>
-      <div className="flex gap-2 px-4 pb-3 text-xs">
+      <div className="flex flex-wrap gap-2 px-4 pb-3 text-xs">
         <a
           href={mapsUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="rounded-[var(--radius-md)] bg-[var(--vf-surface-2)] px-3 py-1.5 text-[var(--color-text)]"
         >
-          Cómo llegar
+          🗺 Maps
+        </a>
+        <a
+          href={wazeUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="rounded-[var(--radius-md)] bg-[var(--vf-surface-2)] px-3 py-1.5 text-[var(--color-text)]"
+        >
+          🚗 Waze
         </a>
         {store.contactPhone && (
           <a
             href={`tel:${store.contactPhone}`}
             className="rounded-[var(--radius-md)] bg-[var(--vf-surface-2)] px-3 py-1.5 text-[var(--color-text)]"
           >
-            Llamar
+            📞 Llamar tienda
           </a>
         )}
+        <Link
+          href={`/route/stop/${stop.id}/chat`}
+          className="rounded-[var(--radius-md)] bg-[var(--color-warning-bg)] px-3 py-1.5 text-[var(--color-warning-fg)] font-medium"
+        >
+          ⚠ Reportar problema
+        </Link>
       </div>
     </header>
   );
