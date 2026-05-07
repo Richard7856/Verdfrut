@@ -1,0 +1,36 @@
+@import '@verdfrut/ui/tokens.css';
+
+/* Reset y defaults globales */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+
+html {
+  scroll-behavior: smooth;
+  font-family: var(--vf-font-sans);
+}
+
+body {
+  background-color: var(--vf-bg);
+  color: var(--vf-text);
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--vf-green-500);
+  outline-offset: 2px;
+  border-radius: var(--vf-r-sm);
+}
+
+/* Scroll fino para zonas internas con contenido largo (lista de tenants, etc.) */
+.vf-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--vf-bg) 60%, white 14%) transparent;
+}
+
+/* Grid del shell del control plane (mismo modelo que platform) */
+.vf-main { background: var(--vf-bg); }

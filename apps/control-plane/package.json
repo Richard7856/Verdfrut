@@ -1,0 +1,32 @@
+{
+  "name": "@verdfrut/control-plane",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3002",
+    "build": "next build",
+    "start": "next start --port 3002",
+    "lint": "next lint",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf .turbo .next *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@verdfrut/supabase": "workspace:*",
+    "@verdfrut/types": "workspace:*",
+    "@verdfrut/ui": "workspace:*",
+    "@verdfrut/utils": "workspace:*",
+    "next": "16.2.4",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "server-only": "0.0.1"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.0",
+    "@types/node": "^22.7.4",
+    "@types/react": "19.2.0",
+    "@types/react-dom": "19.2.0",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^4.1.0",
+    "typescript": "^5.6.2"
+  }
+}
