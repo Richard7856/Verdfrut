@@ -150,21 +150,22 @@ Similar al paso 2 pero con `apps/driver`:
 
 ### 3.2. Environment Variables
 
-Misma lista que platform PERO **sin** estas (el driver NO las necesita):
-- `OPTIMIZER_URL`, `OPTIMIZER_API_KEY` (no llama al optimizer)
-- `MAPBOX_DIRECTIONS_TOKEN` (no genera polylines, solo las consume del platform)
-- `ANTHROPIC_API_KEY` (sí lo necesita para OCR de tickets)
-- `DRIVER_APP_URL` (no aplica)
+El driver NO necesita `OPTIMIZER_URL`/`OPTIMIZER_API_KEY` ni `DRIVER_APP_URL`, pero
+SÍ necesita `MAPBOX_DIRECTIONS_TOKEN` para el endpoint `/api/route/dynamic-polyline`
+que recalcula el path turn-by-turn cuando el chofer se desvía. Sin ese token, la
+PWA cae en loop "Recalculando ruta" porque el server retorna geometry:null y el
+cliente vuelve a pedir cada segundo.
 
-Sí incluye:
+Lista completa para `verdfrut-driver`:
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - `SUPABASE_SERVICE_ROLE_KEY`
-- `NEXT_PUBLIC_MAPBOX_TOKEN`
+- `NEXT_PUBLIC_MAPBOX_TOKEN` (público pk.*)
+- `MAPBOX_DIRECTIONS_TOKEN` (secret sk.* — CRÍTICO para navegación in-app)
 - `NEXT_PUBLIC_VAPID_PUBLIC_KEY`
 - `VAPID_PRIVATE_KEY`
 - `VAPID_SUBJECT`
-- `ANTHROPIC_API_KEY`
+- `ANTHROPIC_API_KEY` (para OCR de tickets)
 - `NEXT_PUBLIC_TENANT_TIMEZONE`
 - `NEXT_PUBLIC_ENV_LABEL`
 - `PLATFORM_API_URL` = `https://verdfrut-platform.vercel.app` (del paso 2)
