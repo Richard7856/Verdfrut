@@ -22,12 +22,6 @@ Formato:
 
 ## Importantes (no bloquean, mejoran calidad / UX)
 
-### #11 — Doble apertura del invite/recovery link consume el token
-**Severidad:** importante
-**Fase afectada:** 2
-**Síntoma:** Cuando el admin manda el invite link por WhatsApp/iMessage, el preview link del cliente de mensajería precarga la URL en background. Eso consume el token de un solo uso. Cuando el chofer hace clic, ve "Link inválido o expirado".
-**Solución propuesta:** Migrar `verifyOtp`/`exchangeCodeForSession` a PKCE flow con verificador en localStorage del browser; el preview no completa el handshake porque no tiene el verifier. Alternativa rápida: añadir botón "Regenerar link" prominente cuando aparece el error.
-**Estado:** abierto
 
 ### #12 — TTL fijo de 24h en links sin renegociación
 **Severidad:** importante
@@ -43,47 +37,8 @@ Formato:
 **Solución propuesta:** Integrar `zxcvbn` (cliente) o lista top-1000 de contraseñas comunes. Bloquear score < 2.
 **Estado:** abierto
 
-### #14 — Allow-list de Redirect URLs no automatizada per tenant
-**Severidad:** importante
-**Fase afectada:** 2 / 6
-**Síntoma:** Cada nuevo tenant requiere editar manualmente la allow-list en Supabase Dashboard → Auth → URL Configuration. `provision-tenant.sh` no la configura.
-**Solución propuesta:** Agregar paso al provision script que llame Supabase Management API (`PATCH /v1/projects/{ref}/config/auth`) para setear las redirect URLs.
-**Estado:** abierto
 
-### #15 — Sin auto-logout por inactividad en driver PWA
-**Severidad:** importante
-**Fase afectada:** 2
-**Síntoma:** Si el chofer presta el teléfono o lo pierde, la sesión permanece activa indefinidamente. No hay timeout de inactividad.
-**Solución propuesta:** Hook que escuche `visibilitychange` + `focus` y haga `signOut` tras N horas inactivas. Considerar 8-12 h (jornada típica). Persistir last-active timestamp.
-**Estado:** abierto
 
-### #16 — Reconciliación de auth.user huérfanos
-**Severidad:** importante
-**Fase afectada:** 2 / 6
-**Síntoma:** Si `inviteUser` falla a mitad del flujo (entre `inviteUserByEmail` y `INSERT user_profiles`), el rollback es best-effort. Puede quedar `auth.user` sin profile correspondiente. Login posterior con ese email da "Perfil no configurado".
-**Solución propuesta:** Job nocturno que detecte `auth.users` sin row correspondiente en `user_profiles` (creados >1h atrás) y los elimine o alerte. También: envolver el flow en RPC con savepoint en Postgres.
-**Estado:** abierto
-
-### #17 — Sin cola offline (IndexedDB outbox) en flujo entrega
-**Severidad:** importante
-**Fase afectada:** 2
-**Síntoma:** Si el chofer pierde red en medio del flujo (subway, semáforo en zona muerta, tienda en sótano), las server actions fallan con errores de red. El `currentStep` queda en el último persistido pero las fotos/datos no suben hasta retomar la red. UX: el chofer ve error y puede pensar que su trabajo no quedó guardado.
-**Solución propuesta:** Cola IndexedDB con shape `{ id, type: 'patch'|'evidence'|'advance'|'submit', payload, attempts, lastError, createdAt }`. Worker que reintenta con backoff cuando vuelve la red. UI muestra badge "X cambios pendientes" y permite retry manual.
-**Estado:** abierto
-
-### #18 — Carrito de incidencias en flujo entrega es stub
-**Severidad:** importante
-**Fase afectada:** 2
-**Síntoma:** El step `incident_cart` solo registra un placeholder genérico en `incident_details`. El chofer no puede declarar productos, cantidades, tipos de incidencia (rechazo/faltante/sobrante/devolución). El encargado tiene que pedir el detalle por chat/voz.
-**Solución propuesta:** UI completa con buscador de productos del catálogo (cuando exista), cantidad, unidad, tipo de incidencia, motivo. Persistir en `incident_details` jsonb estructurado. Después abrir chat con encargado pre-poblando el contexto.
-**Estado:** abierto
-
-### #19 — OCR de tickets pendiente (waste_ticket_review, receipt_review)
-**Severidad:** importante
-**Fase afectada:** 2 / 4
-**Síntoma:** Los steps de revisión post-foto sólo muestran un mensaje "todo bien, continuar". El chofer no ve datos extraídos (número, fecha, total) y no hay validación contra montos esperados. La columna `ticket_data` queda NULL.
-**Solución propuesta:** Integrar `@verdfrut/ai` extractTicket en server action que dispara después del upload. Mostrar UI de revisión con campos editables, botón "confirmar" que setea `ticket_extraction_confirmed=true`.
-**Estado:** abierto
 
 ### #20 — Sin compresión defensiva si canvas falla en iOS Low-Power Mode
 **Severidad:** cosmético
@@ -236,10 +191,10 @@ Formato:
 | Categoría | Abiertos |
 |---|---|
 | Críticos | 0 |
-| Importantes | 16 (#11–#19, #22, #25, #31, #32, #33) |
+| Importantes | 9 (#12, #22, #25, #29, #31, #32, #33) |
 | Cosméticos | 13 (#9, #10, #20, #23, #26, #27, #28, #34, #35, #36, #37, #38) |
 
-**Última actualización:** 2026-05-02, tras Sprints 8 (tipo de visita + flujos cerrada/báscula), 9 (navegación in-app), 9b (turn-by-turn voz).
+**Última actualización:** 2026-05-02, tras Sprints 14-16 (Tiros ADR-024, Mover paradas ADR-025, Theme + Mapa en vivo ADR-026). Cierre limpio para nueva sesión. **26 ADRs, 20 migraciones, 13 importantes / 13 cosméticos abiertos.** Listo para Fase 3 (dashboard cliente).
 **ADRs nuevos en este ciclo:** ADR-013 a ADR-018.
 **Resueltos en este ciclo:** Push real, replay del recorrido, asignación inline de chofer, navegación in-app, turn-by-turn con voz.
 **Issues nuevos:** #36 (off-route precision), #37 (hydration extension), #38 (es-MX voice fallback).

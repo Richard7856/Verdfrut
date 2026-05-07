@@ -502,6 +502,729 @@ Por otro lado, onboardear un cliente nuevo requería crear manualmente decenas o
 
 ---
 
+## [2026-05-02] ADR-019: Cola offline IndexedDB (outbox genérico) para mutaciones del chofer
+
+**Contexto:** El chofer trabaja en zonas con red intermitente (sótanos de tienda, semáforos rojos en zonas muertas, subway). Las server actions de hoy (`advanceStep`, `setReportEvidence`, `patchReport`, `submitReport`, upload a Storage) fallan al instante si no hay red — el chofer ve "Error" y no sabe si su trabajo quedó guardado. Issue #17 documentaba el riesgo. Además, los Sprints 11 (chat) y 12 (OCR) van a generar más mutaciones que también necesitan tolerar pérdida de red, así que la solución debe ser **genérica** desde el inicio para evitar retrofit.
+
+**Decisión:**
+
+1. **Outbox local en IndexedDB** que persiste todas las mutaciones del chofer entre sesiones (sobrevive a reload, cierre de pestaña, reinicio de teléfono). Ubicación: `apps/driver/src/lib/outbox/` (no es un paquete porque por ahora solo el driver app lo necesita; se extrae si la platform lo requiere).
+
+2. **Shape de cada item** (extensible para Sprints 11/12):
+   ```ts
+   interface OutboxItem {
+     id: string;                   // UUIDv4 generado en cliente — idempotency key
+     type: OutboxOpType;           // discriminator: 'advance_step' | 'set_evidence' | ...
+     payload: unknown;             // shape específico por type
+     status: 'pending' | 'in_flight' | 'failed' | 'done';
+     attempts: number;
+     lastError: string | null;
+     lastAttemptAt: number | null;
+     createdAt: number;
+   }
+   ```
+
+3. **Idempotency por UUID en el cliente.** El cliente genera el `id` antes de encolar; si el worker reintenta, el mismo `id` viaja como argumento al server. Para esta primera versión las server actions no almacenan IDs de operación, pero la naturaleza de las mutaciones tolera reintentos:
+   - `advance_step`: idempotente (UPDATE current_step a un valor — si ya está ahí, no pasa nada).
+   - `set_evidence`: read+merge+write — el último gana, OK con reintentos.
+   - `patch_report`: UPDATE de columnas — idempotente.
+   - `submit_report` / `submit_non_entrega`: el server ya tiene guard `WHERE status='draft'`. Un segundo intento devuelve error "ya enviado" → el outbox lo marca como `done` (semánticamente correcto).
+   - `upload_photo`: bucket Storage usa `upsert: false`. Reintentos del mismo path fallan con "already exists" → marcamos `done`. El path lleva `Date.now()` en el nombre, así que rara vez chocan.
+
+4. **Worker en main thread con backoff exponencial.** No es un Service Worker (Serwist se usa para precache/SW, no para esto). Un hook `useOutboxWorker()` corre `processOnce()` cada N segundos cuando `navigator.onLine === true`, en orden FIFO, una operación a la vez. Backoff: `min(1000 * 2^attempts, 30_000)` ms. Tras 10 intentos fallidos consecutivos pasa a `failed` y solo se reintenta con retry manual.
+
+5. **UI: badge en el header del driver** (`<OutboxBadge>`) muestra `X cambios pendientes` cuando hay items no-`done`. Tap abre detail con lista y botón "Reintentar todo". Si hay items en `failed`, badge en rojo.
+
+6. **Operaciones cubiertas en este sprint** (las nuevas vendrán en sprints siguientes):
+   - `advance_step` — antes era `advanceStep(reportId, nextStep)` síncrono.
+   - `set_evidence` — antes era `setReportEvidence(reportId, key, url)` síncrono.
+   - `patch_report` — antes era `patchReport(reportId, patch)` síncrono.
+   - `submit_report` / `submit_non_entrega` — terminales del flujo.
+   - `convert_to_entrega` — del Sprint 8.
+   - `upload_photo` — el Blob comprimido se persiste en IndexedDB y el worker lo sube a Storage cuando hay red. Tras éxito, se encadena con `set_evidence`.
+
+7. **`arriveAtStop` NO va al outbox.** Requiere coords frescos para validación geo anti-fraude (ADR-016). Si no hay red en ese momento, el chofer simplemente no puede arrivar — pero no perdió trabajo porque aún no había generado nada.
+
+**Alternativas consideradas:**
+- *Background Sync API:* el browser dispara reintentos automáticamente cuando vuelve la red, incluso con la app cerrada. Atractivo pero (a) iOS Safari no lo soporta — y nuestro target principal incluye iOS, (b) requiere Service Worker activo, lo que en dev (`next dev`) no aplica. Postergado.
+- *LocalStorage en lugar de IndexedDB:* simple pero no soporta Blobs (necesitamos almacenar fotos), tiene límite ~5MB y es síncrono (bloquea el hilo). Descartado.
+- *Library `idb-keyval` o `dexie`:* `dexie` añade ~30KB; overkill para un store. `idb` (Mozilla, ~2KB) da una API limpia sobre IndexedDB sin opinions extra. **Elegido `idb`**.
+- *Reescribir todo como mutations de TanStack Query con `persistQueryClient`:* tendría sense si ya usáramos React Query, pero el driver app usa server actions + `router.refresh`. Adoptar Query ahora es scope creep.
+- *Service Worker que intercepta `fetch` y encola:* las server actions de Next.js usan POST a la propia ruta con un payload propietario. Interceptar y reenviarlas correctamente es frágil entre versiones de Next.
+
+**Riesgos / Limitaciones:**
+- **iOS Safari y storage eviction:** Safari puede borrar IndexedDB de PWAs no instaladas tras 7 días sin uso. Mitigación: ejecución diaria del chofer evita la ventana de eviction. Recomendación operativa: instalar la PWA al home screen ("Add to Home Screen" graduates la app a "installed" → eviction mucho más permisiva).
+- **Re-aplicación de un advance que el chofer ya superó manualmente:** si el outbox tarda en subir un `advance_step` que dice "pasa a step X" cuando el chofer (post-`router.refresh`) ya está en step X+1, el server lo va a poner de vuelta en X. Mitigación: cuando el cliente enqueue un advance, antes de enviar el worker compara contra el server source of truth (read pre-write); si el server ya está adelante, marca `done`. Pendiente de implementar como hardening si aparece en la práctica.
+- **Foto en IndexedDB ocupa espacio:** una foto comprimida pesa ~150-300KB. Una jornada con 30 paradas y 5 fotos por parada = ~30MB en IndexedDB peor caso. iOS Safari limita ~50MB por origin no-installed. Mitigación: limpiar items `done` agresivamente (TTL 24h), instalar PWA. Suficiente para V1.
+- **Race entre upload y advance:** si el chofer toma foto y avanza step antes de que el upload termine, los handlers del outbox los procesan en orden FIFO. El advance no se aplica hasta que el upload (que va antes en la cola) termine. **Side effect deseado:** el chofer puede avanzar visualmente; el server ve los cambios en orden. Pero si el upload falla 10 veces y queda en `failed`, los advances posteriores quedan stuck. Mitigación: en el sprint, `failed` no bloquea el resto — el worker salta items `failed` y continúa con los `pending` siguientes. Documentar UX clara: "1 foto no se pudo subir — toca para reintentar".
+- **Sin barrera tipo "no salgas del flujo si hay pendientes críticos":** un chofer impaciente puede salir de `/route/stop/X` con un advance encolado que aún no se aplicó. Aceptable porque al volver verá el state correcto del server.
+- **Server actions importadas y llamadas desde un setInterval:** soportado por Next.js — son funciones async normales. `revalidatePath` corre dentro de la action y queda dentro de su contexto.
+
+**Oportunidades de mejora:**
+- Background Sync para Android (degrada elegante en iOS).
+- Telemetría: enviar a un endpoint las operaciones que terminan en `failed` después de 10 intentos para detectar patrones (ej: "siempre se atora en `set_evidence` para X tienda").
+- Unificar idempotency keys en el server (columna `client_op_id` en `delivery_reports` para no re-aplicar advance que el chofer ya superó).
+- Compactar la cola: si hay 3 `advance_step` consecutivos para el mismo report, solo el último importa — droppear los anteriores.
+- Migrar a paquete `@verdfrut/outbox` cuando platform/control-plane lo necesiten.
+
+---
+
+## [2026-05-02] ADR-020: IncidentCart real — texto libre + unidades cerradas, sin catálogo de productos
+
+**Contexto:** En el flujo `entrega`, después de `incident_check` con "sí hay incidencia", el chofer llega al step `incident_cart`. Hasta ahora era un stub: insertaba un único `IncidentDetail` placeholder y avanzaba — el detalle real (producto, cantidad, tipo) se discutía con el comercial por chat fuera del sistema (issue #18). Para que Sprint 11 (chat) tenga contenido estructurado para mandar al comercial, y para que Fase 5 (dashboard) pueda agregar incidencias por producto/tipo, necesitamos data real.
+
+V1 NO tiene catálogo de productos digital — los pedidos vienen pre-empacados con hoja física. Por tanto el chofer no puede "buscar" un producto. Hay que decidir cómo capturar productos sin catálogo.
+
+**Decisión:**
+
+1. **Producto = texto libre.** El chofer escribe "Manzana roja kg" o "Bolsa de zanahoria 1kg" como string. El campo `productId` queda undefined en V1. Cuando exista catálogo (Fase posterior), un job de reconciliación intentará mapear strings frecuentes a `product_id`.
+
+2. **Unidades = lista cerrada.** Selector con opciones: `pcs`, `kg`, `caja`, `paquete`, `bolsa`, `lata`. Cubren el 95% de casos reales (verificado contra el prototipo Verdefrut). Si una incidencia requiere unidad fuera de la lista, el chofer la describe en `notes`. **Cerrada y no custom** porque (a) facilita agregaciones en dashboard, (b) evita variantes del mismo concepto ("kgs", "Kg", "kilo"), (c) Sprint 13 no es lugar para resolver normalización de unidades.
+
+3. **Tipo = segmented buttons** con los 4 valores de `IncidentType` (rechazo / faltante / sobrante / devolución). Botones grandes, alta visibilidad porque cada tipo tiene tratamiento contable distinto en el dashboard del cliente.
+
+4. **Cantidad = numeric input.** Permite decimales (ej. 1.5 kg). Validación: > 0. Sin tope superior — un pedido con 200 cajas faltantes es válido aunque raro.
+
+5. **Notas = textarea opcional.** Para contexto que no cabe en producto/cantidad ("estaba en mal estado, jaba 3 cajas dañadas").
+
+6. **Lista de incidencias agregadas en cards apiladas** con botón "✕" para quitar y tap para editar. El chofer puede agregar 1, 5 o 20 incidencias en la misma parada.
+
+7. **Persistencia:** al tap "Continuar" el componente llama `onPatch({ incidentDetails })` que el outbox encola. La lista completa viaja como JSON, no incremental — es <1KB típico, no vale la pena diferenciar.
+
+8. **Validación mínima:** lista no vacía + cada item con producto.length>=2 + cantidad > 0. Sin esquema de validación (zod) en V1 — la TS-tipa la shape, los runtime checks son simples.
+
+9. **Auto-save de drafts entre re-renders:** el state es local del componente. Si el chofer sale del step (back), pierde el draft no guardado — porque el último `onPatch` se hizo cuando él decidió "Continuar". Aceptable: típicamente el chofer agrega 2-3 items y sigue sin pausa.
+
+**Alternativas consideradas:**
+- *Buscador de productos contra catálogo seedeado:* sin catálogo en V1, no hay qué buscar. Construirlo solo para este step es scope fuera de fase.
+- *Solo productName + notes (sin tipo/cantidad estructurados):* el dashboard de Fase 5 perdería la dimensión "qué porcentaje de incidencias son rechazos vs faltantes" — métrica clave.
+- *Permitir unidad custom (input text):* mata la agregabilidad. Si la unidad es desconocida, el chofer escribe en notes y elige `pcs` (default).
+- *Multi-step wizard (1 producto a la vez con un step shell por incidencia):* abruma al chofer. La mayoría de paradas tienen ≤3 incidencias, todas en una pantalla con scroll es más rápido.
+
+**Riesgos / Limitaciones:**
+- **Texto libre = baja calidad de datos.** "manzana", "Manzana", "manzanas", "Manzana Red Delicious" son el mismo SKU para el negocio pero strings distintos. Mitigación: cuando exista catálogo, normalización offline. Aceptable para V1 porque el destinatario inmediato es el comercial humano que entiende contexto.
+- **Sin foto del producto en disputa (de momento):** si el chofer dice "rechazo de 5 kg de papa por estado", el comercial no tiene evidencia visual. Mitigación: el chat (Sprint 11) permite adjuntar foto. Sprint 13 NO incluye foto-por-incidencia.
+- **No hay "unidad" para servicios (ej. transporte adicional).** Caso muy raro en operación de fruta/verdura — `pcs` con notes lo cubre.
+- **Cantidad como `number` en JSON:** Postgres jsonb los preserva como `numeric`. Decimales precisos hasta 1e-15. OK.
+- **No hay límite de N incidencias por reporte:** un chofer malicioso podría meter 1000 items para inflar el JSON. Riesgo bajo (es chofer autenticado, no público), pero a futuro un cap de 50 sería sano.
+
+**Oportunidades de mejora:**
+- Buscador con autocompletado contra el histórico del propio chofer (cache de strings que ya escribió).
+- Foto por incidencia (subida via outbox, slot dinámico `incident_${index}_photo`).
+- Sugerencias contextuales basadas en la tienda ("en esta tienda los rechazos típicos son: papa, jitomate").
+- Cap de 50 items con mensaje "agrupa incidencias similares en notas".
+- Cuando exista catálogo: campo `productId` con dropdown + fallback a texto libre.
+
+---
+
+## [2026-05-02] ADR-021: Chat realtime conductor↔comercial — Postgres changes en `messages`, sin canal broadcast separado
+
+**Contexto:** Hasta hoy, `<ChatRedirectStep>` era un stub que mostraba una tarjeta "habla con tu comercial" sin un canal real. El flujo `tienda_cerrada`/`bascula` y el step `chat_redirect` post-`incident_cart` necesitan un chat persistente con timer de 20 minutos para escalación, push notification al comercial, foto adjunta, y resolución que cierra el caso. Tabla `messages` ya existía desde la migración 005 con `report_id`, `sender`, `text`, `image_url` — falta UI, realtime, hardening RLS, y barrera del timer.
+
+**Decisión:**
+
+1. **Realtime via Postgres changes (no Broadcast).** `ALTER PUBLICATION supabase_realtime ADD TABLE messages` — los clientes se suscriben a INSERT events filtrados por `report_id`. Razón: los mensajes ya tienen que persistir en DB (auditoría, dashboards, replay). Broadcast adicional sería un canal paralelo a mantener — fuente única de verdad gana.
+
+2. **Filtrado client-side por `report_id`.** Cada chat suscribe `realtime:public:messages:report_id=eq.{id}`. Supabase Realtime aplica RLS al server, así que el chofer solo recibe mensajes de sus propios reports y el zone_manager solo los de su zona.
+
+3. **Hardening RLS en `messages`.** El INSERT policy original solo verificaba `report_id IN (SELECT id FROM delivery_reports)` (delegado a RLS de reports). Eso permitía que un driver insertara con `sender='zone_manager'` (suplantación). Nueva policy:
+   - `sender_user_id = auth.uid()` obligatorio
+   - `sender='driver'` solo si `current_user_role()='driver'`
+   - `sender='zone_manager'` si rol es `zone_manager` o `admin/dispatcher` (estos últimos pueden intervenir desde el panel)
+
+4. **Trigger `tg_messages_open_chat` que setea `chat_opened_at`, `timeout_at` y `chat_status='open'` al primer INSERT.** Idempotente: si `chat_opened_at` ya está, no toca nada. Razón: mover esto al server elimina race conditions del cliente (driver y comercial entrando al chat al mismo tiempo) y centraliza la lógica de timer. El timer corre desde el primer mensaje, no desde "abrí la pantalla" — un chofer que abre y cierra sin escribir no consume tiempo.
+
+5. **`timeout_at = chat_opened_at + 20 min` sin reset por respuestas.** Decisión de producto (memoria del proyecto): el timer mide "¿se llegó a un acuerdo dentro de 20 minutos?", no "¿hubo actividad reciente?". Si se cumplen los 20 minutos sin resolución, el caso pasa a `timed_out` y el chofer puede continuar la jornada — el comercial revisa después.
+
+6. **Mensajes via outbox (op `send_chat_message`).** Texto y foto se encolan igual que las demás mutaciones (ADR-019). La foto comprimida en IDB sube a bucket `evidence` con slot `chat_${ts}`. Tras éxito el handler encola un `send_chat_message` con el `image_url` resultante. Ordering FIFO garantiza que el INSERT del mensaje suceda después de subir la foto.
+
+7. **UI del chat: mismo componente `<ChatThread>` para driver y platform.** Diferencias por prop `viewerRole='driver'|'zone_manager'`. Reduce duplicación. El componente vive en `apps/driver/.../chat-thread.tsx` y se importa también desde el platform via path relativo (los apps comparten root pero NO compartimos `apps/driver/src/` desde platform — necesitaré moverlo a un paquete o duplicarlo).
+
+   **Sub-decisión:** Para evitar inflar `@verdfrut/ui` con lógica de chat (no es UI primitiva), copio el componente a ambas apps con el mismo nombre y mantengo paridad manual. Si en una tercera fase aparece más reuso, se extrae a un paquete `@verdfrut/chat-ui`. YAGNI por ahora.
+
+8. **Mensaje inicial auto-generado** desde `incident_details` (cierra issue #18). Cuando el chofer abre el chat por primera vez en flujo entrega y hay incident_details no vacío, el cliente envía como primer mensaje un summary tabular ("• 2 kg de Manzana — Rechazo", etc.). Esto va al outbox como `send_chat_message` normal.
+
+9. **Push notification al comercial al primer mensaje del chofer.** Usa el mismo `web-push` ya integrado para la app de chofer. El primer INSERT con `sender='driver'` dispara una server action que busca a los `zone_manager` con `zone_id=report.zone_id` y manda push con el deep link `/incidents/{reportId}`.
+
+   **Decisión secundaria:** evitamos enviar push en CADA mensaje (spam para el comercial que tiene el chat abierto). Solo el primero — el resto se sincroniza por Realtime mientras el comercial tenga la pestaña abierta.
+
+10. **Resolución desde cualquier lado** — driver tap "Marcar resuelto" → `chat_status='driver_resolved'`; comercial tap "Cerrar caso" → `'manager_resolved'`. Ambos cierran el chat para edición pero permiten lectura. El cliente que NO inició la resolución ve la transición via Realtime (Postgres change en `delivery_reports.chat_status`).
+
+**Alternativas consideradas:**
+- *Broadcast nativo de Supabase Realtime:* fire-and-forget, sin persistencia automática. Requiere INSERT manual paralelo si queremos auditoría. Doble fuente de verdad.
+- *WebSocket/SSE custom:* infraestructura adicional, no aprovecha Supabase Realtime que ya tenemos.
+- *Pulling cada N segundos:* más simple pero peor UX y carga al server.
+- *Compartir `<ChatThread>` via `@verdfrut/ui`:* el paquete UI es tokens + primitivas, no features completas con state management. Inflarlo aquí debilita la frontera.
+- *Reset del timer con cada mensaje:* el timer se volvería un "watchdog" de actividad en lugar de un SLA. El comercial podría dejar el caso colgando indefinidamente con un mensaje cada 19 min.
+
+**Riesgos / Limitaciones:**
+- **Postgres changes scaling:** Supabase Realtime tiene límites de eventos/sec por proyecto. A 1 driver actualmente, irrelevante. Con 50 drivers en paralelo en chats activos, ~1-2 mensajes/sec — dentro del free tier.
+- **RLS y Realtime:** los filtros por RLS ocurren en el broker de Realtime con cierta latencia comparada a `IN (SELECT...)` puro de Postgres. En la práctica imperceptible.
+- **Trigger en SECURITY DEFINER:** corre con permisos elevados. Solo escribe `delivery_reports` con WHERE específico, no permite ataque del usuario insertando mensajes a reports ajenos porque la WHERE primero filtra y luego el caller ya pasó la RLS de INSERT en messages (que valida report_id IN reports visibles).
+- **Sin "typing indicator":** el chat es lean, sin estado intermedio. Aceptable V1.
+- **Sin "read receipts":** no sabemos si el otro lado leyó. Decisión consciente — el comercial revisa cuando puede; el chofer no debe esperar acuse.
+- **iOS Safari y Realtime:** el cliente del chofer puede perder la suscripción si el OS pausa el WebSocket. Mitigación: al volver `online`/`focus`, refetch de mensajes.
+- **Push duplicado:** si por algún bug `chat_opened_at` se setea con varios mensajes en milisegundos, podríamos disparar push 2 veces. Mitigación: el server action de push valida por `chat_opened_at IS NULL` antes de enviar.
+- **Foto adjunta sin compresión adicional:** usa `compressImage` del flujo de evidencia, ya bajado a ~150KB. OK.
+
+**Oportunidades de mejora:**
+- Read receipts y typing indicators si el comercial los pide.
+- Escalación automática post-`timed_out` a un dispatcher.
+- Inline preview de la foto sin abrir modal (mejor UX).
+- Búsqueda de mensajes en el panel del comercial (cuando crezcan los chats).
+- Auto-respuestas de plantilla del comercial ("ok ya voy", "espera 5 min").
+- Métricas: tiempo medio de primera respuesta, % casos resueltos en <20 min.
+
+---
+
+## [2026-05-02] ADR-022: OCR de tickets con Claude Vision — extracción server-side, edición + confirmación cliente
+
+**Contexto:** Los steps `waste_ticket_review` y `receipt_review` eran placeholders ("foto cargada, continuar") sin extracción de datos. El paquete `@verdfrut/ai` ya tenía `extractTicketFromImageUrl` cableado a Claude Sonnet 4.6 con system prompt en español, pero ningún caller. Issue #19 documentaba la deuda. Para Fase 5 (dashboard del cliente con KPIs por tienda y export XLSX para ERP externo) los datos extraídos son entrada crítica — sin ellos, las paradas reportan distancia/duración pero no monto facturado/devoluciones.
+
+**Decisión:**
+
+1. **Extracción server-side via API route** `POST /api/ocr/extract-ticket` en el driver app. Body: `{ reportId, kind: 'receipt' | 'waste' }`. La route:
+   - Lee la URL desde `delivery_reports.evidence['ticket_recibido']` (kind=receipt) o `evidence['ticket_merma']` (kind=waste).
+   - Llama `extractTicketFromImageUrl(url)` (timeout 60s, 2 reintentos internos).
+   - Persiste resultado en `ticket_data` o `return_ticket_data` (jsonb).
+   - Devuelve `TicketData` al cliente.
+
+   Por qué API route y NO server action: OCR puede tardar 3-8s, las server actions de Next bloquean el formulario; API route es fetch normal con AbortController, mejor UX.
+
+2. **`ANTHROPIC_API_KEY` SOLO server-side.** No expone al cliente — la API route corre en el servidor del driver app.
+
+3. **NO pasa por outbox.** Razones:
+   - El OCR requiere red por definición (call a Anthropic). Sin red, no hay nada que diferir — se le dice al chofer "OCR no disponible, completa los datos a mano".
+   - Re-procesar el mismo ticket dos veces gasta créditos de Anthropic — no queremos reintentos automáticos de la cola.
+   - Si la API route falla, el cliente puede reintentar manualmente con un botón "Reintentar OCR".
+
+4. **Edición del chofer + confirmación SÍ pasa por outbox.** Tras la extracción automática, el chofer ve un form editable con: `numero`, `fecha`, `total`, lista de `items[]`. Cuando toca "Confirmar y continuar", encolamos un `patch_report` con `{ ticketData, ticketExtractionConfirmed: true }` (o `returnTicketData` + `returnTicketExtractionConfirmed`). Esto tolera offline durante la edición — caso real cuando la red se cae mientras el chofer corrige un total mal leído.
+
+5. **Extensión de `patchReport` server action.** Hoy soporta solo columnas planas (`hasMerma`, `noTicketReason`, etc.). Lo extiendo con `ticketData`, `returnTicketData`, `ticketExtractionConfirmed`, `returnTicketExtractionConfirmed`. La whitelist sigue siendo explícita en el server (no pasa-tal-cual cualquier patch).
+
+6. **Trigger del OCR: automático al montar** el step de review. Si `ticket_data` ya existe (re-entrada al mismo step tras un back), se pre-popula el form sin re-llamar Anthropic. Estado:
+   - `idle` → no se ha intentado.
+   - `extracting` → spinner.
+   - `extracted` → form pre-poblado, editable.
+   - `error` → mensaje + botón "Reintentar OCR" + "Llenar manualmente".
+
+7. **Confidence score visible.** El system prompt pide a Claude un `confidence` 0-1. Si <0.6, mostramos un banner amarillo "Datos con baja confianza, revísalos antes de confirmar". El chofer puede confirmar igual — la decisión final es del humano.
+
+8. **Items editables.** El chofer puede agregar / quitar / editar filas. Sin esto, una OCR con 2 errores en items obliga a reintentarlo. Mejor confiar en el chofer como editor humano.
+
+9. **Validación al confirmar:** `numero` no vacío, `fecha` parseable como ISO date, `total` > 0. El chofer puede dejar campos vacíos durante edición — solo bloqueamos al confirmar.
+
+10. **Error path: chofer offline o Anthropic down.** Form vacío con todos los campos editables manualmente. Botón "Confirmar" sigue funcional — el chofer puede llenar a mano. La columna `ticket_extraction_confirmed` se setea igual; el `ticket_data.confidence` queda en 0 para señalar "fue manual".
+
+**Alternativas consideradas:**
+- *OCR client-side con Tesseract.js:* gratis pero calidad mucho menor en tickets impresos en papel térmico (recibos típicos). Claude Vision lee mejor.
+- *OpenAI GPT-4 Vision:* equivalente en precisión, pero ya tenemos Anthropic key y el system prompt ya está afinado para español mexicano.
+- *Hacer el OCR en background/cron tras la subida de la foto:* mejor UX (chofer no espera) pero dificulta la edición — el chofer ya pasó al siguiente step. Decisión: hacer al chofer esperar 3-8s con spinner es aceptable porque la corrección es del momento.
+- *Upload + OCR en una sola llamada:* mezcla concerns. Mejor mantener Storage upload separado del OCR.
+- *Encolar OCR en el outbox:* descartado en punto 3 — gasta créditos en reintentos automáticos.
+
+**Riesgos / Limitaciones:**
+- **Latencia 3-8s perceptible.** Mitigación: spinner claro + "puedes editar manualmente si tarda demasiado".
+- **Cuota / rate limit de Anthropic:** sin manejo explícito. A un chofer haciendo 30 paradas/día y 2 fotos/parada = 60 calls/día/chofer. 50 choferes activos = 3000 calls/día. Anthropic Tier 1 permite ~50 RPM — cerca del límite si todos suben al mismo tiempo. Mitigación pendiente: queue server-side con rate limit (n8n o lambda).
+- **Costo:** ~$0.005-0.01 por imagen con Sonnet 4.6 (input ~1500 tokens, output ~500). 3000/día ≈ $20-30/día por tenant. Aceptable para B2B.
+- **JSON parsing falla si Claude devuelve ruido:** `parseTicketJson` usa regex `\{[\s\S]*\}` y JSON.parse. Si Claude envuelve en markdown (` ```json ... ``` `), el regex funciona. Si devuelve texto plano sin JSON, lanza — clasificado como error por el cliente.
+- **Items extraídos pueden ser `null`:** si la imagen está borrosa o cortada, items[] viene vacío. Cliente lo muestra como "0 items detectados — agrégalos manualmente".
+- **Idempotency: dos clicks rápidos al "Reintentar OCR"** disparan dos calls a Anthropic. Mitigación: el botón se deshabilita durante `extracting`.
+- **Campo `confidence` puede ser inflado por Claude:** modelo no es siempre calibrado. Aceptable para V1 — el chofer ve los datos y juzga.
+
+**Oportunidades de mejora:**
+- Cache server-side por hash de imagen — si el chofer reentra al step, sirve la extracción cacheada sin volver a llamar Anthropic.
+- Comparación contra monto esperado (de la hoja física del pedido) para alertar discrepancias.
+- Multi-imagen (anverso + reverso del ticket) en un solo call.
+- Prompt afinado por cliente (Neto, OXXO tienen layouts distintos).
+- Telemetría: % tickets extraídos correctamente vs editados manualmente — para mejorar prompt.
+
+---
+
+## [2026-05-02] ADR-023: Hardening pass tras Sprints 10-13 — outbox, validaciones, rate limits, invalidación de datos
+
+**Contexto:** Tras cerrar Sprints 10-13 (outbox, IncidentCart, chat realtime, OCR), los self-reviews identificaron 11 bugs/vectores de robustez antes de pasar a Fase 3. Esta ADR resume las decisiones tomadas en la sesión de hardening.
+
+**Decisiones agrupadas:**
+
+### 1. Outbox: `in_flight` interrumpido se resetea al mount (Bug A)
+Si el worker procesa un item y el chofer recarga la app mid-await, el item queda como `in_flight` permanentemente — `nextProcessable` lo excluye y nunca se reintenta.
+
+**Decisión:** Al inicio del hook `useOutboxWorker`, ejecutar `resetInFlight()` que pasa todos los `in_flight` a `pending` SIN incrementar `attempts` (no fue su culpa). Idempotente.
+
+### 2. Outbox: timeout en `processItem` (Bug B)
+Si el server cuelga sin responder, `processOnce` queda esperando indefinidamente bloqueando los siguientes ticks (item permanece `in_flight`).
+
+**Decisión:** `Promise.race(processItem, sleep(60s) → timeout)`. Tras timeout, clasificar como `retry` con error `"timeout"` — el item vuelve a pending con backoff y se reintenta naturalmente.
+
+### 3. Outbox: barrera por `reportId` antes de submit (Bug C)
+Hoy el outbox procesa FIFO global. Si hay `upload_photo → set_evidence → submit_report` en cola, y el upload falla 10 veces (`failed`), los siguientes items NO se quedan stuck — se procesan igual. Resultado: `submit_report` puede aplicarse sin que las fotos hayan subido.
+
+**Decisión:** En `nextProcessable`, cuando el siguiente item sea de tipo terminal (`submit_report` / `submit_non_entrega`), verificar que NO haya items previos con el mismo `reportId` en estado `pending` o `failed`. Si los hay, saltar el submit hasta que se resuelvan. Item terminal queda esperando.
+
+### 4. Outbox: manejo de `QuotaExceededError` (Bug D)
+IndexedDB en iOS no-instalado limita ~50MB. Si el blob de una foto rebasa, `idb.put` falla y la operación se pierde silenciosamente.
+
+**Decisión:** En `enqueue`, try/catch del put. Si error es `QuotaExceededError` o `DOMException` con name match: ejecutar `gc()` agresivo (todos los `done`, no solo >24h), reintentar una vez. Si vuelve a fallar, propagar error al caller para que muestre UX clara ("Espacio agotado, sincroniza pendientes antes de tomar más fotos").
+
+### 5. Outbox: invalidación al reemplazar foto (Bug E + #45)
+Cuando el chofer reemplaza la foto del recibo o ticket_merma, el `ticket_data`/`return_ticket_data` con la extracción vieja persiste — el chofer puede confirmar datos que NO corresponden a la foto actual.
+
+**Decisión:** En `PhotoInput`, cuando el slot es `ticket_recibido` o `ticket_merma` Y `existingUrl` está set (es reemplazo, no primera vez), encolar también `patch_report` con `ticketData: null, ticketExtractionConfirmed: false` (o `returnTicketData: null, returnTicketExtractionConfirmed: false`). Esto fuerza re-OCR al volver al review step.
+
+### 6. IncidentCart: coma decimal mexicana (#39)
+`Number('1,5')` → NaN. UX rota porque el chofer escribe naturalmente con coma.
+
+**Decisión:** Normalizar `replace(',', '.')` antes de `Number()` en el validador del draft.
+
+### 7. Validaciones de input — defensa en profundidad
+Sin `maxLength`/cap el usuario adversarial (o cliente con bug) puede inflar JSON, mensajes, descripciones.
+
+**Decisión (caps razonables):**
+- IncidentCart: `productName` ≤ 200 chars, `notes` ≤ 500 chars, `quantity` 0 < x ≤ 100,000.
+- Chat (driver y manager): `text` ≤ 2,000 chars (≈ 1 página).
+- TicketReview: `numero` ≤ 64 chars, `items` ≤ 50 filas, item.description ≤ 200 chars.
+- Cap visible al user con contador cuando se acerque al límite.
+
+### 8. Mime type validation en uploads (#43)
+`<input accept="image/*">` solo restringe el picker, NO valida el blob real. Un usuario adversarial puede subir SVG con scripts que se ejecutan al click directo.
+
+**Decisión:** En `uploadBlobToStorage` (driver) y `uploadBlobToStorage` (platform), validar `blob.type` contra allow-list `['image/jpeg', 'image/png', 'image/webp']`. SVG queda fuera deliberadamente. Cap defensivo de 10 MB. Rechazar con error claro.
+
+### 9. Cron de chat timeout (#40)
+`chat_status='open'` no migra a `'timed_out'` cuando `timeout_at < now()`. Dashboard de Fase 5 fallaría queries por estado.
+
+**Decisión:** Migración 019 con función SQL `mark_timed_out_chats()` que ejecuta el UPDATE. Programada con `pg_cron` cada 1 minuto. Si pg_cron no está habilitado en el proyecto, documentar fallback (n8n schedule cada minuto que invoca la función). Verificar primero si pg_cron está disponible.
+
+### 10. Rate limit OCR + chat (#41 + #46)
+Spam posible: 50 reintentos del OCR gastan créditos Anthropic; 1000 mensajes del chofer en 10s saturan al comercial.
+
+**Decisión:** Rate limit en memoria (Map<userId, timestamps[]>) en cada API route / server action sensible:
+- `/api/ocr/extract-ticket`: 6 req/min por user (suficiente para casos legítimos de re-extracción).
+- `sendDriverMessage`: 30 msg/min por user (3 cada 6s — humano máximo).
+- `sendManagerMessage`: 60 msg/min (oficinistas pueden ser más rápidos, varios con cliente al mismo tiempo).
+
+Implementación simple, no usa Redis ni tabla DB — el rate state vive en process memory. Aceptable para V1 (un solo proceso por app). Cuando se escale a multi-proceso, migrar a Redis o `rate_limits` table.
+
+### 11. Supuestos de datos: defensas runtime
+Los self-reviews encontraron varios "supuestos sin validación":
+
+**Decisión:**
+- Mapper `mapDeliveryReport` y `mapMessage` validan presencia de campos críticos (id, report_id) y lanzan error claro si faltan.
+- API route `/api/ocr/extract-ticket` valida `kind` contra enum.
+- Server actions de chat ya rechazan `text && imageUrl` ambos null — verificado.
+
+**Riesgos / Limitaciones:**
+- Rate limits en memoria se pierden tras reinicio del process — un atacante puede hacer 6 req justo antes y 6 después. Aceptable para V1.
+- `pg_cron` requiere habilitar la extensión en Supabase — si no está disponible, fallback manual.
+- Caps de chars no protegen contra carácteres unicode multi-byte (un emoji de 4 bytes cuenta como 2 JS chars). Para V1 es OK.
+- Bug C (barrera) puede atorar la cola si un upload entra en `failed` y el chofer no hace retry manual — el submit nunca se procesa. Mitigación: el badge rojo lo expone al chofer.
+
+**Oportunidades de mejora:**
+- Telemetría: cuántos items pasan por `failed`, cuántos timeouts, cuántas invalidaciones de ticket_data.
+- Rate limit distribuido (Redis) cuando llegue la fase multi-tenant.
+- Compactación de la cola: drop advance_step duplicados consecutivos para mismo report.
+
+---
+
+## [2026-05-02] ADR-024: Tiros (`dispatches`) como agrupador operativo de rutas
+
+**Contexto:** Hoy `routes` es la unidad operativa: cada ruta es independiente, asignada a 1 camión y 1 zona, con su propio nombre/fecha/status. En la práctica, la operación VerdFrut sale en "tiros" — un día Pedro CDMX hace 1 "tiro" que consiste en cargar N camionetas (3 Kangoos) y mandarlas a sus respectivas zonas o sub-zonas. Las 3 rutas comparten día, depot, comercial supervisor y muchas veces se aprueban/publican juntas.
+
+Sin agrupación, el dispatcher ve 30 rutas/semana sueltas y pierde contexto. Pidió que las rutas se agrupen por "tiro" (lote operativo) con vista del set completo.
+
+**Decisión:**
+
+1. **Nueva tabla `dispatches`** (tiros). Una fila = un lote operativo. Atributos:
+   - `id`, `name` (ej. "Tiro CDMX matutino", "Test", "Pedido VIP Bodega Aurrera")
+   - `date`, `zone_id`
+   - `status`: `planning` | `dispatched` | `completed` | `cancelled` (status agregado del set)
+   - `notes` (opcional)
+   - `created_by`, `created_at`, `updated_at`
+   - UNIQUE `(zone_id, date, name)` — evita tiros duplicados con mismo nombre el mismo día.
+
+2. **`routes.dispatch_id` UUID nullable FK a dispatches.** Nullable por:
+   - Back-compat: rutas existentes (las 3 actuales) tienen `dispatch_id=null` y se ven en la lista plana.
+   - Casos edge: si por alguna razón quieren rutas independientes sin tiro (auditoría, prueba aislada).
+
+3. **Status del tiro NO es UPDATE manual; se deriva.** Cuando la última ruta del tiro pasa a `COMPLETED`, el tiro se actualiza vía trigger a `completed`. Cuando alguna ruta pasa a `IN_PROGRESS`, el tiro pasa a `dispatched`. Beneficio: no hay drift entre status del tiro y de sus rutas.
+
+4. **Operaciones a nivel tiro (V1):**
+   - Crear tiro vacío.
+   - Agregar rutas (un dispatcher puede crear N rutas dentro del mismo tiro, una por camión).
+   - Optimizar individualmente cada ruta (no optimización conjunta en V1 — cada ruta tiene su camión propio, las restricciones no se cruzan).
+   - Aprobar / publicar todo el tiro de una vez (botón "Publicar tiro" → llama publish a cada ruta).
+   - Reordenar paradas dentro de cada ruta (la query existente `reorderStop` ya lo soporta).
+   - Editar nombre/notas del tiro.
+
+5. **UI:**
+   - `/dispatches` reemplaza la home de logística como vista principal. Lista de tiros agrupados por fecha (hoy / mañana / semana). Card por tiro con summary: nombre, # rutas, # paradas, status agregado.
+   - `/dispatches/[id]` detalle: mapa multi-route con leyenda (similar a la imagen actual de `/routes`), lista de rutas a la derecha con su estado, drag-drop de paradas dentro de cada ruta. Botones: "Agregar ruta", "Publicar todo", "Editar nombre/notas".
+   - `/routes` se mantiene como "vista plana" — útil para búsqueda cross-tiro o auditoría. Con filtro nuevo "Tiro" para encontrar rutas sin tiro.
+   - Al crear ruta, formulario opcional "Asignar a tiro" (dropdown de tiros del día); si no eliges, queda como ruta huérfana.
+
+6. **No reemplazamos `routes` con `dispatches`.** Una ruta es la unidad de ejecución (chofer + camión + paradas + reportes). Un tiro es un agrupador organizativo. Mezclarlos rompe el modelo (¿cuál ruta tiene chofer asignado dentro del tiro?). Conservar ambos.
+
+7. **RLS:** mismo patrón de routes — admin/dispatcher ven todos, zone_manager solo de su zona, driver no ve dispatches (no aplica para él).
+
+**Alternativas consideradas:**
+- *Solo agregar `routes.batch_name TEXT`:* sirve para visualización pero no permite metadata propia del tiro (notas, status agregado, audit). Desechado.
+- *Hacer dispatches un VIEW computado:* simple pero no permite editar el grupo (renombrar tiro afectaría queries dependientes).
+- *Reemplazar `routes` por `dispatches.routes JSONB`:* destruye RLS por ruta, joins, y todo lo construido. Rotundo no.
+- *Optimización conjunta de todas las rutas del tiro:* tentador pero (a) cada Kangoo tiene su propio depot=CEDIS Vallejo, (b) el optimizer ya soporta multi-vehículo, lo cual sería el approach correcto si quisiéramos un solo gran VRP. Pendiente para V2 cuando la fricción lo amerite.
+
+**Riesgos / Limitaciones:**
+- **Rutas huérfanas** acumuladas pueden generar UI inconsistente (algunas en /dispatches, otras solo en /routes). Mitigación: en /routes filtro "sin tiro" para detectarlas.
+- **Trigger de status agregado** corre en cada UPDATE de routes — riesgo mínimo de overhead, pero podría causar update loop si no es cuidadoso (UPDATE dispatches → no dispara trigger en routes, OK). Validar.
+- **UNIQUE (zone_id, date, name)** asume que el nombre del tiro es único por zona/día. Si dos dispatchers crean "Test" el mismo día, choca. Aceptable: pedimos error y que renombren.
+- **Borrar un tiro**: ON DELETE SET NULL para `routes.dispatch_id`, así borrar el tiro NO borra sus rutas (pueden quedar como huérfanas). Esa es la decisión segura.
+
+**Oportunidades de mejora:**
+- Optimización conjunta multi-vehículo (un tiro = un VRP).
+- Templates de tiro (ej. "Tiro semanal CDMX matutino" preconfigurado con N rutas).
+- Métricas agregadas por tiro: distancia total, tiempo, costo, # paradas exitosas.
+- Notificaciones al chofer cuando "su" tiro se publique completo.
+- Visualización Gantt de tiempo por ruta dentro del tiro.
+
+---
+
+## [2026-05-02] ADR-025: Mover paradas entre rutas dentro de un tiro (manual override)
+
+**Contexto:** El optimizer VROOM minimiza distancia+tiempo total y NO balancea por número de paradas. Con la nueva capacidad realista (6 cajas/Kangoo, 1 caja/tienda), VROOM puede asignar 6 paradas a una camioneta y 3 a otra si geográficamente es óptimo. Esto es correcto, pero el dispatcher humano a veces sabe contexto que el optimizer no:
+- Una tienda específica está más segura entregada por un chofer que la conoce.
+- El chofer X tiene auxiliar / el Y va solo (importa para tiendas pesadas).
+- Un cliente VIP debe estar en la primera ruta.
+
+Necesitamos un override manual: mover una parada de Ruta A → Ruta B dentro del mismo tiro, sin re-correr el optimizer.
+
+**Decisión:**
+
+1. **Server action `moveStopToAnotherRouteAction(stopId, targetRouteId)`**.
+   - Valida que ambas rutas estén editables: `DRAFT`, `OPTIMIZED`, `APPROVED`. Si están `PUBLISHED+`, rechaza (el chofer ya tiene la ruta en su PWA — no podemos moverle paradas sin avisar).
+   - Valida que estén en el mismo tiro (`dispatch_id` igual) O ambas sin tiro. Mover entre tiros distintos requeriría re-validar zona/fecha — fuera de scope V1.
+   - Append al final de la ruta destino (sequence = max+1). Si el dispatcher quiere otro orden, usa el drag-drop existente.
+   - Re-numera sequence en ruta origen para no dejar huecos.
+
+2. **NO recalcular `planned_arrival_at`/`planned_departure_at` del stop movido.** Quedan vivos los tiempos del optimizer original (que ya no son exactos). UI muestra warning "Re-optimiza el tiro para recalcular ETAs". El dispatcher decide si vale la pena.
+
+3. **NO validar capacidad estricta.** Si mover una parada hace que la ruta destino exceda `vehicles.capacity[2]`, mostramos warning visual pero no bloqueamos — el dispatcher sabe que algo así es por excepción y puede ajustar después.
+
+4. **UI en `/dispatches/[id]`:** cada ruta del tiro despliega su lista de paradas. Cada parada tiene un dropdown "Mover a → [otra ruta]" listando solo las hermanas editables.
+   - Render compacto: solo si ya hay paradas optimizadas (status ≥ OPTIMIZED), ocultar para DRAFT vacíos.
+   - Tras mover → router.refresh() para re-leer ambas rutas.
+
+5. **No drag-drop entre rutas (V1).** Implementar drag-drop cross-list es ~5x más código que un select y la fricción del select es aceptable para dispatcher experimentado. Drag-drop entre rutas se puede agregar como mejora cuando el N de paradas/tiro crezca.
+
+**Alternativas consideradas:**
+- *Re-correr optimizer con paradas "lockeadas":* VROOM soporta `priority` y restricciones, pero requiere setup más complejo. Override manual cubre 95% de casos.
+- *Permitir mover entre tiros:* tentador pero abre validaciones (zona/fecha distinta, ¿qué hacer con time windows?). YAGNI.
+- *Drag-drop cross-list con dnd-kit:* mejor UX pero ~3 días de UX work. Diferido.
+
+**Riesgos / Limitaciones:**
+- **ETAs desfasados:** stop movido conserva `planned_arrival_at` del optimizer viejo. Visualmente los ETAs ya no concuerdan con el orden geográfico. Mitigación: warning visible + botón "Re-optimizar tiro" (futuro V2).
+- **Capacity exceeded silencioso:** si dispatcher amontona 8 paradas en una Kangoo de capacity=6, no bloqueamos. El warning visual es suficiente para V1 — confiamos en el dispatcher.
+- **Race con publish:** dispatcher A está moviendo paradas mientras dispatcher B publica el tiro. Mitigación: validamos status al inicio del action, pero entre el read y el write hay ventana ms — improbable en práctica.
+- **Reorder dentro de la misma ruta** ya existe (drag-drop en `/routes/[id]`); aquí solo agregamos el cross-route.
+
+**Oportunidades de mejora:**
+- Re-optimizar la ruta destino tras un move (recalcular sequence + ETAs sin pedirle al dispatcher).
+- Drag-drop cross-list con dnd-kit cuando el N crezca.
+- Hint del optimizer: "Mover esta parada a Kangoo 2 ahorraría 8 km" — análisis post-hoc visible al dispatcher.
+- Lock de paradas: marcar una parada como "obligada en ruta X" antes de optimizar, para que el optimizer respete la asignación.
+- Bulk move (mover N paradas a la vez con multi-select).
+
+---
+
+## [2026-05-02] ADR-026: Tema dark/light con cookie + layout consola del Mapa en vivo
+
+**Contexto:** El usuario validó un mockup de "Mapa en vivo" tipo consola operacional moderna: sidebar de choferes + mapa central + panel detalle, con paleta dark profunda y accent verde brillante. El sistema actual tenía:
+- `data-theme="light"` hardcodeado en root layout (toggle no implementado).
+- Tokens dark definidos pero sub-utilizados; sin contraste suficiente para look "consola".
+- `/map` como `EmptyState` placeholder.
+
+**Decisión:**
+
+1. **Tema dark/light con cookie `vf-theme`.** Cookie escrita por `<ThemeToggle/>` (client) y leída en `RootLayout` server component vía `cookies()`. Beneficio: el SSR renderiza con `data-theme` correcto desde el primer byte — sin flash claro→oscuro.
+   - Toggle muta `document.documentElement.setAttribute('data-theme', ...)` en runtime para feedback instantáneo y escribe cookie con max-age 1 año.
+   - Sin server action — el toggle es 100% client. Cookie es el único persistor.
+
+2. **Tokens dark refinados** (apps/platform `--vf-bg` 0.18→0.155, etc.) para matchear consolas operacionales: fondo cuasi-black, surfaces escalonados, accent verde más brillante (`--vf-green-700` sube de 0.42→0.55 lightness en dark mode). Sidebar siempre dark (heredado de identidad).
+
+3. **`/map` como layout 3-columnas full-bleed** (no respeta el `max-w-7xl` ni el padding del shell):
+   - Server component carga rutas con status `PUBLISHED`/`IN_PROGRESS`/`COMPLETED` del día, joina drivers + vehicles + zones + último breadcrumb (proxy de posición actual).
+   - Client component renderiza grid `320px / 1fr / 360px`:
+     - Sidebar choferes con tabs (Todos / En ruta / Con incidencia / Completados) + lista clickeable.
+     - Mapa Mapbox con marcadores por chofer (selected más grande con glow), `dark-v11` style.
+     - Panel detalle con avatar, status chip, métricas (camioneta, ruta, última señal, ETA), barra de progreso y card de próxima parada.
+
+4. **Mecanismo "fullbleed" generalizable:** el shell layout aplica padding/max-width al `vf-main-inner` por default; páginas que necesiten edge-to-edge marcan su root con `data-fullbleed`. Una regla CSS con `:has()` neutraliza el padding cuando esa marca existe. Otras páginas no se afectan.
+   - Soporte navegador: `:has()` está en Chrome/Edge/Safari/Firefox 121+ (todos los moderns). Aceptable para una app de oficina interna.
+
+5. **Posición del chofer = último breadcrumb persistido** (no broadcast realtime, V1).
+   - Limita la "frescura": si el chofer publicó hace 90s, el marker está 90s atrasado.
+   - Trade-off consciente: aprovechamos la query existente de `route_breadcrumbs`. La integración con `gps:{routeId}` realtime channel queda para iteración cuando el caso operacional lo amerite — refresh cada 30s con un `setInterval` + revalidate también es opción.
+
+6. **Tab "Con incidencia" cableado a 0** por ahora — falta query que cruza `delivery_reports.chat_status='open'` con la ruta. Pendiente menor.
+
+**Alternativas consideradas:**
+- *localStorage en lugar de cookie:* funciona en client pero no permite SSR con tema correcto → flash. Cookie gana.
+- *system theme detection (`prefers-color-scheme`):* añadir como tercer modo "auto" es trivial pero el toggle simple cubre 95%. Diferido.
+- *Mapbox Realtime markers conectados al canal `gps:`:* mejor UX pero ~2x más código y RLS de Realtime tendría que validar admin/dispatcher en lugar de driver. Posterior.
+- *`negative margin` en `/map` para escapar padding:* funciona pero no escapa `max-w-7xl`. `:has()` es más limpio.
+
+**Riesgos / Limitaciones:**
+- **Flash en navegadores sin `:has()`:** Firefox <121 ignora la regla y `/map` queda con padding. Mitigación: `data-fullbleed` también marca la app como tal y se ve "constreñida pero funcional".
+- **Posición desfasada:** N segundos de retraso vs realidad. Mitigación: timestamp visible "hace 12s".
+- **Página `/map` carga N+1 queries** (1 por ruta para breadcrumbs + 1 por driver para profile). Aceptable con N≤20 rutas/día. Optimizar a 1 join compuesto cuando el dataset crezca.
+- **Tokens dark afectan TODAS las apps**, incluyendo driver. Driver app forza `data-theme="light"` en `<html>` (legibilidad bajo el sol) — no se afecta. Verificado.
+
+**Oportunidades de mejora:**
+- Realtime marker movement con interpolación `requestAnimationFrame` (issue #34 ya documentado).
+- Modo "auto" siguiendo `prefers-color-scheme`.
+- Tab "Con incidencia" funcional (cruzar `chat_status='open'`).
+- Filtro por zona en el sidebar (cuando haya >1 zona activa).
+- Búsqueda global del topbar funcional (placeholder hoy).
+- Cluster de markers cuando hay >20 choferes en una región.
+
+---
+
+## [2026-05-06] ADR-027: Parches de seguridad — Session timeout, invite landing page, orphan cleanup, redirect URLs
+
+**Contexto:** Sesión de hardening de seguridad antes de Fase 3. Cuatro issues importantes que, aunque no bloquean en prueba, necesitan estar resueltos antes de producción real con choferes y datos reales.
+
+**Decisión:**
+
+*#15 — Auto-logout por inactividad (8h):*
+Hook `useInactivityLogout` montado en el root layout del driver PWA via `<InactivityGuard />`. Escucha `touchstart`/`click`/`keydown` para refrescar timestamp en `localStorage`. En `visibilitychange` (app regresa al foreground) y en cada mount de página, verifica si `now - lastActive > 8h`. Si sí, llama `supabase.auth.signOut()` y redirige a `/login`. 8h cubre una jornada completa sin cerrar sesión a mid-delivery.
+
+*#11 — Invite link no consumible por previews (WhatsApp):*
+Links copiables de invite/recovery ahora apuntan a `/auth/invite?t=<token_hash>&type=<tipo>` en lugar de `/auth/callback?token_hash=...`. La nueva página es un Server Component que renderiza HTML estático con un botón. El token solo se consume cuando el chofer toca "Activar mi cuenta" (client-side `verifyOtp`). WhatsApp/iMessage no ejecutan JavaScript, por lo que el token sobrevive hasta el clic real.
+
+*#16 — Reconciliación de auth.users huérfanos:*
+Migración 021 agrega función SQL `get_orphan_auth_users()` (SECURITY DEFINER) que detecta `auth.users` sin `user_profiles` correspondiente (>1h). Endpoint cron `/api/cron/reconcile-orphan-users` (mismo patrón de auth que mark-timed-out-chats) llama la función y luego elimina cada huérfano via `admin.auth.admin.deleteUser()` (Admin API limpia cascading, no DELETE directo). Se ejecuta 1× por día desde n8n.
+
+*#14 — Redirect URLs automáticas en provision:*
+`provision-tenant.sh` ahora llama `PATCH /v1/projects/{id}/config/auth` inmediatamente después de aplicar las migraciones. Configura `site_url` (platform URL) y `additional_redirect_urls` (`/auth/callback`, `/auth/invite`, `/login`). Elimina la necesidad de edición manual en Supabase Dashboard por cada tenant nuevo.
+
+**Alternativas consideradas:**
+
+*#15:* Timeout de 12h (más laxo, más conveniente si el chofer hace jornadas largas). Elegimos 8h porque protege mejor el caso de "teléfono olvidado/robado fuera de jornada".
+
+*#11:* PKCE completo (code_verifier en localStorage, code_challenge al servidor). Más robusto pero requiere cambiar el flow de `inviteUserByEmail` a OAuth-style PKCE — complejidad alta. La landing page logra la misma protección contra crawlers con 1/10 del código. PKCE queda como mejora futura si se necesita proteger también el link del email (no solo WhatsApp).
+
+*#16:* Envolver `inviteUser()` en una RPC de Postgres con SAVEPOINT para rollback atómico. Más correcto a largo plazo pero requiere reescribir el flujo de invitación. El job nocturno es la net de seguridad adecuada para la escala actual.
+
+*#14:* Dejar como tarea manual documentada. Descartado — un tenant mal configurado bloquea el primer invite y nadie entiende por qué. Automatizar es la única opción confiable.
+
+**Riesgos / Limitaciones:**
+
+- *#15:* `localStorage` no está disponible en SSR — el hook es `'use client'` y solo corre en browser. Correcto por diseño.
+- *#15:* Si el chofer usa la app con pantalla encendida durante >8h sin tocar nada (GPS activo), la sesión se cerrará. Mitigación: el GPS broadcast y el outbox worker generan actividad indirecta, pero no tocan el DOM — no actualizan el timestamp. Opción futura: que el outbox worker también refresque el timestamp de inactividad.
+- *#11:* El email enviado por Supabase directamente (vía `inviteUserByEmail`) todavía apunta a `/auth/callback` (server-side Route Handler). Si ese email es abierto por un cliente con link preview, el token se consumiría. Mitigación actual: los emails de invitación de Supabase son para chofer sin WhatsApp (raro). El link copiable, que es el path principal, ya está protegido.
+- *#16:* Si el admin invita a alguien y el job corre antes de que el chofer active su cuenta Y entre en la ventana de 1h sin profile (e.g., invite falla al insertar profile), el job limpia el usuario antes de que el chofer tenga chance. Ventana de 1h mitiga esto para el caso normal.
+- *#14:* La lista de redirect URLs en Supabase es estática al momento del provisioning. Si el dominio del tenant cambia post-provisioning, hay que actualizar manualmente vía CLI o Dashboard.
+
+**Oportunidades de mejora:**
+
+- *#15:* Que el outbox worker y el GPS broadcast también refresquen el timestamp de inactividad.
+- *#11:* Migrar a PKCE completo para proteger también el link del email original.
+- *#16:* Envolver `inviteUser()` en RPC con SAVEPOINT para rollback atómico — eliminaría la necesidad del job correctivo.
+- *#14:* Agregar comando de "re-sync auth config" al `migrate-all-tenants.sh` para actualizar redirect URLs en todos los tenants si el esquema de dominios cambia.
+
+---
+
+## [2026-05-06] ADR-028: Dashboard cliente — agregaciones SQL + Recharts + filtros vía URL
+
+**Contexto:** Inicio de Fase 3. El cliente distribuidor necesita ver KPIs operativos, comerciales y de calidad de su flota para tomar decisiones del día siguiente y tener evidencia para sus propios stakeholders. El stub de `/dashboard` mostraba placeholders; los reportes salían de queries ad-hoc en Supabase Studio.
+
+**Decisión:**
+
+*Agregaciones en SQL functions, no en TS:*
+Migración 022 agrega 4 funciones — `get_dashboard_overview`, `get_dashboard_daily_series`, `get_dashboard_top_stores`, `get_dashboard_top_drivers`. Una sola RPC devuelve los 12 KPIs completos. Las funciones son `STABLE` y `SECURITY INVOKER` para que respeten RLS automáticamente — un `zone_manager` jamás ve datos fuera de su zona aunque pase un `zoneId` distinto. Sumas sobre campos JSONB (ticket_data->>'total') se hacen con cast nativo a numeric, imposible de hacer eficientemente desde el cliente Supabase JS sin SQL puro.
+
+*KPIs definidos (12 tarjetas en 3 grupos):*
+- **Operativos:** Rutas completadas, Tiendas visitadas (DISTINCT), % Completitud (stops_completed/stops_total), Distancia total (km).
+- **Comerciales:** Total facturado (Σ ticket.total), Ticket promedio, # Tickets, % Merma (Σ return.total / Σ ticket.total).
+- **Calidad:** # Incidencias (Σ jsonb_array_length(incident_details)), # Tiendas cerradas, # Reportes báscula, # Escalaciones (chats abiertos).
+
+*Filtros vía searchParams (no client state):*
+`/dashboard?from=YYYY-MM-DD&to=YYYY-MM-DD&zone=<uuid>` — el server component re-renderea con cada cambio, sin ningún hook de fetching del lado del cliente. Default: últimos 30 días, sin filtro de zona. Los filtros son shareables vía URL (un dispatcher manda link al admin con ese mismo rango).
+
+*Recharts para gráficos:*
+ComposedChart dual-axis: barras (entregas) + línea (facturado) por día. Cliente component (`'use client'`) porque Recharts usa SVG runtime. Bundle adicional: ~50KB gzipped — aceptable para una app de operadores en escritorio.
+
+*Defensa en profundidad para zone_manager:*
+La página fuerza `zoneId = profile.zoneId` para `zone_manager`, ignorando lo que venga en searchParams. RLS también filtra. Doble barrera: aunque la UI permitiera "ver todas las zonas" por error, el server siempre filtra al alcance del usuario.
+
+**Alternativas consideradas:**
+
+*Queries TS con `.select().in().group()`:* Descartado. PostgREST no soporta agregaciones complejas sobre JSONB con casts. Hubiéramos terminado pidiendo todas las filas y agregando en JS — costoso en red y memoria.
+
+*Vistas materializadas:* Más rápido para consultas repetidas, pero requiere refresh schedule y los rangos arbitrarios (cualquier from-to) hacen que una vista materializada por día tampoco sea suficiente. Las funciones STABLE con índices existentes (`idx_routes_zone_date`, `idx_reports_zone_status`) responden bien para rangos de 30-90 días.
+
+*State management cliente (TanStack Query):* Innecesario. El dashboard es un view de lectura, los filtros son URL-driven, no hay mutaciones. Server Component es el patrón correcto.
+
+*ChartJS / Visx en lugar de Recharts:* Recharts tiene mejor DX y SSR-friendly (los componentes son markup React directo, no canvas/imperative). El bundle es comparable o mejor.
+
+*Más KPIs (15-20 tarjetas):* Decidimos quedarnos en 12 hasta que el cliente nos pida más. El feedback temprano evita pulir métricas que nadie ve.
+
+**Riesgos / Limitaciones:**
+
+- *Bug en runtime descubierto al cerrar Sprint 17 (post-mortem):* `get_dashboard_overview` lanzaba `column reference "total_distance_meters" is ambiguous` en runtime. Causa raíz: en plpgsql, los nombres de las columnas OUT del `RETURNS TABLE` están en el mismo namespace que las columnas referenciadas dentro del cuerpo. El CTE `rs` exponía `r.total_distance_meters` y la función tenía un OUT param con el mismo nombre — Postgres no sabía a cuál refería al hacer `SUM(total_distance_meters)`. Fix aplicado: cualificar SIEMPRE las columnas con el alias del CTE (`rs.total_distance_meters`, `dr.ticket_data`, `sx.status`, etc.) en cada subquery dentro de funciones plpgsql con `RETURNS TABLE`. Las funciones `LANGUAGE sql` (top_stores, top_drivers, daily_series) no tienen este problema porque SQL puro no inyecta los OUT params en el namespace. Aprendizaje para próximas funciones plpgsql: o cualificar con alias, o usar `#variable_conflict use_column` al inicio del cuerpo. Comentario explicativo agregado al inicio del cuerpo de la función para que sea evidente para mantenedores futuros.
+- *Tiempo respuesta chat:* No incluido en Sprint 14 — requiere computar diferencias entre primer mensaje del chofer y primer mensaje del manager por reporte. Lo agregaremos en Sprint 15 si lo piden.
+- *Conversión de TZ:* `daily_series` agrupa por `(d.created_at AT TIME ZONE 'UTC')::DATE` — usa UTC, no la TZ local del tenant. Para clientes en TZ con offset >12h del UTC podría haber un día de discrepancia con `routes.date`. Mitigación: la mayoría de los clientes están en `America/Mexico_City` (UTC-6), donde la discrepancia es mínima al final del día. Mejora futura: parametrizar la TZ.
+- *RPC count exacto:* Las funciones devuelven los datos del rango pero no metadata como "total filas posibles" — para paginar (Sprint 15 cuando hagamos drill-downs) habrá que añadirlo.
+- *Cache:* `force-dynamic` en la página — se ejecutan las 4 RPCs por cada request. Aceptable hoy. Si el dashboard se vuelve pesado, agregar `cache: 'force-cache'` con `revalidate: 300` y/o usar Next.js `unstable_cache`.
+
+**Oportunidades de mejora:**
+
+- Drill-down a `/dashboard/stores/[id]` y `/dashboard/drivers/[id]` con histórico — Sprint 15.
+- Export XLSX para ERP — Sprint 16.
+- Comparativa con período anterior ("vs últimos 30 días" delta sobre cada KPI).
+- Filtro por chofer y por tienda específica.
+- Modo "tarjeta semanal" (KPIs de semana actual vs semana anterior).
+- Heatmap de horarios de entrega (qué horas son más eficientes).
+- Tarjeta de tiempo promedio de respuesta del manager en chats.
+
+---
+
+## [2026-05-06] ADR-029: Drill-downs y export XLSX para ERP — Sprints 15-16
+
+**Contexto:** Cierre de Fase 3. Después del dashboard core (ADR-028), faltaban dos piezas: (1) que el cliente pueda hacer click en una tienda/chofer y ver su histórico, (2) que pueda exportar los tickets del período a un archivo que su ERP/Sheets pueda procesar (el cliente no compra módulos de integración custom — pide CSV/XLSX).
+
+**Decisión:**
+
+*Sprint 15 — Drill-downs:*
+
+Cuatro páginas nuevas bajo `/dashboard`:
+- `/dashboard/stores` — listado de todas las tiendas con actividad en el período (reusa `get_dashboard_top_stores` con `limit=1000`).
+- `/dashboard/stores/[id]` — header con info de la tienda, 5 cards de métricas agregadas (visitas, facturado, ticket promedio, devuelto, incidentes), tabla con histórico de visitas (cada fila con badge de tipo, link a la ruta y al chat si aplica).
+- `/dashboard/drivers` y `/dashboard/drivers/[id]` — análogos para choferes (rutas asignadas, paradas completadas, distancia, duración, facturado).
+
+Las queries de detalle (`getStoreVisits`, `getDriverRoutes`) son joins directos con PostgREST nested selects, no SQL functions — son simples lookups, no agregaciones complejas. Los nombres de chofer se resuelven en una segunda pasada para evitar JOIN anidado con `user_profiles` que PostgREST tipa de forma confusa.
+
+`DashboardFilters` se hizo path-aware: usa `usePathname()` para que el redirect tras cambiar fechas funcione tanto en `/dashboard` como en `/dashboard/stores` o `/dashboard/drivers`.
+
+*Sprint 16 — Export XLSX:*
+
+Endpoint `GET /api/export/tickets?from=&to=&zone=` autenticado por cookie. Devuelve un archivo `.xlsx` con `Content-Disposition: attachment` y nombre `verdfrut-tickets-<from>-<to>.xlsx`. El browser descarga directamente cuando el user toca el botón en `/dashboard` (`window.open(url, '_blank')`).
+
+El XLSX tiene 4 hojas, generadas con `exceljs`:
+1. **Tickets** — 1 fila por delivery_report con resumen (fecha, ruta, tienda, chofer, # ticket, total, # items, devolución total, # incidentes, merma).
+2. **Items** — 1 fila por item del ticket principal (granular, para reconciliación de inventario en el ERP).
+3. **Devoluciones** — 1 fila por item del return_ticket. Si la devolución tiene total pero no items detallados, se exporta una fila con solo el total (información parcial mejor que nada).
+4. **Incidentes** — 1 fila por elemento de `incident_details[]` (rechazos, faltantes, sobrantes, devoluciones declaradas manualmente por el chofer).
+
+Header bold + frozen pane en cada hoja. Columnas con `numFmt: "$"#,##0.00` para totales monetarios — Excel/Sheets las muestran formateadas sin que el usuario tenga que aplicar formato.
+
+Cap defensivo `MAX_REPORTS = 10_000` para evitar OOM si alguien pide un export del año entero. zone_manager forzado a su zona (defensa en profundidad sobre RLS).
+
+**Alternativas consideradas:**
+
+*POST con body JSON + blob fetch:* Más control pero requiere JS adicional para crear blob y trigger anchor sintético. GET con `Content-Disposition` lo resuelve nativamente y respeta cookies de sesión.
+
+*CSV en lugar de XLSX:* CSV no soporta múltiples hojas — habría que generar 4 archivos separados o un solo archivo plano. XLSX abre limpio en Excel, Numbers y Google Sheets, y permite formato monetario nativo. Tamaño es comparable porque XLSX es ZIP comprimido.
+
+*SQL function que devuelve directamente el XLSX (con `pg-xlsx` o similar):* Innecesariamente complejo. El TS layer es donde naturalmente vive la lógica de presentación (qué columnas, qué formato, cómo etiquetar tipos).
+
+*Streaming row-by-row con `WritableStream`:* Para 10K reportes (~30MB de XLSX) no se justifica. Buffer en memoria es simple y rápido. Si crece la escala, migrar a streaming será trivial (`ExcelJS.stream.xlsx.WorkbookWriter`).
+
+*Recharts library para drill-downs:* Considerado mostrar mini-charts en las páginas de detalle (sparkline de visitas mensuales por tienda). Decidimos esperar feedback — los stakeholders pueden no necesitarlo y son ciclos extra sin valor confirmado.
+
+**Riesgos / Limitaciones:**
+
+- *Top X con LIMIT excluye 0-actividad:* `get_dashboard_top_stores` tiene `HAVING COUNT > 0` para los top 10 del overview. Reusarlo para el listado completo significa que tiendas SIN visitas en el período no aparecen. Mitigación: para auditarlas, usar `/settings/stores` (que sí lista todas). Mejora futura: parámetro `include_inactive` en la SQL function.
+- *Devoluciones sin items detallados:* el OCR puede fallar al extraer items del ticket de merma — solo persiste el `total`. Exportamos esa fila parcial para que el cliente al menos vea que hubo una devolución. Si quiere granular, debe entrar al reporte y editarlo manualmente.
+- *Cap de 10K reportes:* puede ser bajo para clientes grandes (ej. 30 zonas × 200 reportes/día × 30 días = 180K). Mitigación: el cap puede subirse fácil cambiando `MAX_REPORTS`. A esa escala probablemente convenga streaming + descarga progresiva.
+- *Formato `numero` en ticket_data:* viene como string del OCR. El ERP que lo importe puede necesitar parsing si espera número. Decidimos NO castear (no perder ceros a la izquierda, prefijos, etc.). El cliente formatea según su ERP.
+- *Hojas vacías:* si un export no tiene devoluciones ni incidentes, esas hojas quedan con solo el header. Aceptable — el ERP detecta hojas vacías sin error.
+
+**Oportunidades de mejora:**
+
+- Filtro por chofer/tienda específica en el export (ya tenemos los IDs en searchParams).
+- Botón de export también en `/dashboard/stores/[id]` y `/drivers/[id]` (export limitado a esa entidad).
+- Hoja adicional "Resumen" con los 12 KPIs del overview (algunos ERPs lo pegan directo en su reporte mensual).
+- CSV separado por hoja para clientes con ERPs antiguos que no leen XLSX.
+- Email del XLSX al admin (n8n schedule mensual con auto-export del mes anterior).
+- Sparklines en `/dashboard/stores/[id]` con histórico de 12 meses.
+- Comparativa con período anterior en cada drill-down ("vs 30 días previos").
+
+---
+
+## [2026-05-06] ADR-030: Control Plane VerdFrut — schema co-localizado, shared password V1
+
+**Contexto:** Inicio de Fase 4. VerdFrut necesita un panel propio (no del cliente) para gestionar tenants, ver KPIs agregados cross-tenant y eventualmente onboardear nuevos clientes. Hasta hoy el "control plane" era el script `provision-tenant.sh` + ediciones manuales en Supabase Studio. No escala más allá de 1-2 clientes.
+
+**Decisión:**
+
+*Co-localización en proyecto Supabase existente (Escenario 2 de la matriz que discutimos):*
+
+El schema `control_plane` vive en el MISMO proyecto Supabase que el tenant primario (rifigue97). Aislamiento garantizado por:
+1. **Schema PostgreSQL separado** (`control_plane.tenants`, `control_plane.tenant_kpi_snapshots`, etc.).
+2. **RLS habilitado SIN policies** — anon y authenticated no pueden leer ni una fila.
+3. **REVOKE USAGE** del schema para anon/authenticated — ni siquiera pueden nombrar las tablas en una query.
+4. **service_role como único caller** — bypassea RLS por diseño, lo usa solo el control plane.
+
+ADR-001 obligaba a "un proyecto por cliente" para evitar leak entre competidores. El control plane es **un caso distinto**: es propiedad de VerdFrut, no de un cliente. Las razones de ADR-001 (data leak entre OXXO y Neto) no aplican igual aquí — el riesgo es VerdFrut leyendo a sus propios datos operativos. Trade-off explícito: aceptamos blast radius compartido a cambio de no pagar $25/mes adicionales en testing.
+
+**Triggers para migrar a Escenario 3 (proyecto separado):**
+- Cuando VerdFrut firme su 2º cliente real, O
+- Cuando un contrato exija aislamiento total de datos del proveedor SaaS, O
+- Cuando el CP tenga queries pesadas que afecten perf del tenant.
+
+Migración trivial: `pg_dump --schema=control_plane $CURRENT | psql $NEW_CP_PROJECT`.
+
+*App nueva `apps/control-plane` (Next 16, port 3002):*
+
+- Reusa packages `@verdfrut/ui`, `@verdfrut/types`, `@verdfrut/utils`, `@verdfrut/supabase`.
+- No usa `@verdfrut/maps` ni `@verdfrut/flow-engine` ni `@verdfrut/ai` — el CP no los necesita.
+- Sidebar siempre dark (consistente con identidad VerdFrut) + badge "CTRL" para distinguir visualmente.
+- Theme dark forzado en root layout — el CP no tiene toggle, distinto a platform.
+
+*Auth V1 — shared password con cookie HMAC:*
+
+`CP_SHARED_PASSWORD` en env. El staff de VerdFrut entra con esa password única, recibe una cookie `cp-session` firmada con HMAC-SHA256 (`CP_COOKIE_SECRET`). Cookie HTTP-only, secure (en prod), sameSite=lax, expira en 7 días.
+
+El middleware (Edge runtime) verifica la firma con Web Crypto API en cada request a rutas protegidas. Rutas públicas: `/login` y `/api/health`. Sin cookie válida → redirect a `/login?next=...`.
+
+**Por qué shared password y no Supabase Auth:** el CP hoy tiene 1-2 personas con acceso (tú y eventualmente un colaborador). Supabase Auth requiere proyecto Supabase del CP funcionando con tabla de admin_users + invites + email delivery, etc. — overhead injustificado para 2 personas. La tabla `control_plane.admin_users` queda preparada para Sprint 18+ cuando migremos a auth completo (un email = un row, login real con magic link).
+
+*Cliente Supabase del CP:*
+
+Helper `cpClient()` en `apps/control-plane/src/lib/cp-client.ts` que retorna `createServiceRoleClient().schema('control_plane')`. Toda query del CP pasa por ahí — evita repetir `.schema('control_plane')` en cada call y garantiza que el caller siempre use service_role.
+
+**Alternativas consideradas:**
+
+*Proyecto Supabase nuevo desde día 1 (Escenario 1):* $25/mes adicionales sin clientes reales en producción. Premature optimization. Adoptar cuando los triggers se cumplan.
+
+*Tablas con prefijo `cp_*` en `public`:* Funciona pero leak de schema vía PostgREST OpenAPI (los clientes admin pueden ver que existen `cp_tenants`). Schema separado es más limpio.
+
+*Auth con HTTP Basic:* Browser muestra prompt nativo, sin UX propia. No permite logout limpio. Cookie firmada + form propio es el patrón estándar.
+
+*Magic-link sobre Supabase Auth con allow-list de emails:* Requiere proyecto Supabase del CP funcionando, mucho más infra para 2 usuarios. Migrable después.
+
+*Sin auth en V1 (binding solo a localhost o VPN interna):* Funciona si el CP solo corre en máquinas de desarrollo. No es portable a un deploy en VPS — basta una mala regla de firewall y queda expuesto.
+
+**Riesgos / Limitaciones:**
+
+- *Modelo de seguridad RLS-only (no defense-in-depth de schema):* la versión inicial de la migration revocaba USAGE del schema `control_plane` para anon/authenticated, pensando en defense-in-depth. **Esto rompe el cliente Supabase** porque PostgREST devuelve `PGRST106 / Invalid schema` si el schema no está en `pgrst.db_schemas` y los roles no tienen USAGE. Corregido al cerrar Sprint 17: GRANT USAGE/ALL a anon/authenticated/service_role + `ALTER ROLE authenticator SET pgrst.db_schemas = 'public, graphql_public, control_plane'` + `NOTIFY pgrst, 'reload config'`. La protección de DATOS sigue intacta gracias a RLS sin policies (anon/authenticated obtienen 0 filas en SELECT, fallan en INSERT/UPDATE/DELETE). El leak menor que aceptamos: anon/authenticated pueden DESCUBRIR los nombres de tablas/columnas vía PostgREST OpenAPI (`GET /rest/v1/`). Para esconder también la metadata, migrar las queries a SECURITY DEFINER RPCs en `public.cp_*`. V1 acepta el leak de metadata por simplicidad; mitigación en Sprint 18+ si se firma un cliente con requirements de compliance estrictos.
+- *Shared password sin revocación granular:* si un staff se va, hay que rotar la password Y `CP_COOKIE_SECRET` (invalida todas las sesiones existentes). Aceptable con 1-2 personas, ingestionable a 5+. Por eso Sprint 18+ migra a Supabase Auth.
+- *Co-localización con tenant primario:* el CP corre con `service_role` del proyecto del tenant. Si ese tenant tiene un incidente y restaura backup de hace 3 horas, el CP rebobina también. Mitigación: snapshots de `control_plane.*` separados antes de restores.
+- *Sin RLS por admin_user para `audit_log`:* hoy todo staff con la password ve toda la auditoría. Aceptable con `admin` y `support` siendo solo VerdFrut interno; cuando agreguemos roles más finos en Sprint 18 (ej. partners externos), separar la lectura del `audit_log`.
+- *No hay RLS de tenant_id en cliente Supabase del CP:* los queries del CP listan TODOS los tenants. Correcto por diseño (es la vista global), pero si en el futuro queremos delegar parte del CP a un partner que solo vea SU subset, hay que añadir lógica de permisos en TS.
+- *Cookie HMAC sin rotación de keys:* `CP_COOKIE_SECRET` no rota automáticamente. Para alta seguridad, agregar rotación con kid (key id) en el token.
+
+**Oportunidades de mejora:**
+
+- Sprint 18: KPIs agregados cross-tenant + endpoint `/api/sync/[slug]` que pulla datos del tenant via Management API.
+- Sprint 19: Onboarding wizard que replica `provision-tenant.sh` en TS (Management API calls, polling de status, migration apply, registro en `control_plane.tenants`).
+- Sprint 20+: billing manual (timeline de pagos, generación de facturas).
+- Migrar a Supabase Auth (proyecto separado del CP) cuando crezcamos a 5+ personas con acceso.
+- Migrar a Escenario 3 cuando se cumpla cualquiera de los 3 triggers documentados arriba.
+- `proxy.ts` en lugar de `middleware.ts` — Next 16 deprecó middleware (warning en build). Migración trivial cuando estabilicen el API.
+
+---
+
 ## Plantilla para nuevas decisiones
 
 ```markdown

@@ -19,6 +19,8 @@ export type Database = {
     Tables: {
       delivery_reports: {
         Row: {
+          chat_opened_at: string | null
+          chat_status: string | null
           created_at: string
           current_step: string
           driver_id: string
@@ -51,6 +53,8 @@ export type Database = {
           zone_id: string
         }
         Insert: {
+          chat_opened_at?: string | null
+          chat_status?: string | null
           created_at?: string
           current_step: string
           driver_id: string
@@ -83,6 +87,8 @@ export type Database = {
           zone_id: string
         }
         Update: {
+          chat_opened_at?: string | null
+          chat_status?: string | null
           created_at?: string
           current_step?: string
           driver_id?: string
@@ -113,6 +119,87 @@ export type Database = {
           timeout_at?: string | null
           type?: Database["public"]["Enums"]["report_type"]
           zone_id?: string
+        }
+        Relationships: []
+      }
+      depots: {
+        Row: {
+          address: string
+          code: string
+          contact_name: string | null
+          contact_phone: string | null
+          created_at: string
+          id: string
+          is_active: boolean
+          lat: number
+          lng: number
+          name: string
+          notes: string | null
+          zone_id: string
+        }
+        Insert: {
+          address: string
+          code: string
+          contact_name?: string | null
+          contact_phone?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          lat: number
+          lng: number
+          name: string
+          notes?: string | null
+          zone_id: string
+        }
+        Update: {
+          address?: string
+          code?: string
+          contact_name?: string | null
+          contact_phone?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          lat?: number
+          lng?: number
+          name?: string
+          notes?: string | null
+          zone_id?: string
+        }
+        Relationships: []
+      }
+      dispatches: {
+        Row: {
+          id: string
+          name: string
+          date: string
+          zone_id: string
+          status: string
+          notes: string | null
+          created_by: string
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          date: string
+          zone_id: string
+          status?: string
+          notes?: string | null
+          created_by: string
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          date?: string
+          zone_id?: string
+          status?: string
+          notes?: string | null
+          created_by?: string
+          created_at?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -292,6 +379,7 @@ export type Database = {
           vehicle_id: string
           version: number
           zone_id: string
+          dispatch_id: string | null
         }
         Insert: {
           actual_end_at?: string | null
@@ -315,6 +403,7 @@ export type Database = {
           vehicle_id: string
           version?: number
           zone_id: string
+          dispatch_id?: string | null
         }
         Update: {
           actual_end_at?: string | null
@@ -338,6 +427,7 @@ export type Database = {
           vehicle_id?: string
           version?: number
           zone_id?: string
+          dispatch_id?: string | null
         }
         Relationships: []
       }
@@ -474,15 +564,7 @@ export type Database = {
           role?: Database["public"]["Enums"]["user_role"]
           zone_id?: string | null
         }
-        Relationships: [
-          {
-            foreignKeyName: "user_profiles_zone_id_fkey"
-            columns: ["zone_id"]
-            isOneToOne: false
-            referencedRelation: "zones"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       vehicles: {
         Row: {
@@ -524,68 +606,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["vehicle_status"]
           zone_id?: string
         }
-        Relationships: [
-          {
-            foreignKeyName: "vehicles_depot_id_fkey"
-            columns: ["depot_id"]
-            isOneToOne: false
-            referencedRelation: "depots"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      depots: {
-        Row: {
-          id: string
-          zone_id: string
-          code: string
-          name: string
-          address: string
-          lat: number
-          lng: number
-          contact_name: string | null
-          contact_phone: string | null
-          notes: string | null
-          is_active: boolean
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          zone_id: string
-          code: string
-          name: string
-          address: string
-          lat: number
-          lng: number
-          contact_name?: string | null
-          contact_phone?: string | null
-          notes?: string | null
-          is_active?: boolean
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          zone_id?: string
-          code?: string
-          name?: string
-          address?: string
-          lat?: number
-          lng?: number
-          contact_name?: string | null
-          contact_phone?: string | null
-          notes?: string | null
-          is_active?: boolean
-          created_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "depots_zone_id_fkey"
-            columns: ["zone_id"]
-            isOneToOne: false
-            referencedRelation: "zones"
-            referencedColumns: ["id"]
-          },
-        ]
+        Relationships: []
       }
       zones: {
         Row: {
@@ -631,32 +652,67 @@ export type Database = {
       }
     }
     Functions: {
-      current_user_role: {
-        Args: Record<PropertyKey, never>
-        Returns: Database["public"]["Enums"]["user_role"]
+      current_user_role: { Args: never; Returns: Database["public"]["Enums"]["user_role"] }
+      current_user_zone: { Args: never; Returns: string }
+      get_dashboard_daily_series: {
+        Args: { from_date: string; to_date: string; zone_id_filter?: string | null }
+        Returns: { day: string; deliveries: number; billed: number }[]
       }
-      current_user_zone: {
-        Args: Record<PropertyKey, never>
-        Returns: string
-      }
-      daily_zone_kpis: {
-        Args: { target_date: string }
+      get_dashboard_overview: {
+        Args: { from_date: string; to_date: string; zone_id_filter?: string | null }
         Returns: {
-          completed_routes: number
-          completed_stops: number
-          reports_with_incidents: number
-          reports_with_merma: number
+          routes_completed: number
+          stores_visited: number
+          stops_total: number
+          stops_completed: number
           total_distance_meters: number
-          total_routes: number
-          total_stops: number
-          zone_code: string
-          zone_id: string
+          num_tickets: number
+          total_billed: number
+          total_returned: number
+          total_incidents: number
+          num_closed_stores: number
+          num_scale_issues: number
+          num_escalations: number
         }[]
       }
-      is_admin_or_dispatcher: {
-        Args: Record<PropertyKey, never>
-        Returns: boolean
+      get_dashboard_top_drivers: {
+        Args: {
+          from_date: string
+          to_date: string
+          zone_id_filter?: string | null
+          row_limit?: number
+        }
+        Returns: {
+          driver_id: string
+          driver_name: string
+          routes_count: number
+          stops_completed: number
+          total_distance_meters: number
+          total_billed: number
+        }[]
       }
+      get_dashboard_top_stores: {
+        Args: {
+          from_date: string
+          to_date: string
+          zone_id_filter?: string | null
+          row_limit?: number
+        }
+        Returns: {
+          store_id: string
+          store_code: string
+          store_name: string
+          visits: number
+          total_billed: number
+          incidents: number
+        }[]
+      }
+      get_orphan_auth_users: {
+        Args: never
+        Returns: { user_id: string; email: string | null; created_at: string }[]
+      }
+      is_admin_or_dispatcher: { Args: never; Returns: boolean }
+      mark_timed_out_chats: { Args: never; Returns: number }
     }
     Enums: {
       message_sender: "driver" | "zone_manager" | "system"
@@ -680,6 +736,222 @@ export type Database = {
       stop_status: "pending" | "arrived" | "completed" | "skipped"
       user_role: "admin" | "dispatcher" | "zone_manager" | "driver"
       vehicle_status: "available" | "in_route" | "maintenance" | "inactive"
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
+  control_plane: {
+    Tables: {
+      tenants: {
+        Row: {
+          id: string
+          slug: string
+          name: string
+          status: 'provisioning' | 'active' | 'suspended' | 'archived'
+          plan: 'starter' | 'pro' | 'enterprise'
+          supabase_project_ref: string | null
+          supabase_url: string | null
+          timezone: string
+          contact_email: string | null
+          contact_phone: string | null
+          contracted_at: string | null
+          monthly_fee: number | null
+          last_sync_at: string | null
+          last_sync_error: string | null
+          cached_zone_count: number
+          cached_driver_count: number
+          cached_active_route_count: number
+          notes: string | null
+          metadata: Record<string, unknown>
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          slug: string
+          name: string
+          status?: 'provisioning' | 'active' | 'suspended' | 'archived'
+          plan?: 'starter' | 'pro' | 'enterprise'
+          supabase_project_ref?: string | null
+          supabase_url?: string | null
+          timezone?: string
+          contact_email?: string | null
+          contact_phone?: string | null
+          contracted_at?: string | null
+          monthly_fee?: number | null
+          last_sync_at?: string | null
+          last_sync_error?: string | null
+          cached_zone_count?: number
+          cached_driver_count?: number
+          cached_active_route_count?: number
+          notes?: string | null
+          metadata?: Record<string, unknown>
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          slug?: string
+          name?: string
+          status?: 'provisioning' | 'active' | 'suspended' | 'archived'
+          plan?: 'starter' | 'pro' | 'enterprise'
+          supabase_project_ref?: string | null
+          supabase_url?: string | null
+          timezone?: string
+          contact_email?: string | null
+          contact_phone?: string | null
+          contracted_at?: string | null
+          monthly_fee?: number | null
+          last_sync_at?: string | null
+          last_sync_error?: string | null
+          cached_zone_count?: number
+          cached_driver_count?: number
+          cached_active_route_count?: number
+          notes?: string | null
+          metadata?: Record<string, unknown>
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      tenant_kpi_snapshots: {
+        Row: {
+          id: string
+          tenant_id: string
+          snapshot_date: string
+          routes_completed: number
+          stores_visited: number
+          stops_total: number
+          stops_completed: number
+          total_distance_meters: number
+          num_tickets: number
+          total_billed: number
+          total_returned: number
+          total_incidents: number
+          num_closed_stores: number
+          num_scale_issues: number
+          num_escalations: number
+          raw_payload: Record<string, unknown> | null
+          synced_at: string
+        }
+        Insert: {
+          id?: string
+          tenant_id: string
+          snapshot_date: string
+          routes_completed?: number
+          stores_visited?: number
+          stops_total?: number
+          stops_completed?: number
+          total_distance_meters?: number
+          num_tickets?: number
+          total_billed?: number
+          total_returned?: number
+          total_incidents?: number
+          num_closed_stores?: number
+          num_scale_issues?: number
+          num_escalations?: number
+          raw_payload?: Record<string, unknown> | null
+          synced_at?: string
+        }
+        Update: {
+          id?: string
+          tenant_id?: string
+          snapshot_date?: string
+          routes_completed?: number
+          stores_visited?: number
+          stops_total?: number
+          stops_completed?: number
+          total_distance_meters?: number
+          num_tickets?: number
+          total_billed?: number
+          total_returned?: number
+          total_incidents?: number
+          num_closed_stores?: number
+          num_scale_issues?: number
+          num_escalations?: number
+          raw_payload?: Record<string, unknown> | null
+          synced_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'tenant_kpi_snapshots_tenant_id_fkey'
+            columns: ['tenant_id']
+            isOneToOne: false
+            referencedRelation: 'tenants'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      admin_users: {
+        Row: {
+          id: string
+          email: string
+          full_name: string
+          role: 'admin' | 'support'
+          is_active: boolean
+          last_login_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          email: string
+          full_name: string
+          role?: 'admin' | 'support'
+          is_active?: boolean
+          last_login_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          email?: string
+          full_name?: string
+          role?: 'admin' | 'support'
+          is_active?: boolean
+          last_login_at?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      audit_log: {
+        Row: {
+          id: string
+          actor_email: string | null
+          action: string
+          target_type: string | null
+          target_id: string | null
+          details: Record<string, unknown>
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          actor_email?: string | null
+          action: string
+          target_type?: string | null
+          target_id?: string | null
+          details?: Record<string, unknown>
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          actor_email?: string | null
+          action?: string
+          target_type?: string | null
+          target_id?: string | null
+          details?: Record<string, unknown>
+          created_at?: string
+        }
+        Relationships: []
+      }
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      [_ in never]: never
+    }
+    Enums: {
+      [_ in never]: never
     }
     CompositeTypes: {
       [_ in never]: never

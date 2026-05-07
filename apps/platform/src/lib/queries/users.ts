@@ -112,16 +112,17 @@ function inviteRedirectFor(role: UserRole): string {
 
 /**
  * Convierte el `action_link` que devuelve `auth.admin.generateLink` en un link
- * directo a NUESTRO callback con `?token_hash=...&type=...` en query string.
+ * copiable para el admin.
  *
- * Por qué: el `action_link` apunta a `/auth/v1/verify` de Supabase, que verifica
- * el token y redirige con `#access_token=...` (implicit flow, fragment). El fragment
- * no llega al server, así que un Route Handler server-side no puede recuperarlo.
+ * Para links de la driver app (/auth/callback): apunta a /auth/invite con el
+ * token en ?t= en lugar de ir directo al Route Handler. Esto evita que los
+ * previews de WhatsApp/iMessage fetcheen la URL y consuman el token antes de que
+ * el chofer lo abra — issue #11. El token solo se consume cuando el chofer toca
+ * el botón "Activar mi cuenta" (JS del cliente).
  *
- * Usando `verifyOtp({ token_hash, type })` desde nuestro callback, todo el flow
- * es server-side y compatible con Server-Side Auth (SSR cookies). Patrón oficial
- * de Supabase para PKCE/SSR. Ver:
- * https://supabase.com/docs/guides/auth/server-side/email-based-auth-with-pkce-flow
+ * Para otros targets (platform /login, etc.): mantiene el flujo legacy con
+ * token_hash en query string, ya que el problema de preview afecta principalmente
+ * a links enviados por WhatsApp a choferes.
  */
 function buildServerCallbackLink(
   properties: { hashed_token?: string | null; verification_type?: string | null } | null | undefined,
@@ -131,8 +132,18 @@ function buildServerCallbackLink(
   const verificationType = properties?.verification_type;
   if (!hashedToken || !verificationType) return '';
   const url = new URL(redirectTo);
-  url.searchParams.set('token_hash', hashedToken);
-  url.searchParams.set('type', verificationType);
+
+  if (url.pathname === '/auth/callback') {
+    // Driver app: landing page que no consume el token en page load
+    url.pathname = '/auth/invite';
+    url.searchParams.set('t', hashedToken);
+    url.searchParams.set('type', verificationType);
+  } else {
+    // Platform u otro target: flujo legacy server-side callback
+    url.searchParams.set('token_hash', hashedToken);
+    url.searchParams.set('type', verificationType);
+  }
+
   return url.toString();
 }
 

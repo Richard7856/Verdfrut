@@ -5,6 +5,8 @@ import type { Metadata, Viewport } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import { Toaster } from '@verdfrut/ui';
 import { RegisterServiceWorker } from '@/components/register-service-worker';
+import { OutboxMount } from '@/components/outbox-mount';
+import { InactivityGuard } from '@/components/inactivity-guard';
 import './globals.css';
 
 const geistSans = Geist({
@@ -68,6 +70,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     >
       <body>
         <RegisterServiceWorker />
+        {/* Worker del outbox vive durante toda la sesión — ADR-019 */}
+        <OutboxMount />
+        {/* Auto-logout tras 8h inactivas — issue #15 */}
+        <InactivityGuard />
         {children}
         <Toaster />
       </body>

@@ -79,6 +79,38 @@ for migration in supabase/migrations/*.sql; do
   PGPASSWORD="$DB_PASSWORD" psql "$DB_URL" -f "$migration" >/dev/null
 done
 
+# Puertos de las apps del tenant. Por convención VerdFrut:
+#   platform → https://<slug>.verdfrut.com
+#   driver   → https://driver.<slug>.verdfrut.com
+# Override con env vars si el deployment usa otro esquema de dominios.
+DRIVER_APP_URL="${DRIVER_APP_URL:-https://driver.${SLUG}.verdfrut.com}"
+PLATFORM_APP_URL="${PLATFORM_APP_URL:-https://${SLUG}.verdfrut.com}"
+
+echo "==> Configurando Auth: site_url + redirect URLs (#14)..."
+# Por qué se hace aquí y no manual: un tenant sin esta config genera
+# errores "redirect_uri_mismatch" al primer invite, bloqueando el onboarding.
+# La API acepta additional_redirect_urls como string separado por comas.
+# Se incluyen las rutas de callback Y la landing de invite (/auth/invite) para
+# que Supabase no rechace ningún redirect de nuestro flujo de activación.
+curl -sf -X PATCH "https://api.supabase.com/v1/projects/${PROJECT_ID}/config/auth" \
+  -H "Authorization: Bearer $SUPABASE_MANAGEMENT_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "$(jq -n \
+    --arg siteUrl  "${PLATFORM_APP_URL}" \
+    --arg driverCb "${DRIVER_APP_URL}/auth/callback" \
+    --arg driverInv "${DRIVER_APP_URL}/auth/invite" \
+    --arg platformLogin "${PLATFORM_APP_URL}/login" \
+    '{
+      site_url: $siteUrl,
+      additional_redirect_urls: ([$driverCb, $driverInv, $platformLogin] | join(","))
+    }')" \
+  > /dev/null
+
+echo "    site_url:              ${PLATFORM_APP_URL}"
+echo "    additional_redirects:  ${DRIVER_APP_URL}/auth/callback"
+echo "                           ${DRIVER_APP_URL}/auth/invite"
+echo "                           ${PLATFORM_APP_URL}/login"
+
 echo "==> Actualizando tenant registry: $REGISTRY_PATH"
 TMP_FILE=$(mktemp)
 if [[ -f "$REGISTRY_PATH" ]]; then
@@ -112,4 +144,7 @@ echo ""
 echo "PRÓXIMOS PASOS:"
 echo "  1. Crear el primer usuario admin desde Supabase Studio: $SUPABASE_URL"
 echo "  2. Insertar zonas y datos iniciales (tiendas, camiones)"
-echo "  3. Verificar acceso desde https://$SLUG.verdfrut.com"
+echo "  3. Configurar DNS: $SLUG.verdfrut.com → platform, driver.$SLUG.verdfrut.com → driver"
+echo "  4. Verificar acceso desde $PLATFORM_APP_URL"
+echo ""
+echo "Auth redirect URLs ya configuradas automáticamente (issue #14)."
