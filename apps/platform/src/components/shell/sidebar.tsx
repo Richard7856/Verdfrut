@@ -10,6 +10,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { UserRole } from '@verdfrut/types';
 import { cn } from '@verdfrut/ui';
+import { useOpenIncidentsCount } from '@/lib/use-incident-notifications';
 
 interface NavItem {
   href: string;
@@ -51,9 +52,25 @@ const GROUP_ORDER: NavItem['group'][] = ['GENERAL', 'OPERACIÓN', 'CATÁLOGO', '
 
 const ENV_LABEL = process.env.NEXT_PUBLIC_ENV_LABEL ?? 'PROD';
 
-export function Sidebar({ role }: { role: UserRole }) {
+export function Sidebar({
+  role,
+  initialOpenIncidentsCount = 0,
+}: {
+  role: UserRole;
+  /** Count inicial cargado del server. El hook lo mantiene actualizado en realtime. */
+  initialOpenIncidentsCount?: number;
+}) {
   const pathname = usePathname();
-  const items = NAV_ITEMS.filter((i) => i.roles.includes(role));
+  // Counter realtime para el badge de "Incidencias". Solo aplica para admin/dispatcher.
+  const incidentsCount = useOpenIncidentsCount(initialOpenIncidentsCount);
+
+  // Decora dinámicamente el item "Incidencias" con badge realtime cuando hay reportes abiertos.
+  const items = NAV_ITEMS.filter((i) => i.roles.includes(role)).map((item) => {
+    if (item.href === '/incidents' && incidentsCount > 0) {
+      return { ...item, badge: incidentsCount };
+    }
+    return item;
+  });
 
   return (
     <aside

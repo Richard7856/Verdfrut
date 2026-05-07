@@ -7,11 +7,23 @@ import { useEffect, useState } from 'react';
 import { cn } from './cn';
 import type { BadgeTone } from './badge';
 
+interface ToastAction {
+  label: string;
+  onClick: () => void;
+}
+
+interface ToastOptions {
+  description?: string;
+  action?: ToastAction;
+  durationMs?: number;
+}
+
 interface Toast {
   id: string;
   tone: BadgeTone;
   title: string;
   description?: string;
+  action?: ToastAction;
 }
 
 type Listener = (toasts: Toast[]) => void;
@@ -20,11 +32,15 @@ class ToastStore {
   private toasts: Toast[] = [];
   private listeners: Listener[] = [];
 
-  push(tone: BadgeTone, title: string, description?: string) {
+  push(tone: BadgeTone, title: string, options?: string | ToastOptions) {
+    const opts: ToastOptions = typeof options === 'string' ? { description: options } : options ?? {};
     const id = Math.random().toString(36).slice(2);
-    this.toasts = [...this.toasts, { id, tone, title, description }];
+    this.toasts = [
+      ...this.toasts,
+      { id, tone, title, description: opts.description, action: opts.action },
+    ];
     this.notify();
-    setTimeout(() => this.dismiss(id), 5000);
+    setTimeout(() => this.dismiss(id), opts.durationMs ?? 5000);
   }
 
   dismiss(id: string) {
@@ -47,10 +63,10 @@ class ToastStore {
 const store = new ToastStore();
 
 export const toast = {
-  success: (title: string, description?: string) => store.push('success', title, description),
-  error: (title: string, description?: string) => store.push('danger', title, description),
-  info: (title: string, description?: string) => store.push('info', title, description),
-  warning: (title: string, description?: string) => store.push('warning', title, description),
+  success: (title: string, options?: string | ToastOptions) => store.push('success', title, options),
+  error: (title: string, options?: string | ToastOptions) => store.push('danger', title, options),
+  info: (title: string, options?: string | ToastOptions) => store.push('info', title, options),
+  warning: (title: string, options?: string | ToastOptions) => store.push('warning', title, options),
 };
 
 const TONE_BG: Record<BadgeTone, string> = {
@@ -77,10 +93,28 @@ export function Toaster() {
             TONE_BG[t.tone],
           )}
         >
-          <p className="text-sm font-medium text-[var(--color-text)]">{t.title}</p>
-          {t.description && (
-            <p className="mt-1 text-xs text-[var(--color-text-muted)]">{t.description}</p>
-          )}
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium text-[var(--color-text)]">{t.title}</p>
+              {t.description && (
+                <p className="mt-1 text-xs text-[var(--color-text-muted)] line-clamp-2">
+                  {t.description}
+                </p>
+              )}
+            </div>
+            {t.action && (
+              <button
+                type="button"
+                onClick={() => {
+                  t.action!.onClick();
+                  store.dismiss(t.id);
+                }}
+                className="shrink-0 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 py-1 text-xs font-medium text-[var(--color-text)] hover:bg-[var(--vf-surface-2)]"
+              >
+                {t.action.label}
+              </button>
+            )}
+          </div>
         </div>
       ))}
     </div>
