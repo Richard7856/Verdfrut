@@ -1,0 +1,26 @@
+# Render Blueprint para el optimizer FastAPI + VROOM.
+# Uso: en Render Dashboard → "New" → "Blueprint" → conecta el repo y apunta
+# a este archivo (services/optimizer/render.yaml).
+#
+# Plan recomendado: starter ($7/mes) para que NO se duerma. El plan free duerme
+# tras 15 min de inactividad y el primer request post-sleep tarda ~30s — mala UX
+# para choferes en campo cuando piden optimización.
+
+services:
+  - type: web
+    name: verdfrut-optimizer
+    runtime: docker
+    plan: starter
+    region: oregon         # más barato y baja latencia desde MX (vs frankfurt)
+    rootDir: services/optimizer
+    dockerfilePath: Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: OPTIMIZER_API_KEY
+        sync: false        # Render genera y lo pegas también en Vercel-platform
+      - key: PORT
+        value: 8000
+      - key: VROOM_BIN_PATH
+        value: /usr/local/bin/vroom
+      - key: LOG_LEVEL
+        value: info
