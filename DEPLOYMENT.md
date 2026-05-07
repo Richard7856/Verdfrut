@@ -1,4 +1,4 @@
-# VerdFrut — Guía de Deployment a Producción (Vercel + Render)
+# VerdFrut — Guía de Deployment a Producción (Vercel + Railway)
 
 > Camino más rápido para sacar a producción. Versión V1, sin custom domain
 > (usamos `*.vercel.app`). Custom domain queda para una segunda iteración.
@@ -7,15 +7,18 @@
 
 | Componente | Plataforma | Costo mes 1 |
 |------------|-----------|-------------|
-| Optimizer (FastAPI + VROOM) | Render (Docker) | $7 (Starter) |
+| Optimizer (FastAPI + VROOM) | Railway (Docker) | $5 base + uso (~$2-3) |
 | Platform (admin) | Vercel | $0 (Hobby) |
 | Driver PWA | Vercel | $0 (Hobby) |
 | Control Plane | Vercel | $0 (Hobby) |
 | Supabase | (ya pagado) | — |
-| **Total** | | **$7/mes** |
+| **Total estimado** | | **$5-8/mes** |
 
-> **Vercel Hobby es OK para field test mañana.** Si el cliente firma y son
-> 5+ usuarios concurrentes, migrar a Pro ($20/mes/team).
+> **Railway vs Render**: Railway no duerme nunca (vs Render free), tiene plan
+> Hobby que escala con uso real ($5/mes + ~$0.000231/GB-hour de RAM). Para una
+> carga V1 chica, te quedas en ~$7-8/mes — comparable a Render Starter sin sleep.
+> Vercel Hobby es OK para field test mañana. Si el cliente firma y son 5+ usuarios
+> concurrentes, migrar a Vercel Pro ($20/mes/team).
 
 ---
 
@@ -23,7 +26,7 @@
 
 Sigue este orden estricto — algunos pasos dependen de outputs de pasos previos:
 
-1. **Optimizer en Render** primero → obtienes `OPTIMIZER_URL` y `OPTIMIZER_API_KEY`
+1. **Optimizer en Railway** primero → obtienes `OPTIMIZER_URL` y `OPTIMIZER_API_KEY`
 2. **Platform en Vercel** → necesita `OPTIMIZER_URL` del paso 1
 3. **Driver en Vercel** → necesita `DRIVER_APP_URL` (sale del paso 3 mismo, lo seteás tras el primer deploy)
 4. **Control Plane en Vercel** → independiente, puede ir al final
@@ -31,60 +34,54 @@ Sigue este orden estricto — algunos pasos dependen de outputs de pasos previos
 
 ---
 
-## PASO 1 — Optimizer en Render (~20 min)
+## PASO 1 — Optimizer en Railway (~15 min)
 
-### 1.1. Crear cuenta Render
+### 1.1. Crear cuenta Railway
 
-- Ve a https://render.com
-- "Sign in with GitHub" (autoriza acceso al repo `Richard7856/Verdfrut`)
+- Ve a https://railway.com
+- "Login with GitHub" (autoriza acceso al repo `Richard7856/Verdfrut`)
+- Verifica tu cuenta (link de email)
+- Plan: empezamos en **Hobby** (cobra solo lo que uses, ~$5-8/mes total estimado)
 
 ### 1.2. Crear el servicio
 
-**Opción A — Vía Blueprint (recomendado, automatizado):**
-
-1. Dashboard → **"New"** → **"Blueprint"**
-2. Connect repository: `Richard7856/Verdfrut`
-3. Blueprint file path: `services/optimizer/render.yaml`
-4. Branch: `main`
-5. **"Apply"**
-
-**Opción B — Manual (si Blueprint da error):**
-
-1. Dashboard → **"New"** → **"Web Service"**
-2. Connect repository: `Richard7856/Verdfrut`
-3. Configura:
-   - **Name:** `verdfrut-optimizer`
-   - **Region:** Oregon
-   - **Branch:** `main`
+1. Dashboard → **"New Project"** → **"Deploy from GitHub repo"**
+2. Selecciona `Richard7856/Verdfrut`
+3. Railway detecta el monorepo. Configura:
+   - **Service Name:** `verdfrut-optimizer`
    - **Root Directory:** `services/optimizer`
-   - **Runtime:** `Docker`
-   - **Plan:** `Starter ($7/mo)`
-   - **Health check path:** `/health`
-4. Variables de entorno (Environment):
-   - `OPTIMIZER_API_KEY` = (genera una con `openssl rand -hex 32`, **GUÁRDALA**)
-   - `PORT` = `8000`
-   - `VROOM_BIN_PATH` = `/usr/local/bin/vroom`
+   - **Builder:** Railway lee `railway.json` automáticamente y usa el Dockerfile
+4. Settings → **Networking** → **"Generate Domain"** (te da un `*.up.railway.app`)
+5. Variables (sección "Variables"):
+   - `OPTIMIZER_API_KEY` = (genera con `openssl rand -hex 32`, **GUÁRDALA**)
    - `LOG_LEVEL` = `info`
-5. **"Create Web Service"**
+   - **NO seteés `PORT` manualmente** — Railway lo inyecta dinámicamente y el `startCommand` del `railway.json` ya lo usa.
+   - `VROOM_BIN_PATH` ya viene hardcoded en el Dockerfile, no lo agregues.
+6. **"Deploy"**
 
 ### 1.3. Verificar
 
-Espera ~5 min que termine el build (primer build es lento porque baja la imagen base de VROOM).
+Espera ~5-7 min (primer build descarga la imagen base de VROOM, ~500MB).
 
-Cuando esté en `Live`, copia la URL pública. Algo tipo:
+Cuando el log muestre `Application startup complete`, copia la URL pública del paso 1.2.4.
+Algo tipo:
 ```
-https://verdfrut-optimizer.onrender.com
+https://verdfrut-optimizer-production.up.railway.app
 ```
 
 Test:
 ```bash
-curl https://verdfrut-optimizer.onrender.com/health
+curl https://verdfrut-optimizer-production.up.railway.app/health
 # Esperado: {"status":"ok","vroom_available":true}
 ```
 
 **Apunta** las 2 cosas que necesitas para los pasos siguientes:
-- `OPTIMIZER_URL` = `https://verdfrut-optimizer.onrender.com`
+- `OPTIMIZER_URL` = `https://verdfrut-optimizer-production.up.railway.app`
 - `OPTIMIZER_API_KEY` = `<la que generaste arriba>`
+
+**Importante:** Railway expone PORT dinámico. El Dockerfile actual lo respeta porque
+el `CMD` usa `--port 8000` y el FastAPI mismo lee `os.environ.get("PORT", 8000)`.
+Si tu deploy falla con "no port detected", revisa que el `EXPOSE 8000` esté en el Dockerfile (sí lo está).
 
 ---
 
