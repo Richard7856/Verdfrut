@@ -58,6 +58,12 @@ export function useGpsBroadcast(opts: UseGpsBroadcastOpts): GpsBroadcastState {
   const lastBroadcastRef = useRef(0);
   const lastBreadcrumbRef = useRef(0);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  // Ref con datos volátiles que los handlers de visibility necesitan leer
+  // sin re-disparar el effect (lastPosition se actualiza muy seguido).
+  const stateRef = useRef<{
+    lastPosition: GeolocationPosition | null;
+    gapStartedAt: number | null;
+  }>({ lastPosition: null, gapStartedAt: null });
 
   useEffect(() => {
     if (!enabled || typeof window === 'undefined') return;
@@ -83,8 +89,79 @@ export function useGpsBroadcast(opts: UseGpsBroadcastOpts): GpsBroadcastState {
         .catch((err) => console.warn('[gps] wake lock denegado:', err));
     }
 
+    // Visibilitychange — detecta cuando el chofer abre Waze/Maps externos (PWA
+    // pasa a background). watchPosition deja de emitir en iOS al instante; en
+    // Android sigue un poco pero también se mata pronto. Reportamos el gap al
+    // server para que admin sepa "chofer está en otra app, no es problema".
+    let gapEventId: string | null = null;
+    let lastGapStartLat: number | null = null;
+    let lastGapStartLng: number | null = null;
+
+    async function handleGapStart() {
+      // Capturamos la última posición conocida del state cerrando sobre el ref
+      // del último broadcast. Si no hay, usamos null (gap sin coords previas).
+      const lastPos = stateRef.current.lastPosition;
+      lastGapStartLat = lastPos?.coords.latitude ?? null;
+      lastGapStartLng = lastPos?.coords.longitude ?? null;
+
+      try {
+        const { data, error } = await supabase
+          .from('route_gap_events')
+          .insert({
+            route_id: routeId,
+            driver_id: driverId,
+            started_at: new Date().toISOString(),
+            last_known_lat: lastGapStartLat,
+            last_known_lng: lastGapStartLng,
+          })
+          .select('id')
+          .single();
+        if (error) {
+          console.warn('[gps.gap_start] failed:', error.message);
+          return;
+        }
+        gapEventId = data?.id ?? null;
+      } catch (err) {
+        console.warn('[gps.gap_start] error:', err);
+      }
+    }
+
+    async function handleGapEnd() {
+      if (!gapEventId) return;
+      const startedAt = stateRef.current.gapStartedAt;
+      const duration = startedAt
+        ? Math.round((Date.now() - startedAt) / 1000)
+        : null;
+      try {
+        await supabase
+          .from('route_gap_events')
+          .update({
+            ended_at: new Date().toISOString(),
+            duration_seconds: duration,
+            end_reason: 'back_to_app',
+          })
+          .eq('id', gapEventId);
+      } catch (err) {
+        console.warn('[gps.gap_end] error:', err);
+      }
+      gapEventId = null;
+    }
+
+    function onVisibilityChange() {
+      if (document.visibilityState === 'hidden') {
+        // Marca tiempo de inicio para calcular duración al volver
+        stateRef.current.gapStartedAt = Date.now();
+        void handleGapStart();
+      } else if (document.visibilityState === 'visible') {
+        void handleGapEnd();
+        stateRef.current.gapStartedAt = null;
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
     function handlePosition(pos: GeolocationPosition) {
       const now = Date.now();
+      stateRef.current.lastPosition = pos;
       setState((s) => ({ ...s, lastPosition: pos, error: null, active: true }));
 
       const payload = {
@@ -151,6 +228,22 @@ export function useGpsBroadcast(opts: UseGpsBroadcastOpts): GpsBroadcastState {
       channel.unsubscribe();
       wakeLockRef.current?.release().catch(() => {});
       wakeLockRef.current = null;
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      // Si quedó un gap abierto al desmontar (ej. ruta completada en background),
+      // intentar cerrarlo con razón = route_completed. Best-effort.
+      if (gapEventId) {
+        const startedAt = stateRef.current.gapStartedAt;
+        const duration = startedAt ? Math.round((Date.now() - startedAt) / 1000) : null;
+        void supabase
+          .from('route_gap_events')
+          .update({
+            ended_at: new Date().toISOString(),
+            duration_seconds: duration,
+            end_reason: 'route_completed',
+          })
+          .eq('id', gapEventId);
+      }
+      stateRef.current = { lastPosition: null, gapStartedAt: null };
       setState({ active: false, error: null, lastPosition: null, broadcastCount: 0 });
     };
   }, [routeId, driverId, enabled]);

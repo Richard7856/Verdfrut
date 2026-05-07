@@ -329,6 +329,53 @@ export type Database = {
         }
         Relationships: []
       }
+      route_gap_events: {
+        Row: {
+          id: string
+          route_id: string
+          driver_id: string | null
+          started_at: string
+          ended_at: string | null
+          duration_seconds: number | null
+          last_known_lat: number | null
+          last_known_lng: number | null
+          end_reason: 'back_to_app' | 'timeout' | 'closed' | 'route_completed' | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          route_id: string
+          driver_id?: string | null
+          started_at: string
+          ended_at?: string | null
+          duration_seconds?: number | null
+          last_known_lat?: number | null
+          last_known_lng?: number | null
+          end_reason?: 'back_to_app' | 'timeout' | 'closed' | 'route_completed' | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          route_id?: string
+          driver_id?: string | null
+          started_at?: string
+          ended_at?: string | null
+          duration_seconds?: number | null
+          last_known_lat?: number | null
+          last_known_lng?: number | null
+          end_reason?: 'back_to_app' | 'timeout' | 'closed' | 'route_completed' | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'route_gap_events_route_id_fkey'
+            columns: ['route_id']
+            isOneToOne: false
+            referencedRelation: 'routes'
+            referencedColumns: ['id']
+          },
+        ]
+      }
       route_versions: {
         Row: {
           created_at: string
