@@ -701,6 +701,20 @@ export type Database = {
     Functions: {
       current_user_role: { Args: never; Returns: Database["public"]["Enums"]["user_role"] }
       current_user_zone: { Args: never; Returns: string }
+      get_active_anomalies: {
+        Args: { zone_id_filter?: string | null }
+        Returns: {
+          kind: 'silent_driver' | 'route_delayed' | 'chat_open_long'
+          severity: 'high' | 'medium'
+          route_id: string
+          driver_id: string | null
+          driver_name: string | null
+          store_name: string | null
+          zone_id: string
+          detected_at: string
+          details: Record<string, unknown>
+        }[]
+      }
       get_dashboard_daily_series: {
         Args: { from_date: string; to_date: string; zone_id_filter?: string | null }
         Returns: { day: string; deliveries: number; billed: number }[]

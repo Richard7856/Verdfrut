@@ -38,6 +38,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/settings/vehicles', label: 'Flotilla', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
   { href: '/settings/depots', label: 'CEDIS / Hubs', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
   { href: '/incidents', label: 'Incidencias', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
+  { href: '/incidents/anomalies', label: '🔴 Anomalías', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
 
   { href: '/settings/stores', label: 'Tiendas', roles: ['admin', 'dispatcher'], group: 'CATÁLOGO' },
   { href: '/drivers', label: 'Choferes', roles: ['admin', 'dispatcher'], group: 'CATÁLOGO' },
