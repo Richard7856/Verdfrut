@@ -34,16 +34,16 @@ export const viewport: Viewport = {
   themeColor: '#16a34a',
 };
 
-// Tema por default — el toggle dark/light se implementa después de Fase 1.
-// Por ahora forzamos data-theme="light" para que coincida con el área de contenido del screenshot
-// (el sidebar es oscuro siempre por diseño, no por tema).
-const DEFAULT_THEME: 'light' | 'dark' = 'light';
+// Tema leído de cookie `vf-theme` (set por <ThemeToggle/>). Default: light.
+// Renderizar SSR con data-theme correcto evita flash claro→oscuro.
+import { getThemeFromCookies } from '@/lib/theme';
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const theme = await getThemeFromCookies();
   return (
     <html
       lang="es-MX"
-      data-theme={DEFAULT_THEME}
+      data-theme={theme}
       className={`${geistSans.variable} ${geistMono.variable}`}
     >
       <body>
