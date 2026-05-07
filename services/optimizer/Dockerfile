@@ -42,10 +42,14 @@ ENV PORT=8000
 
 EXPOSE 8000
 
-# Healthcheck — Traefik usa esto para saber si el container está listo.
+# Healthcheck — Traefik / Railway usa esto para saber si el container está listo.
+# Usa $PORT si está disponible (Railway), default 8000 (local docker compose).
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()" || exit 1
+  CMD sh -c 'python -c "import urllib.request, os; urllib.request.urlopen(f\"http://localhost:{os.environ.get(\"PORT\",\"8000\")}/health\").read()"' || exit 1
 
 # El ENTRYPOINT de la imagen base es /usr/local/bin/vroom — sobrescribimos.
 ENTRYPOINT []
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Shell form para que $PORT se expanda en runtime. ${PORT:-8000} usa 8000 si no
+# está definida (caso local con docker compose), y el valor real cuando Railway
+# inyecta su puerto dinámico. Resuelve el bug "Invalid value for '--port': '$PORT'".
+CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
