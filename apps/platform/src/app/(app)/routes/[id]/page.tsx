@@ -67,7 +67,8 @@ export async function generateMetadata({ params }: PageProps) {
 }
 
 export default async function RouteDetailPage({ params }: PageProps) {
-  await requireRole('admin', 'dispatcher', 'zone_manager');
+  // V2: solo admin/dispatcher.
+  await requireRole('admin', 'dispatcher');
   const { id } = await params;
 
   const route = await getRoute(id);
