@@ -1558,3 +1558,33 @@ Removido `DEMO_MODE_BYPASS_GEO` permanente del código de `arriveAtStop`. Era un
 - Permitir agregar/borrar paradas en PUBLISHED+ con notificación al chofer (issue #66).
 - Botón "Borrar parada" en cada SortableRow para complementar appendStop (ya existe el server action, falta UI).
 - Audit completo de contraste light/dark con axe-core o playwright (sprint 19).
+
+## [2026-05-08] ADR-037: Paleta canónica `vf-*` light/dark + aliases semánticos
+
+**Contexto:** El cliente reportó que algunos botones se veían en light pero no en dark mode (y viceversa). Audit reveló dos problemas:
+
+1. **Tokens dark divergentes:** los valores de `--vf-bg/elev/sub/line/text*` en dark mode estaban un poco más oscuros (lightness 0.155) que la paleta operacional moderna que el cliente proporcionó (0.18). El delta era pequeño pero suficiente para que algunos textos `--vf-text-mute` quedaran muy bajos en contraste.
+2. **Variables fantasma:** componentes usaban `var(--vf-warn-bg,#fef3c7)` con fallback hex amber. Esa variable NUNCA estaba definida en `tokens.css` — solo el equivalente `--color-warning-bg`. Resultado: el fallback hex se usaba SIEMPRE, sin importar el tema → cuadros amarillos brillantes en dark mode.
+3. **`bg-white/95` literal:** el overlay de status del live-route-map (cuadrito "● En vivo") era blanco fijo por Tailwind, ilegible en dark mode (cuadro brillante con texto verde claro).
+
+**Decisión:**
+1. Reemplazar valores dark de `--vf-bg/sub/elev/side/line*/text*` con la paleta canónica del cliente (oklch 0.18 / 0.20 / 0.22 / 0.14 / 0.28 / 0.96 etc.). Light queda igual (ya estaba alineado).
+2. Brand greens y accents son **compartidos en ambos temas** — quitamos el override de `--vf-green-700/500` que tenía dark mode. Si en un futuro el primary se ve apagado, agregar lift selectivo (issue #69 si pasa).
+3. Definir aliases `--vf-warn-bg/fg/border`, `--vf-ok-*`, `--vf-crit-*`, `--vf-info-*` con `color-mix(in oklch, ... transparent)` para que ambas convenciones (`--color-*` y `--vf-*`) funcionen y respondan al tema.
+4. Reemplazar `bg-white/95` en live-route-map.tsx por `var(--vf-bg-elev) + border + text-token`.
+
+**Alternativas consideradas:**
+- *Migrar todos los `--vf-*` a `--color-*` (Tailwind theme):* deja un solo namespace, más limpio. Descartado por scope — son ~300 ocurrencias en componentes; risk:reward bajo. Mejor mantener ambos como aliases.
+- *Override de `--vf-green-700` en dark:* el HTML standalone original lo tenía. Quitamos para alinear con la paleta del cliente que dice "Brand compartido". Aceptable trade-off; revisar si hay falta de contraste.
+- *Estilizar `.mapboxgl-popup-content` global vs inline `color:#0f172a`:* mantenemos inline en componentes de mapa para no afectar otros usos de Mapbox.
+
+**Riesgos / Limitaciones:**
+- *Color-mix no funciona en navegadores muy viejos* (<2024). Vercel hosting no es problema; user en Safari iOS 14- podría ver fallback.
+- *`--vf-warn-fg` es valor fijo `oklch(0.40 0.13 80)`* — ámbar oscuro. Sobre `--vf-warn-bg` claro (light), legible. Sobre `--vf-warn-bg` mezclado con dark base (dark theme), también legible porque el color-mix preserva el hue. Si reportan baja legibilidad, agregar override en `[data-theme=dark]` que use ámbar más brillante.
+- *Greens compartidos en dark:* `--vf-green-700` (lightness 0.42) sobre `--vf-bg` 0.18 da un contrast ratio ~5:1. AA pero no AAA. Si reportan, lift a 0.55 en dark.
+
+**Oportunidades de mejora:**
+- Agregar test visual con axe-core en CI: cada componente render en light + dark, fallar si contrast <4.5:1.
+- Storybook con toggle light/dark para revisar componente por componente.
+- Migrar live-map-client.tsx markers (hex hardcoded `#94a3b8`, `#22c55e`, etc.) a `--vf-text-mute`/`--vf-ok`/`--vf-crit` con valores theme-aware (issue #70).
+- Crear utility class `.vf-card` que aplique bg-elev + border + text en un solo set, para evitar repetir el patrón en cada uso.

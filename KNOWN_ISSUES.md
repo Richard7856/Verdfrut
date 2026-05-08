@@ -322,6 +322,21 @@ Formato:
 **Solución propuesta:** combobox con búsqueda por code/nombre (autocomplete). Reuse del componente que ya usa `/dispatches/[id]/route-stops-card.tsx` para mover paradas entre rutas.
 **Estado:** abierto
 
+### #69 — Brand greens podrían verse apagados en dark mode (sin lift selectivo)
+**Severidad:** cosmético (no reportado todavía)
+**Sprint:** monitorear post-deploy ADR-037
+**Contexto:** ADR-037 quitó el override `--vf-green-700: 0.55` que el dark theme tenía. La paleta del cliente dice "Brand compartido". Si en dark resulta poco visible, agregar override.
+**Síntoma futuro:** botón primario verde sobre fondo dark se ve poco distinguible.
+**Solución propuesta:** override en `[data-theme=dark]`: `--vf-green-700: oklch(0.50 0.13 155)` y `--vf-green-500: oklch(0.65 0.16 155)`. Test con axe-core para AA contrast.
+**Estado:** abierto, monitorear
+
+### #70 — Markers del live-map usan hex hardcoded sin theme awareness
+**Severidad:** cosmético
+**Sprint:** backlog
+**Contexto:** `live-map-client.tsx` mapea status → color en hex literal (`#94a3b8`, `#22c55e`, `#ef4444`, `#737373`). Funcionan en ambos temas porque son colores semánticos universales (verde=ok, rojo=critical), pero no aprovechan los tokens.
+**Solución propuesta:** usar `var(--vf-text-mute)`, `var(--vf-ok)`, `var(--vf-crit)`, `var(--vf-text-faint)`. Cuidado: las variables no están disponibles directo en JS — habría que resolverlas con `getComputedStyle`.
+**Estado:** abierto
+
 ### #68 — Modal de unassigned debería ser pre-creation (no post-creation con rollback)
 **Severidad:** importante (UX correcto)
 **Sprint:** S20

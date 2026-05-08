@@ -267,8 +267,16 @@ export function LiveRouteMap({ routeId, stops, depot, geometry, mapboxToken, dri
         ref={containerRef}
         className="h-[500px] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)]"
       />
-      {/* Status overlay arriba a la derecha — el supervisor sabe si hay GPS o no. */}
-      <div className="pointer-events-none absolute right-3 top-3 rounded-[var(--radius-md)] bg-white/95 px-3 py-1.5 text-xs shadow">
+      {/* Status overlay arriba a la derecha — el supervisor sabe si hay GPS o no.
+          ADR-037: usa tokens del tema (no bg-white) para que respete dark mode. */}
+      <div
+        className="pointer-events-none absolute right-3 top-3 rounded-[var(--radius-md)] border px-3 py-1.5 text-xs shadow"
+        style={{
+          background: 'var(--vf-bg-elev)',
+          borderColor: 'var(--vf-line)',
+          color: 'var(--vf-text)',
+        }}
+      >
         {position ? (
           <span style={{ color: 'var(--vf-green-600,#15803d)' }}>
             ● En vivo · {lastUpdateAgo}
