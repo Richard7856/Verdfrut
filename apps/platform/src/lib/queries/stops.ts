@@ -162,6 +162,99 @@ export async function bulkReorderStops(
 }
 
 /**
+ * Agrega una nueva parada a una ruta existente (al final de la secuencia).
+ * ADR-036: el dispatcher necesita poder agregar paradas que el optimizer no
+ * asignó (tiendas muy lejos, fuera de capacity, etc.) o tiendas nuevas.
+ *
+ * - sequence: max(sequence) + 1 dentro de la ruta. Si no hay stops, empieza en 1.
+ * - status: 'pending'.
+ * - planned_arrival_at: null (la próxima re-optimización lo llena, o se queda
+ *   sin ETA — el chofer la atiende cuando llegue).
+ * - load: array vacío (default).
+ *
+ * NO valida si la tienda ya está en otra ruta del mismo día — eso es
+ * responsabilidad del UI (warning) o del dispatcher.
+ */
+export async function appendStopToRoute(
+  routeId: string,
+  storeId: string,
+): Promise<{ id: string; sequence: number }> {
+  const supabase = await createServerClient();
+
+  // 1. Calcular siguiente sequence
+  const { data: existing, error: readErr } = await supabase
+    .from('stops')
+    .select('sequence')
+    .eq('route_id', routeId)
+    .order('sequence', { ascending: false })
+    .limit(1);
+  if (readErr) throw new Error(`[stops.appendToRoute.read] ${readErr.message}`);
+
+  const nextSequence = (existing?.[0]?.sequence ?? 0) + 1;
+
+  // 2. Insert
+  const { data, error } = await supabase
+    .from('stops')
+    .insert({
+      route_id: routeId,
+      store_id: storeId,
+      sequence: nextSequence,
+      status: 'pending',
+      load: [],
+      planned_arrival_at: null,
+      planned_departure_at: null,
+    })
+    .select('id, sequence')
+    .single();
+  if (error) throw new Error(`[stops.appendToRoute.insert] ${error.message}`);
+
+  return { id: data.id as string, sequence: data.sequence as number };
+}
+
+/**
+ * Borra una parada de una ruta (solo si está pending — no se puede borrar
+ * una parada en la que el chofer ya estuvo o entregó).
+ * ADR-036: complemento de `appendStopToRoute` — el dispatcher debe poder
+ * deshacer si agregó una parada por error.
+ */
+export async function deleteStopFromRoute(stopId: string): Promise<void> {
+  const supabase = await createServerClient();
+
+  const { data: stop, error: readErr } = await supabase
+    .from('stops')
+    .select('id, status, route_id')
+    .eq('id', stopId)
+    .maybeSingle();
+  if (readErr || !stop) {
+    throw new Error(`[stops.deleteFromRoute] Parada no encontrada`);
+  }
+  if (stop.status !== 'pending') {
+    throw new Error(
+      `[stops.deleteFromRoute] No se puede borrar una parada en estado ${stop.status}. Solo pending.`,
+    );
+  }
+
+  const { error: delErr } = await supabase.from('stops').delete().eq('id', stopId);
+  if (delErr) throw new Error(`[stops.deleteFromRoute] ${delErr.message}`);
+
+  // Re-numerar las stops restantes para no dejar huecos.
+  const { data: remaining } = await supabase
+    .from('stops')
+    .select('id, sequence')
+    .eq('route_id', stop.route_id)
+    .order('sequence');
+  if (remaining) {
+    for (let i = 0; i < remaining.length; i++) {
+      const row = remaining[i];
+      if (!row) continue;
+      if (row.sequence !== i + 1) {
+        await supabase.from('stops').update({ sequence: i + 1 }).eq('id', row.id);
+      }
+    }
+  }
+}
+
+/**
  * Mueve una parada de una ruta a otra. ADR-025.
  *
  * Reglas:

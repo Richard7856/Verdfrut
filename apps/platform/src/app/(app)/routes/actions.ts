@@ -22,6 +22,8 @@ import {
   createStops,
   deleteStopsForRoute,
   listStopsForRoute,
+  appendStopToRoute,
+  deleteStopFromRoute,
 } from '@/lib/queries/stops';
 import { getStoresByIds } from '@/lib/queries/stores';
 import { getVehiclesByIds } from '@/lib/queries/vehicles';
@@ -496,5 +498,65 @@ export async function reorderStopsAction(
     revalidatePath(`/routes/${id}`);
     revalidatePath('/routes');
     revalidatePath('/dispatches');
+  });
+}
+
+/**
+ * Agrega una nueva parada a una ruta existente (ADR-036).
+ * Solo permitido en DRAFT/OPTIMIZED/APPROVED — agregar paradas a una ruta
+ * PUBLISHED+ requeriría re-optimizar y notificar al chofer (issue #66 abierto).
+ */
+export async function addStopToRouteAction(
+  routeId: string,
+  storeId: string,
+): Promise<ActionResult & { stopId?: string; sequence?: number }> {
+  await requireRole('admin', 'dispatcher');
+  try {
+    const id = requireUuid('routeId', routeId);
+    requireUuid('storeId', storeId);
+
+    const route = await getRoute(id);
+    if (!route) return { ok: false, error: 'Ruta no existe' };
+
+    if (!['DRAFT', 'OPTIMIZED', 'APPROVED'].includes(route.status)) {
+      return {
+        ok: false,
+        error: `No se puede agregar paradas a una ruta en estado ${route.status}. Solo pre-publicación.`,
+      };
+    }
+
+    // Validar que la tienda exista y sea de la misma zona que la ruta.
+    const [store] = await getStoresByIds([storeId]);
+    if (!store) return { ok: false, error: 'Tienda no encontrada' };
+    if (store.zoneId !== route.zoneId) {
+      return {
+        ok: false,
+        error: 'La tienda no pertenece a la misma zona que la ruta.',
+      };
+    }
+
+    const result = await appendStopToRoute(id, storeId);
+
+    revalidatePath(`/routes/${id}`);
+    revalidatePath('/routes');
+    return { ok: true, stopId: result.id, sequence: result.sequence };
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return { ok: false, error: err.message, field: err.field };
+    }
+    return { ok: false, error: err instanceof Error ? err.message : 'Error desconocido' };
+  }
+}
+
+/**
+ * Borra una parada de una ruta. Solo paradas pending (ADR-036).
+ * Re-numera las paradas restantes para no dejar huecos en `sequence`.
+ */
+export async function deleteStopFromRouteAction(stopId: string): Promise<ActionResult> {
+  await requireRole('admin', 'dispatcher');
+  return runAction(async () => {
+    const id = requireUuid('stopId', stopId);
+    await deleteStopFromRoute(id);
+    revalidatePath('/routes');
   });
 }

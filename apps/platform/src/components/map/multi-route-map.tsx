@@ -104,7 +104,7 @@ export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
         new mapboxgl.Marker({ element: el, anchor: 'center' })
           .setLngLat([r.depot.lng, r.depot.lat])
           .setPopup(new mapboxgl.Popup({ offset: 12 }).setHTML(
-            `<div style="font-family:ui-sans-serif"><strong>${r.depot.code}</strong><br/>${r.depot.name}<br/><em>CEDIS</em></div>`,
+            `<div style="font-family:ui-sans-serif;color:#0f172a"><strong>${r.depot.code}</strong><br/>${r.depot.name}<br/><em>CEDIS</em></div>`,
           ))
           .addTo(map);
       }
@@ -126,7 +126,7 @@ export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
             new mapboxgl.Marker({ element: el, anchor: 'center' })
               .setLngLat([s.lng, s.lat])
               .setPopup(new mapboxgl.Popup({ offset: 14 }).setHTML(
-                `<div style="font-family:ui-sans-serif">` +
+                `<div style="font-family:ui-sans-serif;color:#0f172a">` +
                 `<strong>${r.routeName}</strong> · ${r.vehicleLabel}<br/>` +
                 `#${s.sequence} ${s.storeCode}<br/>${s.storeName}</div>`,
               ))

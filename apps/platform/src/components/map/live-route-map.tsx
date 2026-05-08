@@ -131,7 +131,7 @@ export function LiveRouteMap({ routeId, stops, depot, geometry, mapboxToken, dri
         new mapboxgl.Marker({ element: el, anchor: 'center' })
           .setLngLat([depot.lng, depot.lat])
           .setPopup(new mapboxgl.Popup({ offset: 12 }).setHTML(
-            `<div style="font-family:ui-sans-serif"><strong>${depot.code}</strong><br/>${depot.name}<br/><em>CEDIS</em></div>`,
+            `<div style="font-family:ui-sans-serif;color:#0f172a"><strong>${depot.code}</strong><br/>${depot.name}<br/><em>CEDIS</em></div>`,
           ))
           .addTo(map);
       }
@@ -149,7 +149,7 @@ export function LiveRouteMap({ routeId, stops, depot, geometry, mapboxToken, dri
         new mapboxgl.Marker({ element: el, anchor: 'center' })
           .setLngLat([s.lng, s.lat])
           .setPopup(new mapboxgl.Popup({ offset: 16 }).setHTML(
-            `<div style="font-family:ui-sans-serif"><strong>#${s.sequence} · ${s.storeCode}</strong><br/>${s.storeName}<br/><em>${s.status}</em></div>`,
+            `<div style="font-family:ui-sans-serif;color:#0f172a"><strong>#${s.sequence} · ${s.storeCode}</strong><br/>${s.storeName}<br/><em>${s.status}</em></div>`,
           ))
           .addTo(map);
       }
@@ -242,7 +242,7 @@ export function LiveRouteMap({ routeId, stops, depot, geometry, mapboxToken, dri
           .setLngLat(lngLat)
           .setPopup(
             new mapboxgl.Popup({ offset: 18 }).setHTML(
-              `<div style="font-family:ui-sans-serif"><strong>${driverName ?? 'Chofer'}</strong><br/><em>posición en vivo</em></div>`,
+              `<div style="font-family:ui-sans-serif;color:#0f172a"><strong>${driverName ?? 'Chofer'}</strong><br/><em>posición en vivo</em></div>`,
             ),
           )
           .addTo(m);

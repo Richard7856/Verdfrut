@@ -9,7 +9,7 @@ import { formatDateTimeInZone, formatDuration } from '@verdfrut/utils';
 import { requireRole } from '@/lib/auth';
 import { getRoute } from '@/lib/queries/routes';
 import { listStopsForRoute } from '@/lib/queries/stops';
-import { getStoresByIds } from '@/lib/queries/stores';
+import { getStoresByIds, listStores } from '@/lib/queries/stores';
 import { getVehiclesByIds, listVehicles } from '@/lib/queries/vehicles';
 import { getDepot } from '@/lib/queries/depots';
 import { listDrivers, getDriversByIds } from '@/lib/queries/drivers';
@@ -17,6 +17,7 @@ import { listUsers, getUserProfile } from '@/lib/queries/users';
 import { listZones } from '@/lib/queries/zones';
 import { RouteActions } from './route-actions';
 import { SortableStops } from './sortable-stops';
+import { AddStopButton } from './add-stop-button';
 import { DriverAssignment } from './driver-assignment';
 import { TransferRouteButton } from './transfer-route-button';
 import { RouteMapLoader } from '@/components/map/route-map-loader';
@@ -78,14 +79,27 @@ export default async function RouteDetailPage({ params }: PageProps) {
   if (!route) notFound();
 
   const stops = await listStopsForRoute(id);
-  const [stores, vehicles, zones] = await Promise.all([
+  const [stores, vehicles, zones, allZoneStores] = await Promise.all([
     getStoresByIds(stops.map((s) => s.storeId)),
     getVehiclesByIds([route.vehicleId]),
     listZones(),
+    // ADR-036: cargamos todas las tiendas activas de la zona para que el
+    // dispatcher pueda agregar paradas manualmente. Filtramos client-side
+    // las que ya están en la ruta. Cap @50 — para tenants con muchas tiendas
+    // habrá que paginar (issue #67).
+    listStores({ zoneId: route.zoneId, activeOnly: true }),
   ]);
   const storesById = new Map(stores.map((s) => [s.id, s]));
   const vehicle = vehicles[0];
   const zone = zones.find((z) => z.id === route.zoneId);
+
+  // Tiendas disponibles para agregar manualmente: las de la zona que NO están
+  // ya en esta ruta. Si la ruta está post-publicación, no ofrecemos agregar.
+  const stopStoreIds = new Set(stops.map((s) => s.storeId));
+  const availableStoresToAdd = allZoneStores
+    .filter((s) => !stopStoreIds.has(s.id))
+    .map((s) => ({ id: s.id, code: s.code, name: s.name }));
+  const canAddStops = ['DRAFT', 'OPTIMIZED', 'APPROVED'].includes(route.status);
 
   // Cargar depot del vehículo (puede ser FK al CEDIS o coords manuales).
   let mapDepot: RouteMapDepot | null = null;
@@ -277,6 +291,14 @@ export default async function RouteDetailPage({ params }: PageProps) {
                   };
                 })}
               />
+            )}
+            {canAddStops && availableStoresToAdd.length > 0 && (
+              <div className="border-t p-4" style={{ borderColor: 'var(--vf-line)' }}>
+                <AddStopButton
+                  routeId={route.id}
+                  availableStores={availableStoresToAdd}
+                />
+              </div>
             )}
           </div>
         </Card>

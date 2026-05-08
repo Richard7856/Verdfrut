@@ -8,7 +8,7 @@ import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button, Card, CardHeader, Field, Input, Select, toast, cn } from '@verdfrut/ui';
 import type { Dispatch, Driver, Store, Vehicle, Zone } from '@verdfrut/types';
-import { createAndOptimizeRoute } from '../actions';
+import { createAndOptimizeRoute, cancelRouteAction } from '../actions';
 import { assignRouteToDispatchAction } from '../../dispatches/actions';
 
 interface Props {
@@ -112,8 +112,10 @@ export function NewRouteForm({ zones, stores, vehicles, drivers, dispatch }: Pro
       const unassignedCount = res.unassignedStoreIds?.length ?? 0;
       const unassignedRatio = totalSelected > 0 ? unassignedCount / totalSelected : 0;
 
-      // Si más del 20% de las tiendas no se asignaron, bloquear navegación con confirm
-      // explícito para que el dispatcher tome decisión consciente.
+      // Si más del 20% de las tiendas no se asignaron, pedir confirmación explícita.
+      // Bug previo (S14): el modal salía DESPUÉS de crear las rutas y "Cancelar" solo
+      // bloqueaba la navegación — las rutas quedaban en BD. ADR-036: ahora si el user
+      // cancela, BORRAMOS las rutas creadas para que la BD refleje su decisión.
       if (unassignedRatio > 0.2) {
         const proceed = confirm(
           `⚠️ El optimizador no asignó ${unassignedCount} de ${totalSelected} tiendas (${Math.round(unassignedRatio * 100)}%).\n\n` +
@@ -121,11 +123,31 @@ export function NewRouteForm({ zones, stores, vehicles, drivers, dispatch }: Pro
             `• Capacidad total de camiones < demanda total de tiendas\n` +
             `• Ventanas horarias muy estrictas (no caben en el shift)\n` +
             `• Algunas tiendas muy lejos del depósito\n\n` +
-            `¿Continuar con las ${created.length} ruta(s) creadas? (Las tiendas no asignadas quedan disponibles para otra ruta.)`,
+            `Aceptar = mantener las ${created.length} ruta(s) creada(s) (las tiendas no asignadas quedan disponibles).\n` +
+            `Cancelar = BORRAR las ruta(s) creadas y volver al formulario para ajustar.`,
         );
         if (!proceed) {
-          // El usuario decide no continuar — las rutas ya están creadas, solo no navegamos
-          toast.warning('Rutas creadas pero no navegadas', 'Revisa las rutas en la lista.');
+          // BORRAR las rutas creadas — el user las rechaza explícitamente.
+          // Usamos allSettled para no abortar si una falla; loggeamos errores
+          // individuales y avisamos al user del resultado.
+          const results = await Promise.allSettled(
+            created.map((rid) => cancelRouteAction(rid)),
+          );
+          const failed = results.filter(
+            (r) => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.ok),
+          ).length;
+          if (failed > 0) {
+            toast.error(
+              'Rutas parcialmente canceladas',
+              `${created.length - failed}/${created.length} canceladas. Revisa la lista — quedan ${failed} en estado DRAFT.`,
+            );
+          } else {
+            toast.success(
+              'Rutas canceladas',
+              'Las tiendas vuelven a estar disponibles. Ajusta el formulario y reintenta.',
+            );
+          }
+          // No navegamos — el user se queda en el form para corregir.
           return;
         }
       } else if (unassignedCount > 0) {

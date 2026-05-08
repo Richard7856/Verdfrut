@@ -1526,3 +1526,35 @@ Removido `DEMO_MODE_BYPASS_GEO` permanente del código de `arriveAtStop`. Era un
 - Optimistic locking: el client envía la `version` que vio; el server rechaza si difiere.
 - Visual diff: mostrar al chofer en mapa el orden original vs nuevo antes de confirmar.
 - Telemetría: cuántas veces el chofer reordena vs cumple el orden original — feedback para calibrar el optimizer.
+
+## [2026-05-08] ADR-036: Hot fixes post-deploy S19 — cancel del modal + agregar paradas + popups mapa
+
+**Contexto:** Tras deploy de S19 fixes, el cliente probó crear ruta real con 15 tiendas y reportó 3 problemas bloqueantes:
+
+1. **Bug del cancel:** modal "El optimizador no asignó X tiendas" salía DESPUÉS de crear las rutas. Cancelar solo bloqueaba navegación — las rutas quedaban en BD. El user creía cancelar pero las rutas seguían ahí.
+2. **Sin agregar paradas:** una vez creada una ruta, no había forma de agregar las tiendas que el optimizer no asignó. El dispatcher quedaba atorado.
+3. **Popups del mapa con contraste roto:** en dark mode, el texto del popup Mapbox (que tiene fondo blanco hardcoded por la lib) heredaba un gris claro del body en vez de un texto oscuro legible.
+
+**Decisión:**
+
+1. **Bug cancel:** cuando el user cancela el modal, ahora **cancelamos** las rutas creadas vía `cancelRouteAction` (Promise.allSettled, manejo gracioso de fallos). Texto del modal actualizado para reflejar la realidad: "Aceptar = mantener / Cancelar = BORRAR las rutas creadas".
+2. **Agregar paradas:** nuevos helpers `appendStopToRoute` + `deleteStopFromRoute` en queries/stops. Server actions `addStopToRouteAction` + `deleteStopFromRouteAction`. UI: nuevo `<AddStopButton>` en route detail (solo DRAFT/OPTIMIZED/APPROVED). Carga las tiendas activas de la zona, filtra las que ya están en la ruta, dropdown nativo `<select>`. La parada se inserta al final con `sequence = max+1`, status pending, sin ETA — se recalcula al re-optimizar (o el chofer la atiende cuando llegue).
+3. **Popups mapa:** agregar `color:#0f172a` (slate-900) explícito al `<div>` interno de cada popup en route-map.tsx, multi-route-map.tsx y live-route-map.tsx. El fondo del popup Mapbox es siempre blanco; con color de texto oscuro hardcoded queda legible en cualquier theme.
+
+**Alternativas consideradas:**
+- *Para #1, hacer "preview" antes de crear (refactor mayor):* descartado por scope. La opción cancel-y-borrar es funcionalmente equivalente desde la perspectiva del user, con costo de un round-trip extra. Issue #68 abierto para refactor proper.
+- *Para #2, permitir agregar en PUBLISHED+:* descartado. Agregar parada a ruta en curso requiere reoptimizar ETAs y notificar al chofer (mucho más complejo). Issue #66 abierto.
+- *Para #3, estilizar `.mapboxgl-popup-content` global:* funciona pero es CSS global y rompe encapsulación. El inline style es más explícito y no afecta otros usos del popup (si en futuro queremos popup oscuro en algún lado).
+
+**Riesgos / Limitaciones:**
+- *Cancel borra todas las rutas creadas:* si el user creó 3 rutas (3 vehículos) y solo 1 tenía unassigned >20%, las 3 se borran al cancelar. El user puede preferir borrar solo las problemáticas. Aceptable hoy (1 vehículo único en producción).
+- *Add stop sin re-optimizar:* la ruta queda con stops que no tienen ETA, lo cual confunde el dashboard. Mitigación: toast sugiere "Re-optimiza para recalcular ETAs".
+- *Add stop carga TODAS las tiendas de la zona:* si la zona tiene 200 tiendas, el `<select>` es lento de scroll. Issue #67 (paginación / búsqueda) abierto.
+- *Popups con color hardcoded `#0f172a`:* si en futuro el cliente pide tema custom (ej. blanco sobre verde oscuro), el popup mantiene texto slate-900 (sigue siendo legible sobre fondo blanco de Mapbox). No bloquea pero no es theme-aware. Acceptable trade-off.
+
+**Oportunidades de mejora:**
+- Refactor a "preview-then-create" (issue #68): el flujo correcto es correr el optimizer en modo dryRun, mostrar el modal con el resultado, y solo crear si user confirma. Evita writes innecesarios.
+- Búsqueda por code/nombre en `<AddStopButton>` cuando hay >50 tiendas (issue #67).
+- Permitir agregar/borrar paradas en PUBLISHED+ con notificación al chofer (issue #66).
+- Botón "Borrar parada" en cada SortableRow para complementar appendStop (ya existe el server action, falta UI).
+- Audit completo de contraste light/dark con axe-core o playwright (sprint 19).

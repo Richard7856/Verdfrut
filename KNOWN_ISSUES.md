@@ -308,6 +308,28 @@ Formato:
 **Solución propuesta:** comparar la distancia total del nuevo orden (calculada con haversine rápido) vs el orden original. Si crece >50%, mostrar warning al chofer ("¿Seguro? El nuevo orden recorre 22 km más"). NO bloquear — el chofer puede tener razón válida.
 **Estado:** abierto, baja prioridad
 
+### #66 — No se pueden agregar paradas a rutas PUBLISHED/IN_PROGRESS
+**Severidad:** importante
+**Sprint:** backlog
+**Contexto:** ADR-036 agregó `addStopToRouteAction` pero solo permite DRAFT/OPTIMIZED/APPROVED. Si la ruta ya está publicada y el dispatcher quiere agregar una tienda urgente, no hay flujo.
+**Solución propuesta:** extender el action para PUBLISHED/IN_PROGRESS con: bump version + audit + push al chofer (similar a admin reorder ADR-035). El stop se agrega al final, sin ETA.
+**Estado:** abierto
+
+### #67 — AddStopButton carga TODAS las tiendas de la zona sin paginación/búsqueda
+**Severidad:** cosmético (escala con tenant)
+**Sprint:** backlog
+**Contexto:** ADR-036 — el `<select>` puede tener 200+ tiendas si el cliente crece. Scroll inutilizable.
+**Solución propuesta:** combobox con búsqueda por code/nombre (autocomplete). Reuse del componente que ya usa `/dispatches/[id]/route-stops-card.tsx` para mover paradas entre rutas.
+**Estado:** abierto
+
+### #68 — Modal de unassigned debería ser pre-creation (no post-creation con rollback)
+**Severidad:** importante (UX correcto)
+**Sprint:** S20
+**Contexto:** ADR-036 fix #1 hizo cancel = borrar rutas. Funcional pero genera writes innecesarios cada vez que user cancela. El flujo correcto es preview ANTES de crear.
+**Solución propuesta:** agregar `dryRun: boolean` a `createAndOptimizeRoute`. Si `dryRun=true`, ejecuta optimizer sin persistir y devuelve `{ preview, unassigned }`. UI corre dryRun primero, muestra modal, y solo si user acepta llama segunda vez con `dryRun=false`.
+**Riesgo:** duplica costo de optimizer (Mapbox + Railway). Mitigación: cache en server action por hash de params (route, vehicles, stores) por 60s.
+**Estado:** abierto
+
 ### #65 — Total turno calcula `totalShiftSeconds` desde Date.parse — sensible a TZ del server
 **Severidad:** cosmético
 **Sprint:** backlog
