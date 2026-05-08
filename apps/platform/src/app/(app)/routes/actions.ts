@@ -301,7 +301,23 @@ export async function reoptimizeRouteAction(
         load: step.load,
       };
     });
-    await createStops({ routeId: id, stops: stopsToInsert });
+
+    // ADR-038: preservar las stops que el optimizer NO pudo asignar como pending
+    // SIN ETA al final de la ruta. Antes (bug) las borrábamos — el dispatcher
+    // perdía las paradas que había agregado manualmente. Ahora respetamos su
+    // intención: la ruta queda con stops asignadas (con ETA) + stops manuales
+    // (sin ETA). El chofer las atiende cuando llegue; o el dispatcher las mueve
+    // a otra ruta si decide.
+    const unassignedStoreIds = getUnassignedStoreIds(optResponse, stores);
+    const unassignedStops = unassignedStoreIds.map((storeId, idx) => ({
+      storeId,
+      sequence: stopsToInsert.length + idx + 1,
+      plannedArrivalAt: null,
+      plannedDepartureAt: null,
+      load: [] as number[],
+    }));
+
+    await createStops({ routeId: id, stops: [...stopsToInsert, ...unassignedStops] });
 
     const firstStep = optRoute.steps[0];
     const lastStep = optRoute.steps[optRoute.steps.length - 1];
@@ -311,8 +327,6 @@ export async function reoptimizeRouteAction(
       estimatedStartAt: new Date((firstStep?.arrival ?? shiftStartUnix) * 1000).toISOString(),
       estimatedEndAt: new Date((lastStep?.departure ?? shiftEndUnix) * 1000).toISOString(),
     });
-
-    const unassignedStoreIds = getUnassignedStoreIds(optResponse, stores);
 
     revalidatePath('/routes');
     revalidatePath(`/routes/${id}`);

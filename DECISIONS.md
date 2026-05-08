@@ -1588,3 +1588,36 @@ Removido `DEMO_MODE_BYPASS_GEO` permanente del código de `arriveAtStop`. Era un
 - Storybook con toggle light/dark para revisar componente por componente.
 - Migrar live-map-client.tsx markers (hex hardcoded `#94a3b8`, `#22c55e`, etc.) a `--vf-text-mute`/`--vf-ok`/`--vf-crit` con valores theme-aware (issue #70).
 - Crear utility class `.vf-card` que aplique bg-elev + border + text en un solo set, para evitar repetir el patrón en cada uso.
+
+## [2026-05-08] ADR-038: Re-optimize preserva paradas que el optimizer rechaza + UI delete por parada
+
+**Contexto:** Tras desplegar ADR-036 (agregar paradas manualmente), el cliente reportó que al "Re-optimizar" la ruta, las paradas que había agregado a mano **desaparecían**. Diagnóstico: `reoptimizeRouteAction` lee todas las stops actuales como `storeIds`, las pasa al optimizer, y luego `deleteStopsForRoute` + `createStops` SOLO inserta las que el optimizer asignó. Si el optimizer rechaza una parada (por estar lejos del depot, fuera de la ventana del shift, etc. — la misma razón por la que el dispatcher la agregó manualmente), se pierde silenciosamente. El user vio "10 stops siguen, mi 11 se fue".
+
+Adicional: una vez creada una ruta, el dispatcher no podía borrar paradas individuales. El server action `deleteStopFromRouteAction` ya existía (S19 ADR-036) pero faltaba UI.
+
+Adicional: el constraint UNIQUE `idx_routes_vehicle_date_active` (vehicle_id, date) bloqueaba crear nuevas rutas el mismo día con la misma camioneta — durante demo el user quedó atorado con 2 rutas activas y no podía crear otras para probar variantes.
+
+**Decisión:**
+
+1. **Preservar unassigned en re-optimize:** después de insertar las stops asignadas con ETA, agregar las stops que el optimizer rechazó como `pending` SIN `planned_arrival_at` ni `planned_departure_at`, secuenciadas al final (sequence = N+1, N+2…). El chofer las atiende cuando llegue; el dispatcher las puede mover a otra ruta o borrarlas con el botón nuevo. Mejor diseño: respeta la intención explícita del dispatcher.
+
+2. **Botón delete por parada:** nuevo `<button aria-label="Borrar parada">×</button>` en `<SortableRow>` solo visible para paradas pending pre-publicación (DRAFT/OPTIMIZED/APPROVED, status='pending'). Confirm + llama `deleteStopFromRouteAction` que ya re-numera las restantes. Stop propagation a dnd-kit para que el click no dispare drag.
+
+3. **SQL de demo cleanup** (operacional, no código): cuando hay rutas activas atoradas, `UPDATE routes SET status='CANCELLED' WHERE id IN (...)`. El index UNIQUE solo cuenta rutas activas (no CANCELLED/COMPLETED), así que cancelar libera el slot.
+
+**Alternativas consideradas:**
+- *Para #1, forzar al optimizer a asignar todas (priority alta):* descartado. VROOM con priority alta puede romper time_window — la parada se asigna pero el shift_end queda violado, ETAs incorrectos. Mejor preservarlas sin ETA.
+- *Para #1, dejar que el dispatcher decida cada vez con un modal:* descartado por friction. La intención de "re-optimizar" es "haz lo posible", no "vuélveme a preguntar".
+- *Para #2, delete con drag-out (gesture):* descartado por descubribilidad. Botón explícito × es estándar.
+- *Para #3, eliminar el constraint UNIQUE:* nunca. Es protección operativa contra doble asignación. Solo cancelar las viejas.
+
+**Riesgos / Limitaciones:**
+- *Stops sin ETA contaminan métricas:* "Tiempo en paradas" suma `service_time_seconds` × count(stops); incluye las sin ETA. Resultado optimista pero no incorrecto (el chofer SÍ va a tardar 30 min en cada una). El UI muestra "sin ETA" abajo del badge para que el dispatcher sepa cuáles son.
+- *Re-optimize sucesivos pueden acumular stops sin ETA:* si un dispatcher agrega A, re-optimiza (A queda sin ETA), agrega B, re-optimiza (B queda sin ETA), termina con varias stops huérfanas. Aceptable — el dispatcher decide cuándo borrar.
+- *Botón delete sin permission check client-side:* la action server-side valida `requireRole('admin','dispatcher')` y status='pending' del stop; UI solo decide visibilidad. Atacante podría llamar la action con un stopId arbitrario, pero RLS de stops filtra por route ownership y el server valida permisos.
+
+**Oportunidades de mejora:**
+- Mover stops sin ETA al final de la lista visualmente (hoy quedan en su sequence numérico — pueden estar entre paradas con ETA si fueron agregadas antes de re-optimizar).
+- Botón "mover a otra ruta del mismo tiro" en cada stop pending (issue: ya existe `moveStopToAnotherRoute`, falta UI en /routes/[id], hoy solo en /dispatches).
+- Toast en re-optimize que diga "X paradas no asignadas, las dejé al final sin ETA" (en vez del modal del flujo de creación).
+- Botón "Cancelar ruta" más visible en `/routes/[id]` para que el dispatcher pueda destrabarse sin SQL (verificar si ya existe vs route-actions.tsx).

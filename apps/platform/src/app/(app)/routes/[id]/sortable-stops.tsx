@@ -28,7 +28,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { Badge, toast, type BadgeTone } from '@verdfrut/ui';
 import type { Stop, StopStatus } from '@verdfrut/types';
-import { reorderStopsAction } from '../actions';
+import { reorderStopsAction, deleteStopFromRouteAction } from '../actions';
 
 interface StopWithStore {
   stop: Stop;
@@ -186,11 +186,17 @@ export function SortableStops({
               // Post-publish: solo pending stops son draggables (las demás son historia).
               const rowReorderable =
                 reorderable && !pending && (!postPublish || item.stop.status === 'pending');
+              // ADR-036: borrar parada solo en pre-publish + paradas pending
+              // (las arrived/completed/skipped son historia inmutable).
+              const rowDeletable =
+                reorderable && !pending && !postPublish && item.stop.status === 'pending';
               return (
                 <SortableRow
                   key={item.stop.id}
                   item={item}
                   reorderable={rowReorderable}
+                  deletable={rowDeletable}
+                  routeId={routeId}
                   timezone={timezone}
                 />
               );
@@ -205,21 +211,43 @@ export function SortableStops({
 function SortableRow({
   item,
   reorderable,
+  deletable,
+  routeId,
   timezone,
 }: {
   item: StopWithStore;
   reorderable: boolean;
+  deletable: boolean;
+  routeId: string;
   timezone: string;
 }) {
+  const router = useRouter();
+  const [deleting, startDeleteTransition] = useTransition();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: item.stop.id, disabled: !reorderable });
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
-    opacity: isDragging ? 0.5 : 1,
+    opacity: isDragging || deleting ? 0.5 : 1,
     cursor: reorderable ? 'grab' : 'default',
   };
+
+  function handleDelete(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!confirm(`¿Borrar parada #${item.stop.sequence} (${item.storeCode} · ${item.storeName})?`)) {
+      return;
+    }
+    startDeleteTransition(async () => {
+      const res = await deleteStopFromRouteAction(item.stop.id);
+      if (res.ok) {
+        toast.success('Parada borrada', 'Las demás se renumeraron.');
+        router.refresh();
+      } else {
+        toast.error('No se pudo borrar', res.error ?? 'Error desconocido');
+      }
+    });
+  }
 
   const formatTime = (iso: string) =>
     new Intl.DateTimeFormat('es-MX', {
@@ -288,7 +316,25 @@ function SortableRow({
             ETA {formatTime(item.stop.plannedArrivalAt)}
           </p>
         )}
+        {!item.stop.plannedArrivalAt && item.stop.status === 'pending' && (
+          <p className="mt-1 text-[11px]" style={{ color: 'var(--vf-text-faint)' }}>
+            sin ETA
+          </p>
+        )}
       </div>
+      {deletable && (
+        <button
+          type="button"
+          aria-label="Borrar parada"
+          onClick={handleDelete}
+          disabled={deleting}
+          onPointerDown={(e) => e.stopPropagation()} // evitar que dnd-kit capture el click
+          className="ml-1 grid h-7 w-7 shrink-0 place-items-center rounded-md text-[var(--vf-text-faint)] hover:bg-[var(--vf-bg-sub)] hover:text-[var(--vf-crit)] disabled:opacity-30"
+          title="Borrar parada"
+        >
+          {deleting ? '…' : '×'}
+        </button>
+      )}
     </li>
   );
 }
