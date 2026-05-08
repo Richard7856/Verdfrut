@@ -150,3 +150,43 @@ export async function notifyDriverOfPublishedRoute(routeId: string): Promise<voi
     tag: `route-${routeId}`,
   });
 }
+
+/**
+ * Notifica al chofer que su ruta YA PUBLICADA fue modificada por el admin.
+ * ADR-035: post-publicación, el admin puede reorder paradas pending. Eso debe
+ * disparar push para que el chofer recargue la ruta y vea el nuevo orden.
+ *
+ * Usa el mismo `tag` que la notif de "Nueva ruta asignada" — si el chofer aún
+ * tiene esa notif activa, esta la sustituye (evita spam de 2 notifs por ruta).
+ */
+export async function notifyDriverOfRouteChange(
+  routeId: string,
+  reason: string,
+): Promise<void> {
+  const supabase = createServiceRoleClient();
+  const { data: route, error: routeErr } = await supabase
+    .from('routes')
+    .select('id, name, driver_id, drivers!routes_driver_id_fkey(user_id)')
+    .eq('id', routeId)
+    .single();
+  if (routeErr || !route) {
+    console.error('[push] No se pudo cargar ruta para notificar cambio:', routeErr);
+    return;
+  }
+  const routeData = route as unknown as {
+    name: string;
+    drivers?: Array<{ user_id: string }> | { user_id: string } | null;
+  };
+  const driverEmbed = Array.isArray(routeData.drivers) ? routeData.drivers[0] : routeData.drivers;
+  const driverUserId = driverEmbed?.user_id;
+  if (!driverUserId) {
+    console.warn(`[push] Ruta ${routeId} sin chofer — push de cambio omitido`);
+    return;
+  }
+  await sendPushToUser(driverUserId, {
+    title: 'Tu ruta cambió',
+    body: `${routeData.name} — ${reason}`,
+    url: `/route/${routeId}`,
+    tag: `route-${routeId}`,
+  });
+}

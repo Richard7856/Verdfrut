@@ -280,6 +280,58 @@ export async function resetRouteToDraft(id: string): Promise<void> {
 }
 
 /**
+ * Bumpa la versión de la ruta y crea una entrada en `route_versions` con la razón.
+ * Usado tras cambios post-publicación (ADR-035): admin reorder en PUBLISHED/IN_PROGRESS
+ * o chofer reorder. La razón queda en audit para reconstruir el historial.
+ *
+ * Nota: la versión se bumpa SIEMPRE incluso si la ruta está en estado pre-publish.
+ * El caller decide cuándo invocar esto. Para reorder pre-publish típico no se llama
+ * (solo si quiere preservar audit explícito).
+ */
+export async function incrementRouteVersion(
+  id: string,
+  userId: string,
+  reason: string,
+): Promise<number> {
+  const supabase = await createServerClient();
+
+  // 1. Bump la versión (UPDATE … RETURNING) — atomicidad por row.
+  const { data: row, error: bumpErr } = await supabase
+    .from('routes')
+    .update({ version: undefined })  // dummy — actualizamos via SQL raw abajo
+    .eq('id', id)
+    .select('version')
+    .single();
+  // El cliente Supabase JS no expone "version + 1" en client side simple;
+  // hacemos un round-trip: leemos versión actual, luego escribimos +1.
+  // Trade-off aceptable porque admins son <10 concurrentes.
+  if (bumpErr || !row) throw new Error(`[routes.incrementVersion] read: ${bumpErr?.message}`);
+
+  const nextVersion = (row.version as number) + 1;
+  const { error: writeErr } = await supabase
+    .from('routes')
+    .update({ version: nextVersion, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (writeErr) throw new Error(`[routes.incrementVersion] write: ${writeErr.message}`);
+
+  // 2. Audit en route_versions.
+  const { error: auditErr } = await supabase
+    .from('route_versions')
+    .insert({
+      route_id: id,
+      version: nextVersion,
+      reason,
+      created_by: userId,
+    });
+  if (auditErr) {
+    // Audit failure NO debe romper la operación principal — solo loggear.
+    console.error('[routes.incrementVersion] audit failed:', auditErr);
+  }
+
+  return nextVersion;
+}
+
+/**
  * Asigna o desasigna un chofer a una ruta.
  * Solo permitido en estados pre-publicación (DRAFT, OPTIMIZED, APPROVED).
  * Pasar null para desasignar.

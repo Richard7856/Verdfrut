@@ -1428,3 +1428,101 @@ Removido `DEMO_MODE_BYPASS_GEO` permanente del código de `arriveAtStop`. Era un
 
 **Oportunidades de mejora:** Qué podría ser mejor más adelante.
 ```
+
+
+## [2026-05-08] ADR-033: Consolidación a 1 zona efectiva (CDMX) por modelo "1 CEDIS sirve N regiones"
+
+**Contexto:** Al cargar 30 tiendas reales del cliente (15 CDMX + 15 Toluca) descubrimos que el modelo `route.zone_id` exige que vehicle/depot/stores sean todos de la misma zona (regla "una corrida = una zona" del optimizer V1). Pero la operación real del cliente es **1 solo CEDIS (CEDA, CDMX) que abastece tiendas en múltiples regiones geográficas** (CDMX y Edo. de México / Toluca). Si dejábamos 2 zonas separadas, el UI bloqueaba: seleccionar zona Toluca no dejaba escoger CEDIS ni vehículos (todos están en CDMX); seleccionar CDMX no dejaba escoger tiendas Toluca.
+
+**Decisión:** Consolidar todo bajo zona CDMX. Mover las 15 tiendas Toluca → zone_id CDMX. Borrar zona Toluca (no representa una operación separada hoy). La trazabilidad de "región operativa" se preserva via `code='TOL-*'` y la dirección de cada tienda. Yucatán queda pendiente de decisión del usuario (no aplica a CEDA, candidata a borrarse en el futuro). Se agrega backlog issue para columna `region` en `stores` cuando crezca volumen.
+
+**Alternativas consideradas:**
+- *Agregar columna `region` a stores y filtrar por region en el UI (manteniendo zone_id global):* mejor a futuro pero requiere migración + UI changes + queries (~1 día). Aplazado a backlog.
+- *Refactor profundo: route ya no es single-zone, validator se relaja:* riesgo alto, requiere repensar dispatches/cron/RLS. Aplazado a Sprint 20+.
+- *Crear depot CEDA en zona Toluca también (duplicar):* hack feo, conflicting source of truth.
+- *Dejar Toluca como zona separada y esperar a tener CEDIS Toluca:* bloquea el go-live del cliente hoy (no puede crear ruta a Toluca desde CEDA).
+
+**Riesgos / Limitaciones:**
+- *Pérdida de la separación visual "Toluca" en el UI:* mitigado parcialmente con prefijo `code='TOL-*'`. Reportes que agreguen por región tendrán que parsear el code o la dirección hasta que llegue columna `region`.
+- *Cuando Toluca tenga su propio CEDIS:* habrá que dividir las tiendas entre 2 zones, recrear zone Toluca, re-link vehículos/depots. La columna `region` evitaría este re-trabajo.
+- *Zona Yucatán queda como placeholder vacío en dropdowns:* hasta que el usuario confirme borrarla. Si se mantiene, dropdown muestra opción que no se usa.
+- *Coordinadas Toluca son geocoded a nivel municipio (Nominatim):* margen 100m–2km. Para field test real, validar coords con cliente o tomar Google Maps por dirección exacta.
+
+**Oportunidades de mejora:**
+- Migrar a modelo `region` (issue #59 KNOWN_ISSUES) cuando cliente tenga 50+ tiendas o 2+ regiones operativas.
+- Revisitar zone_id como filtro estricto: en V2 puede ser hint UX (sugerencia inicial) pero no bloqueante.
+- Si Yucatán se borra, considerar agregar feature flag para que zonas se ENABLED/DISABLED sin DELETE (preservar audit).
+
+## [2026-05-08] ADR-034: Fix bug `route.distance=0` en optimizer + UI métricas más explícitas
+
+**Contexto:** Tras crear la primera ruta real (15 tiendas CDMX, 09-may), el campo "Distancia total" en `/routes/[id]` mostraba "—" y el dispatcher se confundía con dos números de tiempo (Duración estimada 3h 26m vs Inicio→Fin 6h 33m). Diagnóstico:
+1. `total_distance_meters=0` en BD porque `services/optimizer/main.py` lee `route.get("distance",0)` pero VROOM no llena ese campo cuando los `vehicles` no declaran `profile`. Sin profile, VROOM cae al primero por default y solo emite duraciones — la matriz de distancias queda ignorada.
+2. La etiqueta "Duración estimada" sugería el total del turno, pero solo era el tiempo de manejo. La diferencia (~3h) era servicio en paradas (15 stops × 15 min default), invisible en UI.
+
+**Decisión:**
+- **Fix 1 (optimizer):** agregar `"profile": "car"` a cada vehicle en `build_vroom_input` cuando hay matrix. Match con `matrices.car.distances`.
+- **Fix 2 (defensivo):** `_backfill_distances_from_matrix` que suma `req.matrix.distances[from_idx][to_idx]` por cada par consecutivo de steps si VROOM aún devuelve `distance=0`. Cubre futuras versiones del binario o el caso multi-profile.
+- **Fix 3 (UI métricas):** renombrar y desglosar:
+  - "Distancia total" muestra "0 km · re-optimizar" (no oculto cuando es 0)
+  - "Tiempo de manejo" (era "Duración estimada") = solo viaje
+  - "Tiempo en paradas" = `count(stops) × avg(service_time_seconds)` — nuevo
+  - "Total turno" = `end-start` — nuevo
+  - "Inicio del turno" / "Fin del turno" (eran "Inicio/Fin estimado")
+- **Cambio operativo:** UPDATE `stores.service_time_seconds = 1800` (30 min) y DEFAULT de la columna a 1800 — el cliente reportó que las descargas en tienda toman 30 min, no 15.
+
+**Alternativas consideradas:**
+- *Solo aplicar Fix 1 (profile=car) sin backfill defensivo:* descartado. Si una versión futura de VROOM cambia el output o hay múltiples profiles, volveríamos al bug. El backfill cuesta O(n) por route y blinda.
+- *Calcular distancia client-side desde Mapbox Directions (no de la matriz):* descartado por costo (extra API call) y porque la matriz ya tiene el dato — solo falta sumarlo bien.
+- *Eliminar `total_distance_meters` y dejar la métrica solo en la UI calculada al vuelo:* descartado, perderíamos la columna útil para reports/dashboard que ya la consumen.
+- *Dejar el bug y solo mejorar el UI label:* descartado, el dispatcher quiere ese dato (planeación de combustible, contrato con el chofer).
+
+**Riesgos / Limitaciones:**
+- El fix Python NO se materializa hasta que Railway redeploy. Las rutas creadas hoy tienen `distance=0` permanente (a menos que se re-optimicen). Documentado en post-deploy checklist.
+- `_backfill_distances_from_matrix` asume que `req.matrix.distances` está densely populated y consistente con los `location_index` que VROOM emite. Si VROOM omite `location_index` en algún step (caso edge), salta el step en la suma — la distancia resultante será underestimate. Improbable con VROOM 1.13 pero vigilar.
+- La métrica "Tiempo en paradas" suma `service_time_seconds` de tiendas SIN considerar si la stop está completed/skipped. Para una ruta IN_PROGRESS, ese número incluye paradas que ya pasaron — sigue siendo info útil (planeación), pero podría confundir como "lo que falta".
+
+**Oportunidades de mejora:**
+- Mostrar también "Tiempo en paradas restante" (excluye completed/skipped) cuando la ruta está IN_PROGRESS.
+- Agregar "Distancia recorrida" (actual_distance_meters, ya existe) cuando IN_PROGRESS / COMPLETED.
+- Si VROOM retorna geometría real al cliente (futuro), calcular distancia exacta de tramo recorrido.
+- Per-tienda override de `service_time_seconds` cuando una tienda específica toma más/menos (ej. tienda con muelle de carga vs tienda sin acceso).
+
+---
+
+## [2026-05-08] ADR-035: Reorden de paradas post-publicación (admin y chofer)
+
+**Contexto:** El cliente reportó dos casos operativos críticos no cubiertos:
+1. **Admin reorder post-aprobación:** una vez optimizada y aprobada, llega info nueva (cambio de planes en una tienda, info de tráfico, prioridad comercial) y el dispatcher necesita reordenar paradas pendientes. Antes de S18, al hacer click en "Aprobar" + "Publicar" la ruta quedaba congelada — el flujo era "cancelar y crear de nuevo", muy invasivo.
+2. **Chofer reorder en campo:** el chofer conoce el terreno (calles cerradas, horarios reales de tienda, accesos) mejor que el optimizer. El cliente lo describió como "punto importante": el chofer debería poder cambiar el orden de paradas pendientes cuando vea una mejor ruta, sin esperar autorización.
+
+**Decisión:**
+- **Admin (PUBLISHED/IN_PROGRESS):** extender `reorderStopsAction` para aceptar estos status, pero SOLO permitiendo mover paradas `pending`. Las completadas/en sitio/omitidas quedan fijas en su sequence original (son hechos consumados). Cada reorden post-publish:
+  - Bumpa `routes.version` (vía helper `incrementRouteVersion`).
+  - Inserta row en `route_versions` con razón "Admin reorder en PUBLISHED" / "IN_PROGRESS".
+  - Dispara push al chofer con `notifyDriverOfRouteChange("Las paradas pendientes fueron reordenadas")`.
+  - El componente UI (`SortableStops` con prop `postPublish`) bloquea drag de stops no-pending y cambia el banner ("Se notificará al chofer").
+- **Chofer (driver app):** nuevo server action `reorderStopsByDriverAction` + componente `ReorderableStopsList`:
+  - UX: botón "Cambiar orden" entra en modo edición con flechas ↑↓ (no drag & drop — mejor en touch).
+  - Solo paradas pending son movibles.
+  - Al guardar: UPDATE stops con sesión del chofer (RLS `stops_update` lo permite); bump version + audit con service_role (porque `routes_update` es solo admin).
+  - Razón en audit: "Chofer reordenó paradas pendientes" — trazable a quien hizo el cambio.
+
+**Alternativas consideradas:**
+- *Reorden libre incluso de stops completed/arrived:* descartado. Romper la cronología histórica (sequence vs actual_arrival_at) inutiliza cualquier reporte ex-post.
+- *Workflow de aprobación: chofer propone, admin aprueba antes de aplicar:* descartado por friction. El cliente quiere el cambio inmediato; el audit captura quién/cuándo/por qué.
+- *Chofer drag & drop con dnd-kit (mismo que admin):* descartado. En touch + scroll de móvil, los gestos chocan; flechas son explícitas.
+- *No bumpar version en reorden (solo audit):* descartado. La versión es la fuente de verdad para "el chofer está viendo la versión correcta" si en el futuro agregamos reconciliación cliente↔servidor.
+
+**Riesgos / Limitaciones:**
+- *Concurrencia:* si admin y chofer reordenan al mismo tiempo, gana el último write. No hay locking ni optimistic concurrency. Probabilidad baja; mitigación futura: agregar version check en el UPDATE de stops.
+- *Push al chofer en admin reorder:* si el chofer no aceptó push notifications, no se entera hasta que abra la PWA. La UI driver hace `revalidatePath('/route')` server-side, así que un refresh pasivo (chofer hace pull-to-refresh, navega) ya muestra el nuevo orden.
+- *Audit de chofer usa service_role:* el `created_by` en `route_versions` queda como el `auth.uid()` del chofer (correcto), pero la escritura efectiva la hace service_role bypass. Si en el futuro queremos RLS estricta en `route_versions`, hay que abrir policy de INSERT para drivers (con check `created_by = auth.uid()` y route ownership).
+- *Driver action NO notifica al admin:* si el chofer reordena, el admin lo ve solo cuando refresca `/routes/[id]`. Issue #61 abierto.
+- *Validación de orden razonable:* aceptamos cualquier orden que envíe el chofer (no validamos contra geo). Un chofer malicioso podría ordenar algo absurdo (ej. zigzag) — el audit captura el evento pero no lo bloquea. Trade-off: confianza en el chofer vs costo de validación geo (qué es "razonable" depende de calles/tráfico que el optimizer no siempre captura).
+
+**Oportunidades de mejora:**
+- Notificar admin por push cuando chofer reordene (issue #61).
+- En el UI admin, mostrar historial de versiones (route_versions) con razón + autor para auditar cambios.
+- Optimistic locking: el client envía la `version` que vio; el server rechaza si difiere.
+- Visual diff: mostrar al chofer en mapa el orden original vs nuevo antes de confirmar.
+- Telemetría: cuántas veces el chofer reordena vs cumple el orden original — feedback para calibrar el optimizer.

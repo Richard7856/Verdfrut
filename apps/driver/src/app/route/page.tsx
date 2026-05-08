@@ -8,7 +8,7 @@ import { createServerClient } from '@verdfrut/supabase/server';
 import { todayInZone } from '@verdfrut/utils';
 import { logoutAction } from '@/app/(auth)/login/actions';
 import { RouteHeader } from '@/components/route/route-header';
-import { StopCard } from '@/components/route/stop-card';
+import { ReorderableStopsList } from '@/components/route/reorderable-stops-list';
 import { EmptyRoute } from '@/components/route/empty-route';
 import { GpsBroadcastController } from '@/components/route/gps-broadcast-controller';
 import { PushOptIn } from '@/components/route/push-opt-in';
@@ -124,17 +124,11 @@ export default async function RoutePage() {
                   </Link>
                 )}
               </div>
-              <ul className="flex flex-col gap-2 p-4">
-                {stops.map((item) => (
-                  <li key={item.stop.id}>
-                    <StopCard
-                      item={item}
-                      isNext={item.stop.id === nextStopId}
-                      timezone={timezone}
-                    />
-                  </li>
-                ))}
-              </ul>
+              <ReorderableStopsList
+                initialStops={stops}
+                nextStopId={nextStopId}
+                timezone={timezone}
+              />
             </>
           )}
         </>

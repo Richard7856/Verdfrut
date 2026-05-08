@@ -258,6 +258,131 @@ Formato:
 **Mitigación:** transitorio, autoresuelve con refresh.
 **Estado:** cerrado por naturaleza
 
+### #59 — Falta columna `region` en stores para agrupar sub-regiones operativas
+**Severidad:** importante
+**Sprint:** backlog (post Sprint 19)
+**Contexto:** ADR-033 consolidó tiendas Toluca bajo zone CDMX porque comparten CEDIS (CEDA). Se perdió el agrupador visual "Toluca/CDMX" en el UI. Por ahora solo trazable por prefijo `code='TOL-*'` o dirección.
+**Síntoma:** Reportes de cliente que agrupen por región (ej. "ventas/entregas Toluca vs CDMX") tienen que parsear `code` o `address`. UI no permite filtrar tiendas por región operativa al crear ruta.
+**Solución propuesta:** migración 028 que agregue `stores.region TEXT NULL` (o FK a tabla `regions` si crece la complejidad). Backfill: TOL-* → 'TOLUCA', CDMX-* → 'CDMX'. Update UI: filtro de region en `/routes/new` form. Update queries: `listStores({ region })`.
+**Triggers para ejecutar:** cliente alcanza 50+ tiendas O agrega 2da región operativa O pide reportes por región.
+**Estado:** abierto, parked
+
+### #60 — Optimizer Railway necesita redeploy para que el fix `distance=0` aplique
+**Severidad:** importante (bloqueante para field test)
+**Sprint:** S19 (ADR-034)
+**Contexto:** El fix Python (`profile=car` + `_backfill_distances_from_matrix`) está en `services/optimizer/main.py` local. Las rutas creadas hoy seguirán teniendo `total_distance_meters=0` hasta que Railway reciba el redeploy.
+**Síntoma:** UI muestra "0 km · re-optimizar" en rutas creadas pre-deploy.
+**Solución:** push branch + auto-deploy Railway. Después, re-optimizar rutas existentes que tengan `total_distance_meters=0` (resetToDraft + re-correr optimizer). Las rutas históricas COMPLETED no se tocan (snapshot histórico).
+**Estado:** pendiente de deploy
+
+### #61 — Reorder del chofer NO notifica al admin por push
+**Severidad:** importante
+**Sprint:** backlog
+**Contexto:** ADR-035 implementó reorder en admin (notifica chofer) y reorder en chofer (NO notifica admin). Razón pragmática: un admin típicamente no está pegado al UI 24/7, y los reorders del chofer suelen ser pequeños (1-2 stops). Pero si el admin quiere reaccionar a un cambio del chofer (ej. coordinar con cliente), no se entera.
+**Síntoma:** admin abre `/routes/[id]` 1 hora después y ve orden distinto sin saber cuándo cambió. El audit en `route_versions` lo dice, pero hay que ir a buscarlo.
+**Solución propuesta:** crear `notifyAdminOfDriverReorder(routeId, driverName)` análogo al de chat (push al admin con tag específico). Reutilizar el sistema de `push_subscriptions` admin que ya existe.
+**Estado:** abierto
+
+### #62 — Reorder concurrente admin↔chofer no tiene lock optimista
+**Severidad:** cosmético (probabilidad baja)
+**Sprint:** backlog
+**Contexto:** ADR-035: si admin y chofer reordenan en ventana de segundos, el último write gana. No hay version check ni transacción.
+**Síntoma:** chofer reordena (versión 2). Antes de propagarse, admin reordena (versión 3). Se pierde el cambio del chofer (admin sobrescribe).
+**Probabilidad:** baja en operación real (1 admin + 1 chofer + cambios espaciados).
+**Solución propuesta:** agregar `?version=N` al payload de `reorderStopsAction`/`reorderStopsByDriverAction`. Server compara con BD y rechaza si hay diferencia ("La ruta cambió, recarga"). Versión actual se devuelve en cada select.
+**Estado:** abierto
+
+### #63 — Driver action escribe `route_versions` con service_role bypass de RLS
+**Severidad:** importante (security audit)
+**Sprint:** backlog
+**Contexto:** ADR-035: `reorderStopsByDriverAction` usa `createServiceRoleClient()` para INSERT en `route_versions` y UPDATE en `routes.version`, porque las RLS de esas tablas son solo admin. El `created_by` es `auth.uid()` del chofer (correcto), pero la escritura efectiva no respeta RLS.
+**Síntoma:** un atacante que logre RCE en el servidor podría escribir cualquier `route_versions` con cualquier reason/user. Las RLS no lo protegen.
+**Solución propuesta:** agregar policy `route_versions_insert_driver` que permita INSERT cuando `created_by = auth.uid()` Y `route_id IN (SELECT routes.id WHERE drivers.user_id = auth.uid())`. También policy `routes_update_version_only` que permita UPDATE solo de la columna `version` y `updated_at` para chofer dueño. Migrar el action a usar sesión del chofer en vez de service_role.
+**Estado:** abierto, security review
+
+### #64 — Chofer puede reordenar paradas en orden absurdo sin validación geo
+**Severidad:** cosmético (mitigación implícita: audit captura)
+**Sprint:** backlog
+**Contexto:** ADR-035: el reorder del chofer acepta cualquier permutación de paradas pendientes. No validamos contra distancias geo o "razonabilidad" de la ruta resultante.
+**Síntoma:** chofer malicioso o por error mueve paradas a un orden subóptimo (zigzag, retorno innecesario). Aumenta combustible y tiempo. El admin solo lo ve post-mortem en el dashboard.
+**Solución propuesta:** comparar la distancia total del nuevo orden (calculada con haversine rápido) vs el orden original. Si crece >50%, mostrar warning al chofer ("¿Seguro? El nuevo orden recorre 22 km más"). NO bloquear — el chofer puede tener razón válida.
+**Estado:** abierto, baja prioridad
+
+### #65 — Total turno calcula `totalShiftSeconds` desde Date.parse — sensible a TZ del server
+**Severidad:** cosmético
+**Sprint:** backlog
+**Contexto:** ADR-034: el cálculo de "Total turno" en `/routes/[id]/page.tsx` usa `new Date(route.estimatedEndAt).getTime() - new Date(route.estimatedStartAt).getTime()`. Funciona porque ambos timestamps están en UTC con offset, pero si Postgres devuelve un formato no estándar (sin tz), Date.parse podría interpretar como local time.
+**Síntoma:** en server con TZ distinta a UTC, el total podría off por horas. Hoy todo corre en UTC en Vercel, así que no se ve. Pero migrar a otro hosting podría romper.
+**Solución propuesta:** usar `formatDuration` con segundos calculados explícitamente desde ISO strings parseados con `Temporal` o `date-fns` con TZ explícita.
+**Estado:** abierto, latente
+
+---
+
+## Posibles bugs latentes (introducidos en este ciclo S19 pre-deploy)
+
+### Bug-#L1 — Versión de ruta puede saltar si admin y chofer corren `incrementRouteVersion` simultáneamente
+- **Cuándo:** caso #62 — race condition.
+- **Síntoma:** version en BD = 5, luego dos UPDATEs casi simultáneos (chofer y admin) → ambos leen 5, ambos escriben 6. Una de las dos versiones del audit `route_versions` no corresponde con el snapshot real de stops.
+- **Mitigación inmediata:** apoyarse en el timestamp `created_at` de route_versions para reconstruir orden.
+- **Fix proper:** issue #62 (lock optimista).
+
+### Bug-#L2 — `_backfill_distances_from_matrix` puede fallar silenciosamente si VROOM cambia el shape de `steps`
+- **Cuándo:** Railway recibe nueva versión de pyvroom que omite `location_index`.
+- **Síntoma:** suma de distancias se queda en 0 (try/except absorbe IndexError). Volvemos al bug original.
+- **Mitigación:** monitorear logs de Railway con `[optimizer]` keyword. Agregar metric `route.distance_was_backfilled` para alertar si pasa frecuentemente.
+
+### Bug-#L3 — `notifyDriverOfRouteChange` reusa el mismo `tag` que `notifyDriverOfPublishedRoute`
+- **Cuándo:** chofer recibe push "Nueva ruta asignada", luego admin reordena → llega push "Tu ruta cambió" que SUSTITUYE la anterior. Si el chofer aún no había clickeado la primera, pierde el contexto.
+- **Mitigación:** comportamiento aceptable (la nueva push tiene la URL correcta). Si confunde a usuarios, dar tags distintos.
+
+### Bug-#L4 — Admin reorder POST-PUBLISH NO invalida métricas (distance/duration/ETAs)
+- **Cuándo:** admin reordena PUBLISHED. Las ETAs siguen siendo las del orden original.
+- **Síntoma:** la app driver muestra "ETA 09:48" en una parada que ahora va a llegar a las 11:00.
+- **Mitigación:** decisión consciente (ADR-035) — re-optimizar invalidaría confianza del chofer en el orden recibido. Documentar que "ETA es referencia, no compromiso".
+- **Fix futuro:** botón opcional "Re-calcular ETAs sin re-optimizar" que solo re-corre haversine sobre el nuevo orden.
+
+### Bug-#L5 — Driver action de reorder NO valida que la ruta esté del día actual
+- **Cuándo:** chofer tiene ruta hoy IN_PROGRESS y otra PUBLISHED para mañana. El query `routes.eq('date', today)` filtra correctamente, pero si el chofer tiene 2 rutas el mismo día (escenario edge: un día de transferencias múltiples), `.maybeSingle()` daría error.
+- **Mitigación:** raro; constraint UNIQUE(driver_id, date) sobre rutas activas existe (idx_routes_vehicle_date_active sobre vehicle, no driver). Verificar si hay equivalente para driver.
+
+---
+
+## Attack vectors / Security review (pre-deploy S19)
+
+### AV-#1 — Chofer puede impersonar otro chofer si compromete cookie
+- **Vector:** robo de session cookie del chofer A → atacante reordena las paradas de la ruta de A.
+- **Impacto:** baja-media. Solo afecta una ruta del día. Audit en `route_versions` registra el evento (created_by = chofer A), no captura el robo.
+- **Mitigación actual:** Supabase Auth tiene token expiry; cookies con httpOnly/secure.
+- **Mejora:** rate-limit del action `reorderStopsByDriverAction` (ej. máx 10 reorders/hora). Aún no implementado.
+
+### AV-#2 — Service role bypass en `reorderStopsByDriverAction`
+- **Vector:** RCE en el servidor del driver app → atacante usa `createServiceRoleClient()` para escribir cualquier cosa en `route_versions`/`routes`.
+- **Impacto:** alto. Service role bypass-ea TODA la RLS del proyecto.
+- **Mitigación actual:** ninguna específica — el service role ya estaba expuesto al server side desde S18 (push fanout, chat AI mediator). Esto solo amplía la superficie.
+- **Mejora:** issue #63 — migrar a sesión del chofer + agregar RLS específica para que el chofer pueda UPDATE solo `routes.version` propio.
+
+### AV-#3 — Admin reorder sin verificación de "¿la ruta es de la zona del admin?"
+- **Vector:** admin de zona X (¿zone_manager con permisos elevados?) reordena rutas de zona Y.
+- **Impacto:** medio. Hoy `requireRole('admin','dispatcher')` no filtra por zona — un admin/dispatcher es global. Si en futuro hay "admin per zona" (zone_manager elevado), el action no lo enforce.
+- **Mitigación actual:** modelo V2 actual (post-S18) no tiene "admin de zona". Toda la operación es 1 admin global hoy.
+- **Mejora:** agregar zone check al action si se introduce el concepto.
+
+### AV-#4 — Stops sequence puede usarse para inferir info de competidores
+- **Vector:** atacante con cualquier rol authenticated lee stops por sequence → puede inferir patrones de ruta del cliente (qué tiendas son atendidas primero, etc.).
+- **Impacto:** baja (solo dentro de un tenant; ADR-001 cada cliente tiene proyecto Supabase aislado).
+- **Mitigación:** RLS `stops_select` ya restringe via `routes_select` policy. Driver solo ve su ruta. Zone manager solo ve su zona. No hay leak inter-zona.
+
+### AV-#5 — `notifyDriverOfRouteChange` reason expuesto al chofer
+- **Vector:** la razón pasada al push notif aparece literal en el body. Si admin escribe info sensible en el reason, el chofer lo ve.
+- **Impacto:** bajo. Hoy el reason es hardcoded ("Las paradas pendientes fueron reordenadas").
+- **Mitigación:** documentar que `reason` debe ser sanitizado si se expone a UI futura. No accept user input en el reason del push.
+
+### AV-#6 — Geocoding Toluca con Nominatim NO usa HTTPS verification
+- **Vector:** si Nominatim API queda en man-in-the-middle, atacante devuelve coords falsas.
+- **Impacto:** medio. Ruta pasaría por coords erróneas; el chofer iría al lugar equivocado, anti-fraude geo (>1km de la tienda) lo detecta y no permite check-in.
+- **Mitigación:** las coords están en BD. Cliente debería validar visualmente cada tienda en mapa antes de operar.
+- **Mejora:** anotar coords como "geocoded" vs "verified" en stores; UI mostrar warning hasta que cliente verifique.
+
 ---
 
 ## Resumen

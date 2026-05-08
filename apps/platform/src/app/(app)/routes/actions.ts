@@ -15,6 +15,7 @@ import {
   cancelRoute,
   assignDriverToRoute,
   resetRouteToDraft,
+  incrementRouteVersion,
 } from '@/lib/queries/routes';
 import {
   bulkReorderStops,
@@ -27,7 +28,7 @@ import { getVehiclesByIds } from '@/lib/queries/vehicles';
 import { getDriversByIds } from '@/lib/queries/drivers';
 import { listDepots } from '@/lib/queries/depots';
 import { callOptimizer, getUnassignedStoreIds } from '@/lib/optimizer';
-import { notifyDriverOfPublishedRoute } from '@/lib/push';
+import { notifyDriverOfPublishedRoute, notifyDriverOfRouteChange } from '@/lib/push';
 import { requireUuid, runAction, ValidationError, type ActionResult } from '@/lib/validation';
 
 const TENANT_TIMEZONE = process.env.NEXT_PUBLIC_TENANT_TIMEZONE ?? 'America/Mexico_City';
@@ -391,52 +392,109 @@ export async function clearRouteStopsAction(routeId: string): Promise<ActionResu
 }
 
 /**
- * Reordena las paradas de una ruta. Solo permitido si la ruta NO está
- * publicada (DRAFT/OPTIMIZED/APPROVED). Una vez PUBLISHED, modificar paradas
- * implicaría notificar al chofer y crear nueva versión — flujo separado.
+ * Reordena las paradas de una ruta. ADR-035 (post-publicación reorder):
  *
- * Las métricas de la ruta (distance, duration, ETAs) quedan obsoletas tras
- * el reorder. La UI debe mostrar un warning sugiriendo re-optimizar para
- * recomputarlas, pero NO se invalidan automáticamente — el dispatcher decide.
+ * - **Pre-publicación (DRAFT/OPTIMIZED/APPROVED):** reorder libre de TODAS las
+ *   paradas. Métricas quedan obsoletas — UI sugiere re-optimizar.
+ * - **Post-publicación (PUBLISHED/IN_PROGRESS):** reorder SOLO de paradas
+ *   pendientes (las completed/arrived/skipped no se mueven — su sequence ya es
+ *   historia). Bumpa version + audit en route_versions + push al chofer.
+ * - **COMPLETED/CANCELLED/INTERRUPTED:** prohibido (ruta terminó).
+ *
+ * Las métricas (distance, duration, ETAs) NO se invalidan automáticamente —
+ * el caller decide. Para post-publish, lo recomendado es NO re-optimizar
+ * (rompería la confianza con el chofer); solo aceptar el orden que decidió
+ * el admin/chofer y dejar que el chofer maneje la diferencia con su criterio.
  */
 export async function reorderStopsAction(
   routeId: string,
   orderedStopIds: string[],
 ): Promise<ActionResult> {
-  await requireRole('admin', 'dispatcher');
+  const profile = await requireRole('admin', 'dispatcher');
   return runAction(async () => {
     const id = requireUuid('routeId', routeId);
 
     const route = await getRoute(id);
     if (!route) throw new ValidationError('routeId', 'Ruta no existe');
-    if (!['DRAFT', 'OPTIMIZED', 'APPROVED'].includes(route.status)) {
+
+    const PRE_PUBLISH = ['DRAFT', 'OPTIMIZED', 'APPROVED'] as const;
+    const POST_PUBLISH = ['PUBLISHED', 'IN_PROGRESS'] as const;
+
+    if (
+      !PRE_PUBLISH.includes(route.status as (typeof PRE_PUBLISH)[number]) &&
+      !POST_PUBLISH.includes(route.status as (typeof POST_PUBLISH)[number])
+    ) {
       throw new ValidationError(
         'status',
-        `No se puede reordenar una ruta en estado ${route.status}. Solo DRAFT/OPTIMIZED/APPROVED.`,
+        `No se puede reordenar una ruta en estado ${route.status}.`,
       );
     }
+    const isPostPublish = POST_PUBLISH.includes(route.status as (typeof POST_PUBLISH)[number]);
 
-    // Validar que orderedStopIds tenga TODAS las stops actuales (no parcial).
     const current = await listStopsForRoute(id);
-    if (orderedStopIds.length !== current.length) {
-      throw new ValidationError(
-        'orderedStopIds',
-        `Esperadas ${current.length} stops, recibidas ${orderedStopIds.length}`,
-      );
-    }
-    const currentIds = new Set(current.map((s) => s.id));
-    for (const stopId of orderedStopIds) {
-      if (!currentIds.has(stopId)) {
+
+    if (isPostPublish) {
+      // Solo paradas PENDING son reorderables. Las completed/arrived/skipped
+      // mantienen su sequence original — son hechos consumados.
+      const pending = current.filter((s) => s.status === 'pending');
+      const nonPending = current
+        .filter((s) => s.status !== 'pending')
+        .sort((a, b) => a.sequence - b.sequence);
+      const pendingIds = new Set(pending.map((s) => s.id));
+
+      if (orderedStopIds.length !== pending.length) {
         throw new ValidationError(
           'orderedStopIds',
-          `Stop ${stopId} no pertenece a esta ruta`,
+          `Solo paradas pendientes se pueden reordenar (esperadas ${pending.length}, recibidas ${orderedStopIds.length}).`,
         );
       }
-    }
+      for (const stopId of orderedStopIds) {
+        if (!pendingIds.has(stopId)) {
+          throw new ValidationError(
+            'orderedStopIds',
+            `Stop ${stopId} no es una parada pendiente — no se puede mover.`,
+          );
+        }
+      }
 
-    await bulkReorderStops(id, orderedStopIds);
+      // Construir orden final: histórico (no-pending) primero, después el nuevo
+      // orden de pendientes. bulkReorderStops renumera secuencias de 1..N.
+      const finalOrder = [...nonPending.map((s) => s.id), ...orderedStopIds];
+      await bulkReorderStops(id, finalOrder);
+
+      // Audit + push.
+      try {
+        await incrementRouteVersion(id, profile.id, `Admin reorder en ${route.status}`);
+        await notifyDriverOfRouteChange(
+          id,
+          'Las paradas pendientes fueron reordenadas',
+        );
+      } catch (err) {
+        // No revertir el reorder si falla el audit/push — son secundarios.
+        console.error('[reorderStopsAction] post-publish audit/push falló:', err);
+      }
+    } else {
+      // PRE-PUBLISH — comportamiento previo (reorder libre de TODAS).
+      if (orderedStopIds.length !== current.length) {
+        throw new ValidationError(
+          'orderedStopIds',
+          `Esperadas ${current.length} stops, recibidas ${orderedStopIds.length}`,
+        );
+      }
+      const currentIds = new Set(current.map((s) => s.id));
+      for (const stopId of orderedStopIds) {
+        if (!currentIds.has(stopId)) {
+          throw new ValidationError(
+            'orderedStopIds',
+            `Stop ${stopId} no pertenece a esta ruta`,
+          );
+        }
+      }
+      await bulkReorderStops(id, orderedStopIds);
+    }
 
     revalidatePath(`/routes/${id}`);
     revalidatePath('/routes');
+    revalidatePath('/dispatches');
   });
 }

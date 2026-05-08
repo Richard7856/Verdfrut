@@ -138,7 +138,15 @@ def optimize(
     """Ejecuta VROOM sobre la entrada y devuelve rutas optimizadas."""
     vroom_input = build_vroom_input(req)
     vroom_output = run_vroom(vroom_input)
-    return parse_vroom_output(vroom_output)
+    response = parse_vroom_output(vroom_output)
+
+    # FIX-distance0 (ADR-034): si VROOM devolvió distance=0 a pesar de tener matrix,
+    # calcular manualmente sumando la matriz para los pares (location_idx[i], location_idx[i+1])
+    # según la secuencia de steps. Esto es defensivo: si VROOM se queda sin profile,
+    # o si una versión futura cambia el output, siempre tendremos distance correcta.
+    if req.matrix is not None:
+        response = _backfill_distances_from_matrix(response, req, vroom_output)
+    return response
 
 
 # ----------------------------------------------------------------------------
@@ -153,6 +161,12 @@ def build_vroom_input(req: OptimizeRequest) -> dict[str, Any]:
     que apuntan a posiciones de la matriz. Convención: indexamos en orden:
       - vehicle[0].start, vehicle[0].end, vehicle[1].start, ..., job[0], job[1], ...
     Sin matrix, VROOM consulta OSRM en localhost:5000 (que NO tenemos en el setup).
+
+    Profile: cuando hay `matrices` con varios profiles, cada vehicle DEBE indicar
+    qué profile usar. Sin `profile` declarado, VROOM cae a un profile por default
+    pero PUEDE ignorar la sub-matriz de `distances` y sólo usar `durations` —
+    eso resulta en `route.distance=0` en el output. Por eso forzamos `profile=car`
+    cuando hay matrix (FIX-distance0, ADR-034).
     """
     has_matrix = req.matrix is not None
 
@@ -166,6 +180,7 @@ def build_vroom_input(req: OptimizeRequest) -> dict[str, Any]:
             "time_window": list(v.time_window),
         }
         if has_matrix:
+            item["profile"] = "car"  # Match con matrices.car (línea 204) — sin esto VROOM ignora distances.
             item["start_index"] = next_idx
             next_idx += 1
             item["end_index"] = next_idx
@@ -237,6 +252,86 @@ def run_vroom(payload: dict[str, Any]) -> dict[str, Any]:
         return json.loads(result.stdout.decode("utf-8"))
     except json.JSONDecodeError as err:
         raise HTTPException(status_code=500, detail=f"VROOM devolvió JSON inválido: {err}") from err
+
+
+def _backfill_distances_from_matrix(
+    resp: OptimizeResponse,
+    req: OptimizeRequest,
+    raw_vroom: dict[str, Any],
+) -> OptimizeResponse:
+    """Calcula distancias a partir de la matriz si VROOM no las llenó.
+
+    Cómo: para cada `route` del raw_vroom, recorre ALL los steps (start/job/end) y
+    suma `req.matrix.distances[from_idx][to_idx]` consecutivamente. Necesitamos el
+    raw para acceder a `location_index`/`start_index`/`end_index` que VROOM devuelve
+    en cada step (no los exponemos en OptimizeStep porque la app cliente no los usa).
+
+    Si la suma resulta > 0 y el response ya tenía distance=0, la sobreescribe.
+    Si VROOM ya devolvió distance>0 confiable, NO la toca (asume que es correcta).
+
+    Trade-off: este método NO repara duración (asumimos que VROOM siempre llena
+    duration porque es la dimensión de optimización por default). Si en el futuro
+    también queda en 0, replicar esta lógica con `durations`.
+    """
+    if not raw_vroom.get("routes"):
+        return resp
+
+    matrix_dist = req.matrix.distances if req.matrix else None
+    if not matrix_dist:
+        return resp
+
+    fixed_routes: list[OptimizeRoute] = []
+    grand_total = 0
+    for i, route in enumerate(raw_vroom.get("routes", [])):
+        original = resp.routes[i] if i < len(resp.routes) else None
+        if original is None:
+            continue
+
+        if original.distance > 0:
+            # VROOM llenó bien — no tocar.
+            fixed_routes.append(original)
+            grand_total += original.distance
+            continue
+
+        # Sumar steps consecutivos usando location_index (VROOM lo expone para start/end/job).
+        total_dist = 0
+        prev_idx: Optional[int] = None
+        for step in route.get("steps", []):
+            # VROOM nombra el índice según el tipo de step.
+            idx = step.get("location_index")
+            if idx is None:
+                # start/end usan start_index/end_index; tratamos cada uno.
+                idx = step.get("start_index") or step.get("end_index")
+            if idx is None:
+                continue
+            if prev_idx is not None:
+                try:
+                    total_dist += matrix_dist[prev_idx][idx]
+                except (IndexError, TypeError):
+                    pass
+            prev_idx = idx
+
+        rebuilt = OptimizeRoute(
+            vehicle_id=original.vehicle_id,
+            steps=original.steps,
+            distance=int(total_dist),
+            duration=original.duration,
+            cost=original.cost,
+        )
+        fixed_routes.append(rebuilt)
+        grand_total += rebuilt.distance
+
+    new_summary = (
+        OptimizeSummary(
+            total_distance=int(grand_total) if resp.summary.total_distance == 0 else resp.summary.total_distance,
+            total_duration=resp.summary.total_duration,
+            total_cost=resp.summary.total_cost,
+        )
+        if resp.summary.total_distance == 0
+        else resp.summary
+    )
+
+    return OptimizeResponse(routes=fixed_routes, unassigned=resp.unassigned, summary=new_summary)
 
 
 def parse_vroom_output(output: dict[str, Any]) -> OptimizeResponse:

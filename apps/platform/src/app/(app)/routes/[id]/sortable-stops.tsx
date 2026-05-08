@@ -41,6 +41,13 @@ interface Props {
   routeId: string;
   /** Si false, render read-only sin drag handles. */
   reorderable: boolean;
+  /**
+   * ADR-035: si true, estamos post-publicación. Restricciones distintas:
+   *   - Solo paradas `pending` se pueden arrastrar (las demás son histórico).
+   *   - El payload enviado al server es solo de pending stops.
+   *   - El warning indica "se notificará al chofer" en vez de "re-optimiza".
+   */
+  postPublish?: boolean;
   initialStops: StopWithStore[];
   timezone: string;
 }
@@ -58,7 +65,13 @@ const STOP_STATUS_TONES: Record<StopStatus, BadgeTone> = {
   skipped: 'danger',
 };
 
-export function SortableStops({ routeId, reorderable, initialStops, timezone }: Props) {
+export function SortableStops({
+  routeId,
+  reorderable,
+  postPublish = false,
+  initialStops,
+  timezone,
+}: Props) {
   const router = useRouter();
   const [items, setItems] = useState(initialStops);
   const [pending, startTransition] = useTransition();
@@ -75,6 +88,21 @@ export function SortableStops({ routeId, reorderable, initialStops, timezone }: 
     const oldIndex = items.findIndex((s) => s.stop.id === active.id);
     const newIndex = items.findIndex((s) => s.stop.id === over.id);
     if (oldIndex < 0 || newIndex < 0) return;
+
+    // Post-publish: bloquear si el target o el origen NO es pending.
+    // Las paradas no-pending son historia inmutable (completed/arrived/skipped).
+    if (postPublish) {
+      const draggedStatus = items[oldIndex]?.stop.status;
+      const targetStatus = items[newIndex]?.stop.status;
+      if (draggedStatus !== 'pending' || targetStatus !== 'pending') {
+        toast.error(
+          'Solo paradas pendientes se pueden mover',
+          'Las paradas completadas/omitidas/en sitio quedan en su orden original.',
+        );
+        return;
+      }
+    }
+
     const reordered = arrayMove(items, oldIndex, newIndex);
     // Renumeramos sequence en local para feedback visual inmediato.
     setItems(
@@ -85,10 +113,19 @@ export function SortableStops({ routeId, reorderable, initialStops, timezone }: 
 
   function persist() {
     startTransition(async () => {
-      const orderedIds = items.map((s) => s.stop.id);
-      const res = await reorderStopsAction(routeId, orderedIds);
+      // Post-publish: enviamos solo IDs de paradas pending (server espera solo eso).
+      // Pre-publish: enviamos todos en el orden actual.
+      const idsToSend = postPublish
+        ? items.filter((s) => s.stop.status === 'pending').map((s) => s.stop.id)
+        : items.map((s) => s.stop.id);
+      const res = await reorderStopsAction(routeId, idsToSend);
       if (res.ok) {
-        toast.success('Orden guardado', 'Re-optimiza para actualizar ETAs.');
+        toast.success(
+          'Orden guardado',
+          postPublish
+            ? 'El chofer recibirá una notificación con el nuevo orden.'
+            : 'Re-optimiza para actualizar ETAs.',
+        );
         setDirty(false);
         router.refresh();
       } else {
@@ -110,7 +147,9 @@ export function SortableStops({ routeId, reorderable, initialStops, timezone }: 
       {dirty && (
         <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--vf-warn-bg,#fef3c7)] px-4 py-2 text-xs">
           <span className="text-[var(--color-text)]">
-            Cambiaste el orden. Las métricas (ETA, distancia) ya no son fiables — re-optimiza después de guardar.
+            {postPublish
+              ? 'Cambiaste el orden de paradas pendientes. Al guardar se notificará al chofer y se subirá la versión.'
+              : 'Cambiaste el orden. Las métricas (ETA, distancia) ya no son fiables — re-optimiza después de guardar.'}
           </span>
           <div className="flex gap-2">
             <button
@@ -143,14 +182,19 @@ export function SortableStops({ routeId, reorderable, initialStops, timezone }: 
           strategy={verticalListSortingStrategy}
         >
           <ol className="divide-y" style={{ borderColor: 'var(--vf-line-soft)' }}>
-            {items.map((item) => (
-              <SortableRow
-                key={item.stop.id}
-                item={item}
-                reorderable={reorderable && !pending}
-                timezone={timezone}
-              />
-            ))}
+            {items.map((item) => {
+              // Post-publish: solo pending stops son draggables (las demás son historia).
+              const rowReorderable =
+                reorderable && !pending && (!postPublish || item.stop.status === 'pending');
+              return (
+                <SortableRow
+                  key={item.stop.id}
+                  item={item}
+                  reorderable={rowReorderable}
+                  timezone={timezone}
+                />
+              );
+            })}
           </ol>
         </SortableContext>
       </DndContext>

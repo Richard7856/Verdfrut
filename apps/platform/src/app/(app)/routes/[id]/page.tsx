@@ -123,6 +123,26 @@ export default async function RouteDetailPage({ params }: PageProps) {
   const completedStops = stops.filter((s) => s.status === 'completed').length;
   const skippedStops = stops.filter((s) => s.status === 'skipped').length;
 
+  // Cálculo de "tiempo en paradas" — sumar service_time_seconds de cada tienda.
+  // El optimizer ya considera estos service times en estimated_end_at, pero el UI
+  // no exponía la descomposición → el dispatcher veía solo "Duración estimada"
+  // (= solo manejo) sin saber que la ventana inicio→fin incluye servicio.
+  // ADR-034: agregamos métricas separadas para que sea claro de un vistazo.
+  const totalServiceSeconds = stops.reduce((sum, s) => {
+    const store = storesById.get(s.storeId);
+    return sum + (store?.serviceTimeSeconds ?? 0);
+  }, 0);
+  const totalShiftSeconds =
+    route.estimatedStartAt && route.estimatedEndAt
+      ? Math.max(
+          0,
+          Math.round(
+            (new Date(route.estimatedEndAt).getTime() - new Date(route.estimatedStartAt).getTime()) /
+              1000,
+          ),
+        )
+      : null;
+
   // Cargar info de chofer (actual + opciones) para el selector inline.
   // Drivers activos en la zona, joineados con su user_profile para mostrar nombre.
   const [zoneDrivers, zoneDriverProfiles] = await Promise.all([
@@ -235,7 +255,17 @@ export default async function RouteDetailPage({ params }: PageProps) {
             ) : (
               <SortableStops
                 routeId={route.id}
-                reorderable={['DRAFT', 'OPTIMIZED', 'APPROVED'].includes(route.status)}
+                // ADR-035: reorder permitido también en PUBLISHED/IN_PROGRESS,
+                // pero con restricciones (solo paradas pending). El componente
+                // recibe `postPublish` para diferenciar el comportamiento.
+                reorderable={[
+                  'DRAFT',
+                  'OPTIMIZED',
+                  'APPROVED',
+                  'PUBLISHED',
+                  'IN_PROGRESS',
+                ].includes(route.status)}
+                postPublish={['PUBLISHED', 'IN_PROGRESS'].includes(route.status)}
                 timezone={TENANT_TZ}
                 initialStops={stops.map((s) => {
                   const store = storesById.get(s.storeId);
@@ -257,17 +287,27 @@ export default async function RouteDetailPage({ params }: PageProps) {
             <CardHeader title="Métricas" />
             <dl className="space-y-2.5 text-sm">
               <Metric label="Distancia total">
-                {route.totalDistanceMeters
-                  ? `${(route.totalDistanceMeters / 1000).toFixed(1)} km`
+                {route.totalDistanceMeters !== null && route.totalDistanceMeters !== undefined
+                  ? route.totalDistanceMeters > 0
+                    ? `${(route.totalDistanceMeters / 1000).toFixed(1)} km`
+                    : <span className="text-[11px]" style={{ color: 'var(--vf-text-mute)' }}>0 km · re-optimizar</span>
                   : '—'}
               </Metric>
-              <Metric label="Duración estimada">
+              <Metric label="Tiempo de manejo">
                 {route.totalDurationSeconds ? formatDuration(route.totalDurationSeconds) : '—'}
               </Metric>
-              <Metric label="Inicio estimado">
+              <Metric label="Tiempo en paradas">
+                {totalServiceSeconds > 0
+                  ? `${formatDuration(totalServiceSeconds)} (${stops.length} × ${Math.round(totalServiceSeconds / stops.length / 60)} min)`
+                  : '—'}
+              </Metric>
+              <Metric label="Total turno">
+                {totalShiftSeconds !== null ? formatDuration(totalShiftSeconds) : '—'}
+              </Metric>
+              <Metric label="Inicio del turno">
                 {route.estimatedStartAt ? formatTime(route.estimatedStartAt) : '—'}
               </Metric>
-              <Metric label="Fin estimado">
+              <Metric label="Fin del turno">
                 {route.estimatedEndAt ? formatTime(route.estimatedEndAt) : '—'}
               </Metric>
             </dl>
