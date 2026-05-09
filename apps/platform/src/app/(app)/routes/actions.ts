@@ -659,10 +659,49 @@ export async function addStopToRouteAction(
       };
     }
 
+    // Guard server-side: si la ruta tiene tiro, validar que la tienda no esté
+    // ya en OTRA ruta viva del mismo tiro. Una tienda no puede recibir dos
+    // entregas el mismo día desde el mismo tiro — para mover entre rutas
+    // existe el flow "Mover a →" (moveStopToAnotherRouteAction).
+    if (route.dispatchId) {
+      const supabaseGuard = await (await import('@verdfrut/supabase/server')).createServerClient();
+      // 1. Listar IDs de rutas vivas del tiro (excluyendo la actual).
+      const { data: siblingRoutes, error: rErr } = await supabaseGuard
+        .from('routes')
+        .select('id, name')
+        .eq('dispatch_id', route.dispatchId)
+        .neq('status', 'CANCELLED')
+        .neq('id', id);
+      if (rErr) throw new Error(`[addStop] sibling routes: ${rErr.message}`);
+      const siblingIds = (siblingRoutes ?? []).map((r) => r.id as string);
+
+      if (siblingIds.length > 0) {
+        // 2. Ver si la tienda ya está en alguna de esas rutas.
+        const { data: dupes, error: dErr } = await supabaseGuard
+          .from('stops')
+          .select('route_id')
+          .eq('store_id', storeId)
+          .in('route_id', siblingIds);
+        if (dErr) throw new Error(`[addStop] dupe check: ${dErr.message}`);
+
+        const conflictStop = (dupes ?? [])[0];
+        if (conflictStop) {
+          const conflictRoute = (siblingRoutes ?? []).find(
+            (r) => r.id === conflictStop.route_id,
+          );
+          return {
+            ok: false,
+            error: `${store.code} ya está en la ruta "${conflictRoute?.name ?? '?'}" del mismo tiro. Usa "Mover a →" para transferirla.`,
+          };
+        }
+      }
+    }
+
     const result = await appendStopToRoute(id, storeId);
 
     revalidatePath(`/routes/${id}`);
     revalidatePath('/routes');
+    if (route.dispatchId) revalidatePath(`/dispatches/${route.dispatchId}`);
     return { ok: true, stopId: result.id, sequence: result.sequence };
   } catch (err) {
     if (err instanceof ValidationError) {

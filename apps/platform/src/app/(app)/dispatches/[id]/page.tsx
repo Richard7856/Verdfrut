@@ -97,11 +97,20 @@ export default async function DispatchDetailPage({ params }: Props) {
     .filter((d) => d.isActive)
     .map((d) => ({ id: d.id, code: d.code, name: d.name }));
 
-  // Tiendas disponibles para agregar manualmente: las activas de la zona del tiro.
-  // Cada card filtra después las que ya están en SU ruta (pueden estar en otra
-  // ruta del tiro y aun así ser candidato si el dispatcher decide moverla).
+  // Tiendas disponibles para agregar manualmente: activas de la zona del tiro
+  // que NO están YA en NINGUNA ruta viva del tiro. Si una tienda está en
+  // Kangoo 2 y el dispatcher la quiere en Kangoo 3, debe usar "Mover a →"
+  // (transfer entre rutas) — duplicarla rompería la entrega (la tienda no
+  // puede recibir dos veces el mismo día).
+  const usedInDispatchStoreIds = new Set<string>();
+  for (let idx = 0; idx < routes.length; idx++) {
+    if (routes[idx]!.status === 'CANCELLED') continue;
+    for (const s of stopsPerRoute[idx] ?? []) {
+      usedInDispatchStoreIds.add(s.storeId);
+    }
+  }
   const allZoneStoresActive = stores.filter(
-    (s) => s.isActive && s.zoneId === dispatch.zoneId,
+    (s) => s.isActive && s.zoneId === dispatch.zoneId && !usedInDispatchStoreIds.has(s.id),
   );
 
   // Choferes activos en la zona para el selector.
@@ -193,12 +202,14 @@ export default async function DispatchDetailPage({ params }: Props) {
                 if (d) effectiveDepot = { id: d.id, code: d.code, name: d.name };
               }
 
-              // Tiendas que esta ruta puede agregar = activas de la zona menos las
-              // que ya están en esta ruta (sí pueden venir de otras rutas del tiro).
-              const stopStoreIds = new Set(stops.map((s) => s.storeId));
-              const availableStoresForRoute = allZoneStoresActive
-                .filter((s) => !stopStoreIds.has(s.id))
-                .map((s) => ({ id: s.id, code: s.code, name: s.name }));
+              // Tiendas que esta ruta puede agregar: las que NO están en NINGUNA
+              // ruta viva del tiro (ya filtradas arriba en allZoneStoresActive).
+              // Si quiere mover una tienda desde otra ruta, usa "Mover a →".
+              const availableStoresForRoute = allZoneStoresActive.map((s) => ({
+                id: s.id,
+                code: s.code,
+                name: s.name,
+              }));
 
               return (
                 <li key={r.id}>

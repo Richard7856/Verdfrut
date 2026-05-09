@@ -95,10 +95,29 @@ export default async function RouteDetailPage({ params }: PageProps) {
   const zone = zones.find((z) => z.id === route.zoneId);
 
   // Tiendas disponibles para agregar manualmente: las de la zona que NO están
-  // ya en esta ruta. Si la ruta está post-publicación, no ofrecemos agregar.
-  const stopStoreIds = new Set(stops.map((s) => s.storeId));
+  // ya en NINGUNA ruta viva del mismo tiro. Si la tienda ya está en una
+  // hermana, el dispatcher debe usar "Mover a →" en lugar de duplicar (la
+  // tienda no puede recibir dos veces el mismo día desde el mismo tiro).
+  const usedInDispatchStoreIds = new Set<string>(stops.map((s) => s.storeId));
+  if (route.dispatchId) {
+    const supabaseDup = await (await import('@verdfrut/supabase/server')).createServerClient();
+    const { data: siblingRoutes } = await supabaseDup
+      .from('routes')
+      .select('id')
+      .eq('dispatch_id', route.dispatchId)
+      .neq('status', 'CANCELLED')
+      .neq('id', id);
+    const sibIds = (siblingRoutes ?? []).map((r) => r.id as string);
+    if (sibIds.length > 0) {
+      const { data: sibStops } = await supabaseDup
+        .from('stops')
+        .select('store_id')
+        .in('route_id', sibIds);
+      for (const s of sibStops ?? []) usedInDispatchStoreIds.add(s.store_id as string);
+    }
+  }
   const availableStoresToAdd = allZoneStores
-    .filter((s) => !stopStoreIds.has(s.id))
+    .filter((s) => !usedInDispatchStoreIds.has(s.id))
     .map((s) => ({ id: s.id, code: s.code, name: s.name }));
   const canAddStops = ['DRAFT', 'OPTIMIZED', 'APPROVED'].includes(route.status);
 
