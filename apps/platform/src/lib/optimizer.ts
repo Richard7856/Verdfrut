@@ -37,6 +37,13 @@ interface OptimizeContext {
    * propio vehículo (depotLat/depotLng).
    */
   depotsById?: Map<string, Depot>;
+  /**
+   * ADR-047: override del depot al nivel ruta. Indexado por vehicle.id, contiene
+   * coords del depot que la ruta concreta debe usar. Si está presente para un
+   * vehicle.id, manda sobre vehicle.depotId / vehicle.depotLat/Lng — útil cuando
+   * la misma camioneta sale de distintos CEDIS según el tiro.
+   */
+  vehicleDepotOverridesById?: Map<string, { lat: number; lng: number }>;
 }
 
 /**
@@ -101,10 +108,11 @@ function buildOptimizerRequest(
   ctx: OptimizeContext,
 ): OptimizerRequest {
   const optVehicles: OptimizerVehicle[] = vehicles.map((v, idx) => {
-    // Resolver depot: preferir CEDIS asignado, fallback a coords manuales del vehículo.
-    const fromDepot = v.depotId ? ctx.depotsById?.get(v.depotId) : null;
-    const depotLng = fromDepot ? fromDepot.lng : v.depotLng ?? 0;
-    const depotLat = fromDepot ? fromDepot.lat : v.depotLat ?? 0;
+    // Prioridad: override por vehicle.id (ADR-047) > vehicle.depotId > coords manuales.
+    const override = ctx.vehicleDepotOverridesById?.get(v.id);
+    const fromDepot = !override && v.depotId ? ctx.depotsById?.get(v.depotId) : null;
+    const depotLng = override ? override.lng : fromDepot ? fromDepot.lng : v.depotLng ?? 0;
+    const depotLat = override ? override.lat : fromDepot ? fromDepot.lat : v.depotLat ?? 0;
     return {
       id: idx + 1,
       capacity: v.capacity,
@@ -286,9 +294,10 @@ function listOptimizerCoords(
 ): Array<[number, number]> {
   const coords: Array<[number, number]> = [];
   for (const v of vehicles) {
-    const fromDepot = v.depotId ? ctx.depotsById?.get(v.depotId) : null;
-    const lng = fromDepot ? fromDepot.lng : v.depotLng ?? 0;
-    const lat = fromDepot ? fromDepot.lat : v.depotLat ?? 0;
+    const override = ctx.vehicleDepotOverridesById?.get(v.id);
+    const fromDepot = !override && v.depotId ? ctx.depotsById?.get(v.depotId) : null;
+    const lng = override ? override.lng : fromDepot ? fromDepot.lng : v.depotLng ?? 0;
+    const lat = override ? override.lat : fromDepot ? fromDepot.lat : v.depotLat ?? 0;
     coords.push([lng, lat]); // start
     coords.push([lng, lat]); // end
   }
@@ -301,13 +310,13 @@ function buildHaversineMatrix(
   stores: Store[],
   ctx: OptimizeContext,
 ): { durations: number[][]; distances: number[][] } {
-  // Resolver coords del depot por vehículo (ya hecho en buildOptimizerRequest,
-  // pero lo repetimos aquí — se podría refactorizar a un helper compartido).
+  // Resolver coords del depot por vehículo (mismo orden que buildOptimizerRequest).
   const points: Array<[number, number]> = []; // [lng, lat]
   for (const v of vehicles) {
-    const fromDepot = v.depotId ? ctx.depotsById?.get(v.depotId) : null;
-    const lng = fromDepot ? fromDepot.lng : v.depotLng ?? 0;
-    const lat = fromDepot ? fromDepot.lat : v.depotLat ?? 0;
+    const override = ctx.vehicleDepotOverridesById?.get(v.id);
+    const fromDepot = !override && v.depotId ? ctx.depotsById?.get(v.depotId) : null;
+    const lng = override ? override.lng : fromDepot ? fromDepot.lng : v.depotLng ?? 0;
+    const lat = override ? override.lat : fromDepot ? fromDepot.lat : v.depotLat ?? 0;
     points.push([lng, lat]); // start
     points.push([lng, lat]); // end (mismo punto)
   }

@@ -66,6 +66,7 @@ function toRoute(row: RouteRow): Route {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     dispatchId: row.dispatch_id,
+    depotOverrideId: (row as { depot_override_id?: string | null }).depot_override_id ?? null,
   };
 }
 

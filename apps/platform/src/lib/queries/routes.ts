@@ -29,13 +29,14 @@ interface RouteRow {
   created_at: string;
   updated_at: string;
   dispatch_id: string | null;
+  depot_override_id: string | null;
 }
 
 const ROUTE_COLS = `
   id, name, date, vehicle_id, driver_id, zone_id, status, version,
   total_distance_meters, total_duration_seconds, estimated_start_at, estimated_end_at,
   actual_start_at, actual_end_at, published_at, published_by, approved_at, approved_by,
-  created_by, created_at, updated_at, dispatch_id
+  created_by, created_at, updated_at, dispatch_id, depot_override_id
 `;
 
 function toRoute(row: RouteRow): Route {
@@ -62,6 +63,7 @@ function toRoute(row: RouteRow): Route {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     dispatchId: row.dispatch_id,
+    depotOverrideId: row.depot_override_id,
   };
 }
 
@@ -354,6 +356,26 @@ export async function assignDriverToRoute(
 }
 
 /**
+ * Asigna o limpia el override de depot de salida para una ruta (ADR-047).
+ * Pasar null para volver al depot del vehículo. Solo permitido pre-publicación
+ * (DRAFT, OPTIMIZED, APPROVED). Tras setear, el caller debe `recalculateRouteMetrics`
+ * para que ETAs/km reflejen el nuevo origen.
+ */
+export async function assignDepotOverrideToRoute(
+  id: string,
+  depotId: string | null,
+): Promise<void> {
+  const supabase = await createServerClient();
+  const { error } = await supabase
+    .from('routes')
+    .update({ depot_override_id: depotId })
+    .eq('id', id)
+    .in('status', ['DRAFT', 'OPTIMIZED', 'APPROVED']);
+
+  if (error) throw new Error(`[routes.assignDepotOverride] ${error.message}`);
+}
+
+/**
  * Recalcula métricas y ETAs de una ruta a partir de sus stops actuales.
  * ADR-044: invocado tras cualquier mutación de stops (reorder, move entre rutas,
  * append, delete) para que la BD refleje el orden actual sin tener que llamar
@@ -405,7 +427,7 @@ export async function recalculateRouteMetrics(routeId: string): Promise<void> {
   // 1. Cargar ruta
   const { data: route, error: rErr } = await supabase
     .from('routes')
-    .select('id, date, vehicle_id, estimated_start_at, status')
+    .select('id, date, vehicle_id, estimated_start_at, status, depot_override_id')
     .eq('id', routeId)
     .maybeSingle();
   if (rErr || !route) throw new Error(`[routes.recalculateMetrics] route ${routeId}: ${rErr?.message ?? 'not found'}`);
@@ -445,23 +467,32 @@ export async function recalculateRouteMetrics(routeId: string): Promise<void> {
     ]),
   );
 
-  // 4. Resolver depot del vehículo (FK depot_id o coords manuales).
-  const { data: vehicle } = await supabase
-    .from('vehicles')
-    .select('depot_id, depot_lat, depot_lng')
-    .eq('id', route.vehicle_id as string)
-    .maybeSingle();
-
+  // 4. Resolver depot — prioridad: route.depot_override_id > vehicle.depot_id > vehicle.depot_lat/lng (ADR-047).
   let depotCoord: { lat: number; lng: number } | null = null;
-  if (vehicle?.depot_id) {
+  if (route.depot_override_id) {
     const { data: depot } = await supabase
       .from('depots')
       .select('lat, lng')
-      .eq('id', vehicle.depot_id as string)
+      .eq('id', route.depot_override_id as string)
       .maybeSingle();
     if (depot) depotCoord = { lat: depot.lat as number, lng: depot.lng as number };
-  } else if (vehicle?.depot_lat && vehicle?.depot_lng) {
-    depotCoord = { lat: vehicle.depot_lat as number, lng: vehicle.depot_lng as number };
+  }
+  if (!depotCoord) {
+    const { data: vehicle } = await supabase
+      .from('vehicles')
+      .select('depot_id, depot_lat, depot_lng')
+      .eq('id', route.vehicle_id as string)
+      .maybeSingle();
+    if (vehicle?.depot_id) {
+      const { data: depot } = await supabase
+        .from('depots')
+        .select('lat, lng')
+        .eq('id', vehicle.depot_id as string)
+        .maybeSingle();
+      if (depot) depotCoord = { lat: depot.lat as number, lng: depot.lng as number };
+    } else if (vehicle?.depot_lat && vehicle?.depot_lng) {
+      depotCoord = { lat: vehicle.depot_lat as number, lng: vehicle.depot_lng as number };
+    }
   }
   // Fallback: si no hay depot, usar la primera tienda como origen (no ideal pero no rompe).
   if (!depotCoord) {

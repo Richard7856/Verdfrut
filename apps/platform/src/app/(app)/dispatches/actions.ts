@@ -6,7 +6,11 @@
 import { revalidatePath } from 'next/cache';
 import { createServerClient } from '@verdfrut/supabase/server';
 import { requireRole } from '@/lib/auth';
-import { moveStopToAnotherRoute } from '@/lib/queries/stops';
+import { moveStopToAnotherRoute, deleteStopsForRoute } from '@/lib/queries/stops';
+import { cancelRoute } from '@/lib/queries/routes';
+import { listRoutesByDispatch } from '@/lib/queries/dispatches';
+import { listStopsForRoute } from '@/lib/queries/stops';
+import { createAndOptimizeRoute, type CreateAndOptimizeResult } from '../routes/actions';
 import {
   runAction,
   requireUuid,
@@ -264,4 +268,216 @@ export async function disableDispatchSharingAction(
     await disableDispatchSharing(id);
     revalidatePath(`/dispatches/${id}`);
   });
+}
+
+// ---------------------------------------------------------------------------
+// ADR-048: agregar/quitar camionetas dentro de un tiro y re-rutear todo.
+// ---------------------------------------------------------------------------
+// El dispatcher trabaja al nivel del TIRO, no de rutas individuales. Cuando
+// decide "quiero ver cómo queda con otra camioneta", esperaba que el sistema:
+//   1. Tomara las paradas que ya están en el tiro (de todas las rutas vivas).
+//   2. Llamara al optimizer con la nueva lista de vehículos.
+//   3. Reemplazara las rutas pre-publicación con el split nuevo.
+//
+// Este flujo SOLO opera sobre rutas pre-publicación (DRAFT/OPTIMIZED/APPROVED).
+// Si alguna ruta ya está PUBLISHED+ se aborta — el chofer ya recibió el push,
+// re-distribuir rompería la confianza con la operación.
+
+interface RestructureInput {
+  dispatchId: string;
+  /** Lista final de asignaciones tras el cambio. Cada entrada = 1 ruta nueva. */
+  vehicleAssignments: Array<{ vehicleId: string; driverId: string | null }>;
+}
+
+/**
+ * Helper interno: cancela las rutas pre-publicación del tiro, recolecta sus
+ * stops y llama a `createAndOptimizeRoute` con los vehículos pedidos.
+ *
+ * Devuelve los nuevos route ids en éxito o un error legible.
+ */
+async function restructureDispatchInternal(
+  input: RestructureInput,
+): Promise<CreateAndOptimizeResult> {
+  const dispatchId = requireUuid('dispatchId', input.dispatchId);
+  if (input.vehicleAssignments.length === 0) {
+    throw new ValidationError('vehicleAssignments', 'Debes asignar al menos un camión.');
+  }
+
+  const supabase = await createServerClient();
+  const { data: dispatch, error: dErr } = await supabase
+    .from('dispatches')
+    .select('id, date, zone_id, name')
+    .eq('id', dispatchId)
+    .maybeSingle();
+  if (dErr || !dispatch) throw new ValidationError('dispatchId', 'Tiro no encontrado.');
+
+  // Listar rutas vivas del tiro. Las CANCELLED las ignoramos — su historial queda.
+  const allRoutes = await listRoutesByDispatch(dispatchId);
+  const liveRoutes = allRoutes.filter((r) => r.status !== 'CANCELLED');
+
+  // Si alguna ruta está post-publicación, abortar — no es seguro re-rutear.
+  const POST_PUBLISH = new Set(['PUBLISHED', 'IN_PROGRESS', 'INTERRUPTED', 'COMPLETED']);
+  const blocking = liveRoutes.find((r) => POST_PUBLISH.has(r.status));
+  if (blocking) {
+    throw new ValidationError(
+      'status',
+      `No se puede re-rutear: la ruta "${blocking.name}" está ${blocking.status}. ` +
+        `Cancélala primero o crea un tiro nuevo.`,
+    );
+  }
+
+  // Recolectar todos los store_ids únicos de las rutas vivas, en orden estable.
+  const allStoreIds: string[] = [];
+  const seen = new Set<string>();
+  for (const r of liveRoutes) {
+    const stops = await listStopsForRoute(r.id);
+    for (const s of stops) {
+      if (!seen.has(s.storeId)) {
+        seen.add(s.storeId);
+        allStoreIds.push(s.storeId);
+      }
+    }
+  }
+
+  if (allStoreIds.length === 0) {
+    throw new ValidationError(
+      'stores',
+      'El tiro no tiene paradas todavía — agrega rutas con tiendas antes de redistribuir.',
+    );
+  }
+
+  // Cancelar rutas viejas (status CANCELLED + drop stops) ANTES de crear las nuevas.
+  // Esto libera las store_ids para que createAndOptimizeRoute no choque con
+  // restricciones de unicidad lógica (una tienda por tiro/día).
+  for (const r of liveRoutes) {
+    await deleteStopsForRoute(r.id);
+    await cancelRoute(r.id);
+  }
+
+  // Llamar al action existente — ya orquesta optimizer + persistencia + dispatch.
+  const result = await createAndOptimizeRoute({
+    name: dispatch.name as string,
+    date: dispatch.date as string,
+    vehicleIds: input.vehicleAssignments.map((a) => a.vehicleId),
+    driverIds: input.vehicleAssignments.map((a) => a.driverId),
+    storeIds: allStoreIds,
+    dispatchId,
+  });
+
+  return result;
+}
+
+/**
+ * Agrega una camioneta al tiro y re-rutea todo. El dispatcher sólo elige
+ * cuál vehículo (y opcionalmente chofer) — el split lo hace VROOM.
+ */
+export async function addVehicleToDispatchAction(
+  dispatchId: string,
+  newVehicleId: string,
+  newDriverId: string | null,
+): Promise<CreateAndOptimizeResult> {
+  await requireRole('admin', 'dispatcher');
+  try {
+    const id = requireUuid('dispatchId', dispatchId);
+    requireUuid('newVehicleId', newVehicleId);
+    if (newDriverId) requireUuid('newDriverId', newDriverId);
+
+    // Recoger asignaciones actuales (una por ruta viva) + agregar la nueva.
+    const currentRoutes = await listRoutesByDispatch(id);
+    const liveRoutes = currentRoutes.filter((r) => r.status !== 'CANCELLED');
+    const existingAssignments = liveRoutes.map((r) => ({
+      vehicleId: r.vehicleId,
+      driverId: r.driverId,
+    }));
+
+    // Validar que no estamos duplicando vehículo (rutas distintas no comparten camión).
+    if (existingAssignments.some((a) => a.vehicleId === newVehicleId)) {
+      throw new ValidationError(
+        'newVehicleId',
+        'Ese camión ya está en una ruta del tiro.',
+      );
+    }
+
+    const result = await restructureDispatchInternal({
+      dispatchId: id,
+      vehicleAssignments: [
+        ...existingAssignments,
+        { vehicleId: newVehicleId, driverId: newDriverId },
+      ],
+    });
+
+    revalidatePath('/dispatches');
+    revalidatePath(`/dispatches/${id}`);
+    revalidatePath('/routes');
+    return result;
+  } catch (err) {
+    if (err instanceof ValidationError) return { ok: false, error: err.message };
+    return { ok: false, error: err instanceof Error ? err.message : 'Error desconocido' };
+  }
+}
+
+/**
+ * Quita una ruta (= una camioneta) del tiro y redistribuye las paradas entre
+ * las camionetas restantes. Si era la última, deja el tiro vacío.
+ */
+export async function removeVehicleFromDispatchAction(
+  routeId: string,
+): Promise<CreateAndOptimizeResult> {
+  await requireRole('admin', 'dispatcher');
+  try {
+    const id = requireUuid('routeId', routeId);
+    const supabase = await createServerClient();
+    const { data: route, error: rErr } = await supabase
+      .from('routes')
+      .select('id, dispatch_id, vehicle_id, status')
+      .eq('id', id)
+      .maybeSingle();
+    if (rErr || !route) throw new ValidationError('routeId', 'Ruta no encontrada.');
+    const dispatchId = route.dispatch_id as string | null;
+    if (!dispatchId) {
+      throw new ValidationError('routeId', 'La ruta no pertenece a un tiro — usa cancelar.');
+    }
+    if (
+      route.status !== 'DRAFT' &&
+      route.status !== 'OPTIMIZED' &&
+      route.status !== 'APPROVED'
+    ) {
+      throw new ValidationError(
+        'status',
+        `No se puede quitar una ruta ${route.status}. Cancélala manualmente si es necesario.`,
+      );
+    }
+
+    // Recoger las otras rutas vivas (sin la que estamos quitando).
+    const allRoutes = await listRoutesByDispatch(dispatchId);
+    const remaining = allRoutes.filter(
+      (r) => r.id !== id && r.status !== 'CANCELLED',
+    );
+
+    // Caso especial: si era la única, sólo cancelar y no llamar al optimizer.
+    if (remaining.length === 0) {
+      await deleteStopsForRoute(id);
+      await cancelRoute(id);
+      revalidatePath(`/dispatches/${dispatchId}`);
+      revalidatePath('/dispatches');
+      revalidatePath('/routes');
+      return { ok: true, routeIds: [] };
+    }
+
+    const result = await restructureDispatchInternal({
+      dispatchId,
+      vehicleAssignments: remaining.map((r) => ({
+        vehicleId: r.vehicleId,
+        driverId: r.driverId,
+      })),
+    });
+
+    revalidatePath('/dispatches');
+    revalidatePath(`/dispatches/${dispatchId}`);
+    revalidatePath('/routes');
+    return result;
+  } catch (err) {
+    if (err instanceof ValidationError) return { ok: false, error: err.message };
+    return { ok: false, error: err instanceof Error ? err.message : 'Error desconocido' };
+  }
 }

@@ -10,12 +10,15 @@ import { listRoutes, countStopsForRoutes } from '@/lib/queries/routes';
 import { listStopsForRoute } from '@/lib/queries/stops';
 import { listZones } from '@/lib/queries/zones';
 import { listVehicles } from '@/lib/queries/vehicles';
+import { listDrivers } from '@/lib/queries/drivers';
+import { listUsers } from '@/lib/queries/users';
 import { listStores } from '@/lib/queries/stores';
 import { MultiRouteMapServer } from '@/components/map/multi-route-map-server';
 import { AssignRouteForm } from './assign-route-form';
 import { DispatchActions } from './dispatch-actions';
 import { RouteStopsCard } from './route-stops-card';
 import { ShareDispatchButton } from './share-dispatch-button';
+import { AddVehicleButton } from './add-vehicle-button';
 import type { ChatStatus, DispatchStatus, Store } from '@verdfrut/types';
 
 export const dynamic = 'force-dynamic';
@@ -40,12 +43,14 @@ export default async function DispatchDetailPage({ params }: Props) {
   const dispatch = await getDispatch(id);
   if (!dispatch) notFound();
 
-  const [routes, allRoutesData, zones, vehicles, stores] = await Promise.all([
+  const [routes, allRoutesData, zones, vehicles, stores, zoneDrivers, zoneUsers] = await Promise.all([
     listRoutesByDispatch(id),
     listRoutes({ date: dispatch.date, zoneId: dispatch.zoneId, limit: 200 }),
     listZones(),
     listVehicles({}),
     listStores({ activeOnly: false }),
+    listDrivers({ zoneId: dispatch.zoneId, activeOnly: true }),
+    listUsers({ role: 'driver', zoneId: dispatch.zoneId }),
   ]);
   const stopCounts = await countStopsForRoutes(routes.map((r) => r.id));
   // Cargar paradas de cada ruta del tiro (paralelo).
@@ -69,6 +74,29 @@ export default async function DispatchDetailPage({ params }: Props) {
 
   // Para el mapa, solo rutas con paradas.
   const routesWithStops = routes.filter((r) => (stopCounts.get(r.id)?.total ?? 0) > 0);
+
+  // Vehículos disponibles para agregar al tiro: misma zona, activos, NO usados ya
+  // por una ruta viva (no CANCELLED) del tiro. ADR-048.
+  const usedVehicleIds = new Set(
+    routes.filter((r) => r.status !== 'CANCELLED').map((r) => r.vehicleId),
+  );
+  const availableVehicles = vehicles
+    .filter((v) => v.isActive && v.zoneId === dispatch.zoneId && !usedVehicleIds.has(v.id))
+    .map((v) => ({
+      id: v.id,
+      label: `${v.plate}${v.alias ? ` · ${v.alias}` : ''}`,
+      zoneId: v.zoneId,
+    }));
+
+  // Choferes activos en la zona para el selector.
+  const profilesByUserId = new Map(zoneUsers.map((p) => [p.id, p]));
+  const availableDriverOpts = zoneDrivers
+    .map((d) => {
+      const profile = profilesByUserId.get(d.userId);
+      if (!profile || !profile.isActive) return null;
+      return { id: d.id, fullName: profile.fullName, zoneId: d.zoneId };
+    })
+    .filter((x): x is { id: string; fullName: string; zoneId: string } => x !== null);
 
   return (
     <>
@@ -104,11 +132,20 @@ export default async function DispatchDetailPage({ params }: Props) {
           <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
             Rutas del tiro
           </h2>
-          <Link href={`/routes/new?dispatchId=${dispatch.id}`}>
-            <Button type="button" variant="primary" size="sm">
-              + Crear ruta nueva
-            </Button>
-          </Link>
+          <div className="flex items-center gap-2">
+            {/* ADR-048: agregar camioneta = re-rutea todo el tiro automáticamente. */}
+            <AddVehicleButton
+              dispatchId={dispatch.id}
+              availableVehicles={availableVehicles}
+              availableDrivers={availableDriverOpts}
+            />
+            {/* Botón legacy: crear ruta nueva manualmente (sin redistribuir). */}
+            <Link href={`/routes/new?dispatchId=${dispatch.id}`}>
+              <Button type="button" variant="ghost" size="sm">
+                + Ruta manual
+              </Button>
+            </Link>
+          </div>
         </header>
 
         {routes.length === 0 ? (

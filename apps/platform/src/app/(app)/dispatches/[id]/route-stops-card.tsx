@@ -31,6 +31,7 @@ import { formatDuration } from '@verdfrut/utils';
 import type { Route, RouteStatus, Stop, Store, Vehicle } from '@verdfrut/types';
 import { moveStopToAnotherRouteAction } from '../actions';
 import { reorderStopsAction } from '../../routes/actions';
+import { RemoveVehicleButton } from './remove-vehicle-button';
 
 const STATUS: Record<RouteStatus, { text: string; tone: 'neutral' | 'info' | 'success' | 'warning' | 'danger' }> = {
   DRAFT: { text: 'Borrador', tone: 'neutral' },
@@ -241,7 +242,20 @@ export function RouteStopsCard({
             </p>
           )}
         </div>
-        <Badge tone={status.tone}>{status.text}</Badge>
+        <div className="flex flex-col items-end gap-1">
+          <Badge tone={status.tone}>{status.text}</Badge>
+          {/* ADR-048: quitar camioneta — solo en pre-publicación. */}
+          {EDITABLE_STATUSES.has(route.status) && (
+            <RemoveVehicleButton
+              routeId={route.id}
+              vehicleLabel={vehicle?.alias ?? vehicle?.plate ?? 'la ruta'}
+              remainingAfter={
+                siblings.filter((s) => s.id !== route.id && s.status !== 'CANCELLED').length
+              }
+              stopsCount={items.length}
+            />
+          )}
+        </div>
       </header>
 
       {overCapacity && (

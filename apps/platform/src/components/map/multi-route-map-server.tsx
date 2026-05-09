@@ -44,11 +44,17 @@ export async function MultiRouteMapServer({ routes, mapboxToken }: Props) {
     const vehicle = vehiclesById.get(r.vehicleId);
     const stops = stopsArrays[idx] ?? [];
 
+    // Resolución de depot — ADR-047: prioridad route.depotOverrideId > vehicle.
     let depot: MultiRouteEntry['depot'] = null;
-    if (vehicle?.depotId) {
+    if (r.depotOverrideId) {
+      const d = depotsById.get(r.depotOverrideId);
+      if (d) depot = { code: d.code, name: d.name, lat: d.lat, lng: d.lng };
+    }
+    if (!depot && vehicle?.depotId) {
       const d = depotsById.get(vehicle.depotId);
       if (d) depot = { code: d.code, name: d.name, lat: d.lat, lng: d.lng };
-    } else if (vehicle?.depotLat && vehicle?.depotLng) {
+    }
+    if (!depot && vehicle?.depotLat && vehicle?.depotLng) {
       depot = {
         code: vehicle.plate,
         name: `Salida de ${vehicle.alias ?? vehicle.plate}`,

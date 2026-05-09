@@ -485,6 +485,7 @@ export type Database = {
           created_at: string
           created_by: string
           date: string
+          depot_override_id: string | null
           driver_id: string | null
           estimated_end_at: string | null
           estimated_start_at: string | null
@@ -510,6 +511,7 @@ export type Database = {
           created_at?: string
           created_by: string
           date: string
+          depot_override_id?: string | null
           driver_id?: string | null
           estimated_end_at?: string | null
           estimated_start_at?: string | null
@@ -535,6 +537,7 @@ export type Database = {
           created_at?: string
           created_by?: string
           date?: string
+          depot_override_id?: string | null
           driver_id?: string | null
           estimated_end_at?: string | null
           estimated_start_at?: string | null

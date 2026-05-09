@@ -11,7 +11,7 @@ import { getRoute } from '@/lib/queries/routes';
 import { listStopsForRoute } from '@/lib/queries/stops';
 import { getStoresByIds, listStores } from '@/lib/queries/stores';
 import { getVehiclesByIds, listVehicles } from '@/lib/queries/vehicles';
-import { getDepot } from '@/lib/queries/depots';
+import { getDepot, listDepots } from '@/lib/queries/depots';
 import { listDrivers, getDriversByIds } from '@/lib/queries/drivers';
 import { listUsers, getUserProfile } from '@/lib/queries/users';
 import { listZones } from '@/lib/queries/zones';
@@ -19,6 +19,7 @@ import { RouteActions } from './route-actions';
 import { SortableStops } from './sortable-stops';
 import { AddStopButton } from './add-stop-button';
 import { DriverAssignment } from './driver-assignment';
+import { DepotAssignment } from './depot-assignment';
 import { TransferRouteButton } from './transfer-route-button';
 import { RouteMapLoader } from '@/components/map/route-map-loader';
 import { LiveRouteMapLoader } from '@/components/map/live-route-map-loader';
@@ -101,12 +102,26 @@ export default async function RouteDetailPage({ params }: PageProps) {
     .map((s) => ({ id: s.id, code: s.code, name: s.name }));
   const canAddStops = ['DRAFT', 'OPTIMIZED', 'APPROVED'].includes(route.status);
 
-  // Cargar depot del vehículo (puede ser FK al CEDIS o coords manuales).
+  // Resolver depot — prioridad: route.depot_override_id > vehicle.depot_id > vehicle.depot_lat/lng (ADR-047).
   let mapDepot: RouteMapDepot | null = null;
-  if (vehicle?.depotId) {
+  let effectiveDepot: { id: string; code: string; name: string } | null = null;
+  let isDepotOverride = false;
+  if (route.depotOverrideId) {
+    const depot = await getDepot(route.depotOverrideId);
+    if (depot) {
+      mapDepot = { code: depot.code, name: depot.name, lat: depot.lat, lng: depot.lng };
+      effectiveDepot = { id: depot.id, code: depot.code, name: depot.name };
+      isDepotOverride = true;
+    }
+  }
+  if (!mapDepot && vehicle?.depotId) {
     const depot = await getDepot(vehicle.depotId);
-    if (depot) mapDepot = { code: depot.code, name: depot.name, lat: depot.lat, lng: depot.lng };
-  } else if (vehicle?.depotLat && vehicle?.depotLng) {
+    if (depot) {
+      mapDepot = { code: depot.code, name: depot.name, lat: depot.lat, lng: depot.lng };
+      effectiveDepot = { id: depot.id, code: depot.code, name: depot.name };
+    }
+  }
+  if (!mapDepot && vehicle?.depotLat && vehicle?.depotLng) {
     mapDepot = {
       code: vehicle.plate,
       name: `Salida de ${vehicle.alias ?? vehicle.plate}`,
@@ -114,6 +129,13 @@ export default async function RouteDetailPage({ params }: PageProps) {
       lng: vehicle.depotLng,
     };
   }
+  // Lista de depots activos para el selector. Por ahora todos los depots; un futuro
+  // refinamiento es filtrar por zona, pero la idea del ADR es justamente que un depot
+  // pueda servir cross-zone.
+  const allDepots = await listDepots();
+  const availableDepots = allDepots
+    .filter((d) => d.isActive)
+    .map((d) => ({ id: d.id, code: d.code, name: d.name }));
 
   // Build paradas para el mapa con coords de la tienda.
   // ADR-039: incluimos address + plannedArrivalAt para que el popup del marker
@@ -348,6 +370,13 @@ export default async function RouteDetailPage({ params }: PageProps) {
                 route={route}
                 currentDriver={currentDriver}
                 availableDrivers={availableDrivers}
+              />
+              {/* ADR-047: selector inline de CEDIS de salida — override del depot del vehículo. */}
+              <DepotAssignment
+                route={route}
+                effectiveDepot={effectiveDepot}
+                isOverride={isDepotOverride}
+                availableDepots={availableDepots}
               />
               <Metric label="Zona">{zone?.code ?? '—'}</Metric>
               <Metric label="Fecha operativa">

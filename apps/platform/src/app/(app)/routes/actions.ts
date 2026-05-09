@@ -14,6 +14,8 @@ import {
   publishRoute,
   cancelRoute,
   assignDriverToRoute,
+  assignDepotOverrideToRoute,
+  recalculateRouteMetrics,
   resetRouteToDraft,
   incrementRouteVersion,
 } from '@/lib/queries/routes';
@@ -345,15 +347,22 @@ export async function reoptimizeRouteAction(
     const shiftStartUnix = localTimeToUnix(route.date, shiftStart, TENANT_TIMEZONE);
     const shiftEndUnix = localTimeToUnix(route.date, shiftEnd, TENANT_TIMEZONE);
 
-    // Llamar al optimizer (con depots de la zona)
-    const depots = await listDepots({ zoneId: vehicle.zoneId });
+    // Llamar al optimizer (con depots de todas las zonas — override puede apuntar a uno cross-zone, ADR-047)
+    const depots = await listDepots();
     const depotsById = new Map(depots.map((d) => [d.id, d]));
+    // Si la ruta tiene override de depot, prepararlo para el optimizer.
+    const vehicleDepotOverridesById = new Map<string, { lat: number; lng: number }>();
+    if (route.depotOverrideId) {
+      const ov = depotsById.get(route.depotOverrideId);
+      if (ov) vehicleDepotOverridesById.set(vehicle.id, { lat: ov.lat, lng: ov.lng });
+    }
     const optResponse = await callOptimizer([vehicle], stores, {
       shiftStartUnix,
       shiftEndUnix,
       shiftDate: route.date,
       timezone: TENANT_TIMEZONE,
       depotsById,
+      vehicleDepotOverridesById,
     });
     const optRoute = optResponse.routes.find((r) => r.vehicle_id === 1);
     if (!optRoute || optRoute.steps.length === 0) {
@@ -473,6 +482,29 @@ export async function assignDriverAction(routeId: string, driverId: string | nul
     if (driverId) requireUuid('driverId', driverId);
     await assignDriverToRoute(id, driverId);
     revalidatePath(`/routes/${id}`);
+  });
+}
+
+/**
+ * ADR-047: setea o limpia el override de depot de salida para una ruta.
+ * Pasar null = vuelve al depot del vehículo. Tras cambiar, recalcula métricas
+ * (km/ETAs) para reflejar el nuevo origen. La revalidación incluye el detalle
+ * del tiro porque el mapa multi-route también muestra el depot.
+ */
+export async function assignDepotToRouteAction(
+  routeId: string,
+  depotId: string | null,
+): Promise<ActionResult> {
+  await requireRole('admin', 'dispatcher');
+  return runAction(async () => {
+    const id = requireUuid('routeId', routeId);
+    if (depotId) requireUuid('depotId', depotId);
+    await assignDepotOverrideToRoute(id, depotId);
+    // Las métricas dependen del depot — recalcular tras cualquier cambio.
+    await recalculateRouteMetrics(id);
+    const route = await getRoute(id);
+    revalidatePath(`/routes/${id}`);
+    if (route?.dispatchId) revalidatePath(`/dispatches/${route.dispatchId}`);
   });
 }
 

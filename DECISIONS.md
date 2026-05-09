@@ -1973,3 +1973,58 @@ Mapbox geocoder funciona bien por dirección pero su POI registry no incluye mar
 - Issue #102: vista pública minimalista para mobile (sin sidebar leyenda, mapa fullscreen prioritario).
 - Issue #103: meta `og:image` con preview del mapa para que el link pegado en WhatsApp/Slack muestre thumbnail.
 - Issue #104: token rotación automática (cada N días) si se vuelve crítica la "frescura" del enlace.
+
+## [2026-05-09] ADR-047: Override de depot al nivel ruta (`routes.depot_override_id`)
+
+**Contexto:** El depot/CEDIS de salida vive en `vehicles` (depot_id, depot_lat/lng). Esto ata cada vehículo a un solo depot. Cuando el cliente plantea abrir múltiples CEDIS y rotar el origen por tiro/ruta (caso real: Estadio Nemesio Díez Toluca, 2026-05-09), las opciones eran (a) cambiar el depot del vehículo con efectos colaterales sobre otras rutas activas, (b) crear vehículos virtuales por depot (Kangoo CEDA + Kangoo Toluca para la misma camioneta física). Ambas malas — la primera rompe consistencia, la segunda ensucia inventario.
+
+**Decisión:** Migración 031 agrega `routes.depot_override_id UUID NULL` (FK depots ON DELETE RESTRICT). Cuando NOT NULL, sobrescribe el depot del vehículo SOLO para esa ruta. Resolución: `route.depot_override_id > vehicle.depot_id > vehicle.depot_lat/lng`. UI: nuevo componente `DepotAssignment` inline en `/routes/[id]` (réplica del patrón `DriverAssignment`). Server action `assignDepotToRouteAction` setea/limpia el override y llama `recalculateRouteMetrics` para que km/ETAs reflejen el nuevo origen automáticamente. Optimizer Railway acepta `vehicleDepotOverridesById?: Map<vehicleId, {lat,lng}>` en el contexto, propagado por `reoptimizeRouteAction` para que el VROOM real use el override.
+
+**Alternativas consideradas:**
+- *Override al nivel dispatch (no route):* descartado porque cada ruta del tiro puede tener su propio depot — más granular, no menos.
+- *Tabla pivot `depot_zones (depot_id, zone_id)`:* descartado por ahora. La columna `depots.zone_id` sigue siendo NOT NULL, pero el override en route ignora la zona del depot, así que ya hay flexibilidad cross-zone. Migrar a pivot si surge un caso donde un depot necesita pertenecer a varias zonas oficialmente (reportería).
+- *Crear vehículos virtuales por depot:* descartado — ensucia inventario y rompe metricas por vehículo físico.
+- *Mover `depot_id` de vehicle a stop:* overkill, granularidad innecesaria. El depot importa al inicio y final de la ruta, no por parada.
+
+**Riesgos / Limitaciones:**
+- *El override solo aplica a la ruta actual;* si el dispatcher re-optimiza sin querer, el override se preserva (la columna sigue seteada). Esto es intencional — pero requiere que el UI muestre claramente cuándo viene del override (sufijo "· override" en el badge).
+- *Si un depot se borra mientras hay routes con override apuntando a él,* la FK ON DELETE RESTRICT bloquea el borrado. Correcto, pero el error que ve el admin en `/settings/depots` es genérico — issue #105 para mejorar el mensaje.
+- *El driver app (mobile)* lee el campo via `apps/driver/src/lib/queries/route.ts` y `stop.ts`, pero NO lo usa para nada hoy (el mapa del chofer ya recibe el depot resuelto desde server). Si en el futuro el chofer necesita ver el origen del día, el dato está disponible.
+- *El optimizer V1 valida "todos los vehículos misma zona".* El override de depot puede apuntar a un depot de otra zona — eso NO viola la restricción del optimizer (que es sobre vehicles, no depots), pero podría confundir al admin que ve la ruta con depot Toluca y zona CDMX. UI muestra ambos por separado.
+
+**Oportunidades de mejora:**
+- Issue #105: mensaje de error claro cuando se intenta borrar un depot con routes que lo referencian.
+- Issue #106: tabla pivot `depot_zones` cuando el negocio formalice depots cross-zona.
+- Issue #107: que el override se aplique al template del tiro (al re-crear rutas se preserva el preferred depot por chofer/zona).
+
+## [2026-05-09] ADR-048: Agregar/quitar camionetas dentro del tiro con re-rutear automático
+
+**Contexto:** El dispatcher trabajaba al nivel de ruta individual: para "ver cómo queda el tiro con 2 camionetas en lugar de 1" tenía que (a) cancelar la ruta de 1 camioneta, (b) crear un tiro nuevo, (c) seleccionar 2 camionetas, (d) volver a tipear todas las paradas. Caso real: cliente NETO pidió simulación CDMX con 1 vs 2 camionetas, 2026-05-09. UX: el botón principal del detalle del tiro decía "+ Crear ruta nueva" — ambiguo, no comunicaba el split óptimo.
+
+**Decisión:** Reemplazar "+ Crear ruta nueva" por dos botones: **"+ Agregar camioneta"** (primario) y **"+ Ruta manual"** (ghost, para casos legacy). El primario abre modal con selector de vehículo + chofer y al confirmar:
+1. Recolecta todas las paradas únicas de las rutas vivas (no CANCELLED) del tiro.
+2. Cancela las rutas pre-publicación viejas (CANCELLED + drop stops).
+3. Llama `createAndOptimizeRoute` con la lista combinada de vehículos (existentes + nueva camioneta) + las storeIds del tiro + el dispatchId.
+4. VROOM redistribuye automáticamente — el dispatcher ve el split nuevo y compara métricas.
+
+Espejo: en cada `RouteStopsCard` un botón sutil **"Quitar"** (`RemoveVehicleButton`) cancela esa ruta y redistribuye sus paradas entre las restantes via el mismo flow. Si era la única ruta del tiro, sólo cancela (sin redistribuir). Server actions: `addVehicleToDispatchAction`, `removeVehicleFromDispatchAction`. Helper interno `restructureDispatchInternal` orquesta el reuse de `createAndOptimizeRoute`.
+
+**Restricciones:** SOLO opera si todas las rutas del tiro están en pre-publicación (DRAFT/OPTIMIZED/APPROVED). Si alguna está PUBLISHED+ aborta — re-distribuir rompería la confianza con choferes que ya recibieron push.
+
+**Alternativas consideradas:**
+- *Endpoint dedicado `restructureDispatchAction(dispatchId, vehicleAssignments[])`* expuesto al UI: descartado por ahora — más complejo de validar (lista atómica de cambios) sin beneficio claro. Las dos acciones (`add`, `remove`) cubren los casos reales 1-a-1.
+- *Mantener "+ Crear ruta nueva" como único entry point:* descartado — el flow de "agregar camioneta y dejar que VROOM redistribuya" es lo que el dispatcher quiere 90% del tiempo. La creación manual queda accesible como ruta secundaria.
+- *Soft-delete de rutas (mantener CANCELLED en el set de redistribución):* descartado, las rutas CANCELLED son histórico y no deben re-considerarse.
+
+**Riesgos / Limitaciones:**
+- *Si el optimizer falla a mitad de la redistribución,* `createAndOptimizeRoute` hace rollback de las rutas que alcanzó a crear pero NO re-crea las que cancelamos. El tiro puede quedar con menos rutas de las que tenía. Mitigación: el toast de error pide al dispatcher refrescar la página y volver a intentar; las storeIds están preservadas en código del action y se podrían re-armar manualmente. Para producción seria, mover el flow completo a una RPC Postgres con transacción real (issue #108).
+- *La nueva camioneta debe estar en la misma zona del tiro.* Esto se valida client-side al filtrar `availableVehicles` y server-side en `createAndOptimizeRoute`. El error legible si pasa.
+- *El depot override (ADR-047) NO se preserva* tras re-rutear — las rutas nuevas se crean con el depot del vehículo. Si el dispatcher tenía un override en una ruta, debe re-aplicarlo. Aceptable hoy; futura mejora: pasar overrides existentes al rebuild.
+- *Si la redistribución produce más unassigned stops (capacidad insuficiente),* el resultado es válido pero el dispatcher recibe esos IDs de regreso — UI hoy no los expone visualmente al usuario en este flow (sí en el flow `/routes/new`). Issue #109.
+
+**Oportunidades de mejora:**
+- Issue #108: mover `restructureDispatchInternal` a una RPC Postgres con transacción atómica.
+- Issue #109: surfacing de unassigned stops tras redistribuir (toast con lista o card "Sin asignar").
+- Issue #110: preservar `depot_override_id` por chofer/vehicle al redistribuir.
+- Issue #111: comparar métricas pre vs post redistribución (banner "Antes: 105 km · Ahora: 95 km").
+- Issue #112: confirmar antes de `Add Vehicle` si las rutas tenían reorders manuales recientes (para no perder ese trabajo).

@@ -38,6 +38,12 @@ export interface Route {
   updatedAt: string;
   /** Tiro al que pertenece (nullable para rutas huérfanas). ADR-024. */
   dispatchId: string | null;
+  /**
+   * Override del depot de salida para esta ruta (ADR-047).
+   * Si NULL, se usa vehicle.depotId. Si NOT NULL, manda sobre el depot del vehículo
+   * para que la misma camioneta pueda salir de un CEDIS distinto en cada ruta.
+   */
+  depotOverrideId: string | null;
 }
 
 export interface RouteVersion {
