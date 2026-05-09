@@ -451,6 +451,33 @@ Formato:
 **Solución propuesta:** comparar ETA pre/post recalc para la próxima parada pending; si delta >15min, push notif "Tu próxima ETA cambió: era X, ahora Y".
 **Estado:** abierto
 
+### #95 — Drag entre cards de distintas rutas (cross-route drag)
+**Severidad:** importante (UX premium)
+**Sprint:** backlog
+**Contexto:** ADR-045 implementó drag dentro de UNA ruta. Para mover entre rutas del mismo tiro, el dispatcher usa el dropdown "Mover a →". Drag horizontal entre cards sería más fluido.
+**Solución propuesta:** elevar `DndContext` al parent (`/dispatches/[id]/page`) compartido entre todos los `RouteStopsCard`. `useDroppable` en cada card como destino. `onDragEnd` detecta si target es ruta distinta → llama `moveStopToAnotherRouteAction`.
+**Estado:** abierto
+
+### #96 — Animación suave del polyline al reorder (no salto)
+**Severidad:** cosmético
+**Sprint:** backlog
+**Contexto:** ADR-045 — tras drag, `router.refresh` trae nuevas coords y el polyline se redibuja con "salto". Mejor con tween suave.
+**Solución propuesta:** usar `setData` en mapboxgl source en lugar de re-render del componente. Animación CSS o tween manual de coordinates.
+**Estado:** abierto
+
+### #97 — Keyboard shortcuts accessibility para reorder
+**Severidad:** cosmético (a11y)
+**Sprint:** backlog
+**Contexto:** ADR-045 con dnd-kit ya tiene `KeyboardSensor` (Tab + Space para focus, arrows para mover). Falta documentarlo + tooltip que lo indique.
+**Estado:** abierto
+
+### #98 — Undo/redo del último reorder
+**Severidad:** cosmético
+**Sprint:** backlog
+**Contexto:** ADR-045 — si el dispatcher arrastra accidental, hay que volver a arrastrar al orden previo. Ctrl+Z natural sería ideal.
+**Solución propuesta:** mantener stack de últimos 5 órdenes en local state, Ctrl+Z restaura previo + invoca `reorderStopsAction` con ese orden.
+**Estado:** abierto, baja prioridad
+
 ### #94 — Surfacear delta de optimización (haversine vs Mapbox real)
 **Severidad:** cosmético (UX premium)
 **Sprint:** backlog

@@ -265,6 +265,8 @@ export function LiveRouteMap({ routeId, stops, depot, geometry, mapboxToken, dri
     <div className="relative">
       <div
         ref={containerRef}
+        // ADR-045: contener los markers Mapbox al hacer scroll.
+        style={{ isolation: 'isolate', transform: 'translateZ(0)' }}
         className="h-[500px] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)]"
       />
       {/* Status overlay arriba a la derecha — el supervisor sabe si hay GPS o no.

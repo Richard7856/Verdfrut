@@ -1893,3 +1893,44 @@ Mapbox geocoder funciona bien por dirección pero su POI registry no incluye mar
 - Issue #92: invalidar cache del mapa client-side post-recalc para que el polyline se redibuje sin refresh manual.
 - Issue #93: en post-publish (PUBLISHED/IN_PROGRESS), agregar push al chofer "ETAs actualizadas" cuando reorder cambia >15 min su próxima parada.
 - Issue #94: surfacear delta en UI: "Re-optimizar te ahorraría 12 km / 23 min" — llamada lazy a VROOM solo cuando se hace click en el indicador.
+
+## [2026-05-09] ADR-045: Drag-and-drop con dnd-kit + isolation del mapa Mapbox
+
+**Contexto:** Cliente reportó dos problemas en `/dispatches/[id]`:
+1. *"Si bajo el mapa los iconos se queda sobre el menú"* — al hacer scroll, los markers numerados de Mapbox flotan sobre las cards de las rutas (escapan el bounding box del mapa).
+2. *"El de mover el orden de las paradas me gustaría se pueda agarrar y arrastrar a el número que quieres y no sea uno por 1 arriba o abajo"* — los botones ↑↓ de ADR-043 funcionan pero arrastrar 7 → 3 toma 4 clicks. Quería drag-and-drop al estilo "agarrar y soltar en la posición destino".
+
+**Decisión:**
+
+1. **Fix isolation del mapa** (3 archivos: `multi-route-map.tsx`, `route-map.tsx`, `live-route-map.tsx`):
+   - Agregar `isolation: isolate` + `transform: translateZ(0)` al `<div>` con `ref={containerRef}`.
+   - Crea un nuevo stacking context que CONTIENE los markers internos de Mapbox (que tienen `position: absolute` con z-index alto que escapaban del `overflow: hidden` del padre).
+   - Es un fix de 1 línea por archivo, sin efectos secundarios visibles.
+
+2. **Drag-and-drop con dnd-kit** en `RouteStopsCard`:
+   - Reemplaza los botones ▲▼ (ADR-043) con `<DndContext> + <SortableContext>` (mismo patrón que ya usa `SortableStops` en `/routes/[id]`).
+   - Drag handle visible: `⋮⋮` a la izquierda de cada parada (similar al admin reorder pre-publish).
+   - `arrayMove(items, oldIdx, newIdx)` reordena local con desplazamiento automático: si arrastras la parada 7 a la posición 3, las que estaban en 3..6 se desplazan a 4..7. Es exactamente el comportamiento que pidió el cliente.
+   - Optimistic UI: el orden cambia inmediato local, en paralelo se llama a `reorderStopsAction` para persistir; si falla, rollback al orden inicial.
+   - Restricciones ADR-035 respetadas: en post-publish (PUBLISHED/IN_PROGRESS) solo paradas `pending` son arrastrables. Si intenta drag de no-pending → toast con explicación.
+   - El `onPointerDown stopPropagation` en el `<select>` "Mover a →" evita que dnd-kit capture el click como intent de drag.
+   - Server tras reorder llama a `recalculateRouteMetrics` (ADR-044) → ETAs y km se actualizan automáticamente.
+
+**Alternativas consideradas:**
+- *Solo agregar `overflow: clip` al wrapper del mapa* (más estricto que `hidden`):  no funcionó en testing — los markers de Mapbox usan portales internos que escapan igual. El truco GPU `translateZ(0)` es lo que crea el stacking context que contiene los markers.
+- *Native HTML5 drag-and-drop:* descartado. La API es notoriamente quebradiza, sin soporte mobile nativo, y tendríamos que reimplementar accessibility. dnd-kit ya está en el proyecto y maneja todo eso.
+- *Mantener ↑▼ + agregar drag:* descartado por ruido visual. Una sola interfaz de reorder es más clara.
+- *react-beautiful-dnd:* descartado, el lib está deprecated y dnd-kit es el sucesor recomendado.
+
+**Riesgos / Limitaciones:**
+- *`isolation: isolate` no funciona en Safari <16.* Caída de safari ~14: los markers volverían a flotar. Iceberg muy chico (>96% del market support según caniuse). `translateZ(0)` es el fallback que cubre todos los browsers modernos.
+- *Drag entre cards de distintas rutas no soportado.* dnd-kit lo permite con `DndContext` compartido, pero requiere refactor mayor (state lifting al parent dispatch page). Issue #95 abierto. Por ahora el dispatcher usa el dropdown "Mover a →" para drag inter-route.
+- *Optimistic update de drag puede divergir del server* si la red falla a mitad. El rollback a `initialItems` tras error mantiene consistencia, pero el user pierde su trabajo. Mitigación: toast claro con error + el orden vuelve al previo. No persiste estado roto.
+- *Sync upstream-down* (cuando router.refresh trae nuevas stops): la heurística "si IDs cambiaron, reset items" funciona pero podría sobrescribir un drag in-flight si el refresh llega justo en medio. Probabilidad muy baja; aceptable.
+- *Touch devices:* dnd-kit `PointerSensor` con `activationConstraint: { distance: 5 }` previene drags accidentales en mobile, pero la experiencia mobile no es óptima (browser nativo scroll vs drag). Para iOS/Android específicamente, agregar `TouchSensor` con delay sería más fiable. No prioritario hoy (admin opera desktop).
+
+**Oportunidades de mejora:**
+- Issue #95: drag entre cards de rutas distintas (cross-route drag) reemplazaría el dropdown "Mover a →".
+- Issue #96: animación suave del polyline en el mapa cuando reorder cambia el orden (hoy se redibuja "salto" tras router.refresh).
+- Issue #97: keyboard shortcuts para reorder (Up/Down + Enter, Tab para target) — accessibility.
+- Issue #98: undo/redo del último reorder (Ctrl+Z) — reusa el snapshot inicial.

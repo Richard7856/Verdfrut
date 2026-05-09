@@ -260,6 +260,12 @@ export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
       <div className="relative">
         <div
           ref={containerRef}
+          // ADR-045: `isolation: isolate` + transform `translateZ(0)` crean un nuevo
+          // stacking context que CONTIENE los markers de Mapbox. Sin esto, los markers
+          // (position: absolute internamente) escapan del clipping `overflow-hidden`
+          // y se renderizan flotando sobre las cards de abajo cuando el viewport
+          // hace scroll. Reportado por el cliente.
+          style={{ isolation: 'isolate', transform: 'translateZ(0)' }}
           className={
             isFullscreen
               ? 'h-full w-full overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)]'

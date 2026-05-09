@@ -2,13 +2,30 @@
 
 // Card por ruta dentro del detalle del tiro. Muestra:
 //  - Header con nombre + status + Kangoo + chofer + métricas (km, manejo, ETAs).
-//  - Lista de paradas con flechas ↑↓ para reordenar dentro de la ruta + dropdown
+//  - Lista de paradas con drag-and-drop para reordenar dentro de la ruta + dropdown
 //    "Mover a → otra ruta" del mismo tiro.
-// ADR-025 + ADR-035 (reorder ↑↓) + ADR-043 (métricas detalladas).
+// ADR-025 + ADR-035 (reorder) + ADR-043 (métricas) + ADR-045 (drag-drop).
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import {
+  DndContext,
+  PointerSensor,
+  KeyboardSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { Badge, Card, toast } from '@verdfrut/ui';
 import { formatDuration } from '@verdfrut/utils';
 import type { Route, RouteStatus, Stop, Store, Vehicle } from '@verdfrut/types';
@@ -50,6 +67,12 @@ const REORDERABLE_STATUSES = new Set<RouteStatus>([
   'IN_PROGRESS',
 ]);
 
+interface StopRowData {
+  stop: Stop;
+  storeCode: string;
+  storeName: string;
+}
+
 export function RouteStopsCard({
   dispatchId,
   route,
@@ -63,7 +86,6 @@ export function RouteStopsCard({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [movingStopId, setMovingStopId] = useState<string | null>(null);
-  const [reorderingStopId, setReorderingStopId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const status = STATUS[route.status];
@@ -75,15 +97,92 @@ export function RouteStopsCard({
   const canReorder = REORDERABLE_STATUSES.has(route.status);
   const isPostPublish = route.status === 'PUBLISHED' || route.status === 'IN_PROGRESS';
 
-  // ADR-043: total kg (sum de stop.load[0]) y count de pendientes vs total.
+  // ADR-043: total kg + completados/omitidos
   const totalKg = stops.reduce((acc, s) => acc + (Number(s.load?.[0] ?? 0) || 0), 0);
   const completedStops = stops.filter((s) => s.status === 'completed').length;
   const skippedStops = stops.filter((s) => s.status === 'skipped').length;
   const usedCajas = stops.length;
   const overCapacity = usedCajas > capacityCajas;
 
-  // Sort stops por sequence — defensivo, server debe entregarlas ordenadas.
-  const sortedStops = [...stops].sort((a, b) => a.sequence - b.sequence);
+  // Ordered stops + estado local para optimistic UI
+  const sorted = [...stops].sort((a, b) => a.sequence - b.sequence);
+  const initialItems: StopRowData[] = sorted.map((s) => ({
+    stop: s,
+    storeCode: storesById.get(s.storeId)?.code ?? '—',
+    storeName: storesById.get(s.storeId)?.name ?? '???',
+  }));
+
+  // ADR-045: drag-and-drop con dnd-kit. Reordena con arrayMove(items, oldIdx, newIdx)
+  // — al soltar la parada en la posición N, todas las que estaban entre N y la
+  // antigua posición se desplazan automáticamente. Es el comportamiento que
+  // pidió el cliente (vs ↑↓ uno por uno).
+  const [items, setItems] = useState<StopRowData[]>(initialItems);
+  const [dirty, setDirty] = useState(false);
+
+  // Sync local state if upstream stops cambia (después de router.refresh).
+  // Heurística: si los IDs cambiaron O el length, reset.
+  if (
+    !dirty &&
+    (items.length !== initialItems.length ||
+      items.some((it, i) => it.stop.id !== initialItems[i]?.stop.id))
+  ) {
+    setItems(initialItems);
+  }
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIdx = items.findIndex((s) => s.stop.id === active.id);
+    const newIdx = items.findIndex((s) => s.stop.id === over.id);
+    if (oldIdx < 0 || newIdx < 0) return;
+
+    // Post-publish: solo paradas pending son movibles. Si origen o destino no
+    // son pending, abortar con toast claro.
+    if (isPostPublish) {
+      const dragStatus = items[oldIdx]?.stop.status;
+      const targetStatus = items[newIdx]?.stop.status;
+      if (dragStatus !== 'pending' || targetStatus !== 'pending') {
+        toast.error(
+          'Solo paradas pendientes se pueden mover',
+          'Las paradas completadas/omitidas/en sitio quedan fijas en su posición original.',
+        );
+        return;
+      }
+    }
+
+    // arrayMove: pone el item en newIdx, las demás se desplazan.
+    // Ej: items [A,B,C,D,E,F,G] con G→2 = [A,B,G,C,D,E,F]
+    const reordered = arrayMove(items, oldIdx, newIdx).map((it, i) => ({
+      ...it,
+      stop: { ...it.stop, sequence: i + 1 },
+    }));
+    setItems(reordered);
+    setDirty(true);
+
+    // Persistir en server. ADR-035: en post-publish solo enviamos IDs de pending.
+    const idsToSend = isPostPublish
+      ? reordered.filter((it) => it.stop.status === 'pending').map((it) => it.stop.id)
+      : reordered.map((it) => it.stop.id);
+
+    startTransition(async () => {
+      const res = await reorderStopsAction(route.id, idsToSend);
+      if (!res.ok) {
+        toast.error('No se pudo reordenar', res.error ?? '');
+        // Rollback al orden original.
+        setItems(initialItems);
+        setDirty(false);
+        return;
+      }
+      // Server ya recalculó ETAs/km (ADR-044). Refresh para tomar valores nuevos.
+      setDirty(false);
+      router.refresh();
+    });
+  }
 
   function handleMove(stopId: string, targetRouteId: string) {
     setError(null);
@@ -99,46 +198,7 @@ export function RouteStopsCard({
     });
   }
 
-  function handleReorder(stopId: string, direction: 'up' | 'down') {
-    setError(null);
-    setReorderingStopId(stopId);
-    // ADR-035: en post-publish solo paradas pending son reordenables.
-    // Construimos el nuevo orden swappeando con la stop adyacente del mismo subset.
-    const eligible = isPostPublish
-      ? sortedStops.filter((s) => s.status === 'pending')
-      : sortedStops;
-    const idx = eligible.findIndex((s) => s.id === stopId);
-    if (idx < 0) {
-      setReorderingStopId(null);
-      setError('Parada no movible');
-      return;
-    }
-    const swapWith = direction === 'up' ? idx - 1 : idx + 1;
-    if (swapWith < 0 || swapWith >= eligible.length) {
-      setReorderingStopId(null);
-      return;
-    }
-    const newEligible = [...eligible];
-    [newEligible[idx], newEligible[swapWith]] = [newEligible[swapWith]!, newEligible[idx]!];
-
-    // Server espera lista de IDs en el orden final. Para post-publish solo pending;
-    // pre-publish, todas. reorderStopsAction maneja ambos casos.
-    const idsToSend = isPostPublish
-      ? newEligible.map((s) => s.id)
-      : newEligible.map((s) => s.id);
-
-    startTransition(async () => {
-      const res = await reorderStopsAction(route.id, idsToSend);
-      setReorderingStopId(null);
-      if (!res.ok) {
-        toast.error('No se pudo reordenar', res.error ?? '');
-        return;
-      }
-      router.refresh();
-    });
-  }
-
-  // Format helpers para ETAs en TZ del tenant.
+  // Format helpers
   const fmtTime = (iso: string | null) =>
     iso
       ? new Intl.DateTimeFormat('es-MX', {
@@ -194,95 +254,126 @@ export function RouteStopsCard({
         <p className="mt-2 text-xs text-[var(--color-danger-fg)]">{error}</p>
       )}
 
-      {sortedStops.length === 0 ? (
+      {items.length === 0 ? (
         <p className="mt-3 text-xs text-[var(--color-text-subtle)]">
           Sin paradas. Optimiza esta ruta o vincula una existente.
         </p>
       ) : (
-        <ul className="mt-3 flex flex-col gap-1.5">
-          {sortedStops.map((s, idx) => {
-            const store = storesById.get(s.storeId);
-            const isMoving = movingStopId === s.id && pending;
-            const isReorderingThis = reorderingStopId === s.id && pending;
-            // Restricción ADR-035: en post-publish solo pending es reordenable.
-            const isPending = s.status === 'pending';
-            const eligibleStops = isPostPublish
-              ? sortedStops.filter((x) => x.status === 'pending')
-              : sortedStops;
-            const eligibleIdx = eligibleStops.findIndex((x) => x.id === s.id);
-            const canMoveUp =
-              canReorder && (!isPostPublish || isPending) && eligibleIdx > 0;
-            const canMoveDown =
-              canReorder &&
-              (!isPostPublish || isPending) &&
-              eligibleIdx >= 0 &&
-              eligibleIdx < eligibleStops.length - 1;
-
-            return (
-              <li
-                key={s.id}
-                className="flex items-center justify-between gap-2 rounded-[var(--radius-md)] bg-[var(--vf-surface-2)] px-2 py-1.5"
-              >
-                <div className="flex items-center gap-1">
-                  {canReorder && (
-                    <div className="flex flex-col">
-                      <button
-                        type="button"
-                        onClick={() => handleReorder(s.id, 'up')}
-                        disabled={!canMoveUp || isReorderingThis}
-                        aria-label="Mover arriba"
-                        title="Mover arriba"
-                        className="grid h-3.5 w-5 place-items-center text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] disabled:opacity-20"
-                      >
-                        ▲
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleReorder(s.id, 'down')}
-                        disabled={!canMoveDown || isReorderingThis}
-                        aria-label="Mover abajo"
-                        title="Mover abajo"
-                        className="grid h-3.5 w-5 place-items-center text-[10px] text-[var(--color-text-muted)] hover:text-[var(--color-text)] disabled:opacity-20"
-                      >
-                        ▼
-                      </button>
-                    </div>
-                  )}
-                  <div className="min-w-0">
-                    <span className="mr-2 text-xs font-mono text-[var(--color-text-muted)]">
-                      #{s.sequence}
-                    </span>
-                    <span className="text-xs text-[var(--color-text)]">
-                      {store?.code ?? '—'} {store?.name ?? '???'}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {s.plannedArrivalAt && (
-                    <span className="text-[10px] font-mono tabular-nums text-[var(--color-text-subtle)]">
-                      {fmtTime(s.plannedArrivalAt)}
-                    </span>
-                  )}
-                  {canMove && s.status === 'pending' && (
-                    <MoveStopMenu
-                      siblings={editableSiblings}
-                      vehicles={vehicles}
-                      disabled={isMoving}
-                      onMove={(targetId) => handleMove(s.id, targetId)}
-                    />
-                  )}
-                  {s.status !== 'pending' && (
-                    <span className="text-[10px] uppercase tracking-wide text-[var(--color-text-subtle)]">
-                      {s.status}
-                    </span>
-                  )}
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={canReorder ? handleDragEnd : undefined}
+        >
+          <SortableContext
+            items={items.map((it) => it.stop.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            <ul className="mt-3 flex flex-col gap-1.5">
+              {items.map((item) => {
+                const isMoving = movingStopId === item.stop.id && pending;
+                const isPending = item.stop.status === 'pending';
+                const rowDraggable =
+                  canReorder && !pending && (!isPostPublish || isPending);
+                return (
+                  <SortableStopRow
+                    key={item.stop.id}
+                    item={item}
+                    draggable={rowDraggable}
+                    canMoveBetweenRoutes={canMove && isPending}
+                    isPostPublishDimmed={isPostPublish && !isPending}
+                    isMovingBetweenRoutes={isMoving}
+                    siblings={editableSiblings}
+                    vehicles={vehicles}
+                    fmtTime={fmtTime}
+                    onMove={(targetId) => handleMove(item.stop.id, targetId)}
+                  />
+                );
+              })}
+            </ul>
+          </SortableContext>
+        </DndContext>
       )}
     </Card>
+  );
+}
+
+function SortableStopRow({
+  item,
+  draggable,
+  canMoveBetweenRoutes,
+  isPostPublishDimmed,
+  isMovingBetweenRoutes,
+  siblings,
+  vehicles,
+  fmtTime,
+  onMove,
+}: {
+  item: StopRowData;
+  draggable: boolean;
+  canMoveBetweenRoutes: boolean;
+  isPostPublishDimmed: boolean;
+  isMovingBetweenRoutes: boolean;
+  siblings: Array<{ id: string; name: string; vehicleId: string }>;
+  vehicles: Vehicle[];
+  fmtTime: (iso: string | null) => string;
+  onMove: (targetRouteId: string) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: item.stop.id, disabled: !draggable });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : isPostPublishDimmed ? 0.6 : 1,
+  };
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      className="flex items-center justify-between gap-2 rounded-[var(--radius-md)] bg-[var(--vf-surface-2)] px-2 py-1.5"
+    >
+      <div className="flex items-center gap-1.5">
+        {draggable && (
+          <span
+            {...attributes}
+            {...listeners}
+            aria-label="Arrastra para reordenar"
+            className="select-none px-1 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+            style={{ cursor: 'grab', fontFamily: 'system-ui' }}
+            title="Arrastra para reordenar"
+          >
+            ⋮⋮
+          </span>
+        )}
+        <span className="text-xs font-mono text-[var(--color-text-muted)]">
+          #{item.stop.sequence}
+        </span>
+        <span className="text-xs text-[var(--color-text)]">
+          {item.storeCode} {item.storeName}
+        </span>
+      </div>
+      <div className="flex items-center gap-2">
+        {item.stop.plannedArrivalAt && (
+          <span className="text-[10px] font-mono tabular-nums text-[var(--color-text-subtle)]">
+            {fmtTime(item.stop.plannedArrivalAt)}
+          </span>
+        )}
+        {canMoveBetweenRoutes && (
+          <MoveStopMenu
+            siblings={siblings}
+            vehicles={vehicles}
+            disabled={isMovingBetweenRoutes}
+            onMove={onMove}
+          />
+        )}
+        {item.stop.status !== 'pending' && (
+          <span className="text-[10px] uppercase tracking-wide text-[var(--color-text-subtle)]">
+            {item.stop.status}
+          </span>
+        )}
+      </div>
+    </li>
   );
 }
 
@@ -307,6 +398,9 @@ function MoveStopMenu({
         e.target.value = '';
       }}
       disabled={disabled}
+      // Los listeners de dnd-kit absorben pointerdown — bloqueamos para que el
+      // select sí reciba clicks normales y no inicie un drag por accidente.
+      onPointerDown={(e) => e.stopPropagation()}
       className="rounded border border-[var(--color-border)] bg-[var(--vf-surface-1)] px-1.5 py-0.5 text-[11px] text-[var(--color-text)] disabled:opacity-50"
       aria-label="Mover parada a otra ruta"
     >

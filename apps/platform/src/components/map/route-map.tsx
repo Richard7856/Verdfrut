@@ -210,7 +210,15 @@ export function RouteMap({ stops, depot, geometry, mapboxToken, routeId, timezon
     <div
       ref={containerRef}
       className={className}
-      style={{ width: '100%', height: '100%', minHeight: 400 }}
+      // ADR-045: isolation + translateZ(0) contienen los markers Mapbox dentro
+      // del bounding box del mapa (evita que floten sobre el contenido al scroll).
+      style={{
+        width: '100%',
+        height: '100%',
+        minHeight: 400,
+        isolation: 'isolate',
+        transform: 'translateZ(0)',
+      }}
     />
   );
 }
