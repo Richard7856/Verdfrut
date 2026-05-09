@@ -64,21 +64,19 @@ export async function getDispatch(id: string): Promise<Dispatch | null> {
 
 /**
  * Lista las rutas que pertenecen a un dispatch.
- * Reutiliza listRoutes filtrando en cliente — N pequeño (típicamente 1-5 rutas/tiro).
+ *
+ * Bug previo: la implementación pedía las N rutas MÁS RECIENTES de la BD
+ * vía `listRoutes({ limit: ids.length })` y filtraba por id en cliente.
+ * Si entre crear y consultar aparecía otra ruta más reciente (otro tiro,
+ * otro día), el filter devolvía menos rutas o cero. Resultado para el user:
+ * "el tiro tiene 0 rutas" cuando en realidad la BD las tenía.
+ *
+ * Fix: usar el filtro `dispatchId` que agregamos a listRoutes (filtra en
+ * Postgres, no en cliente). Limit alto (200) cubre cualquier tiro razonable.
  */
 export async function listRoutesByDispatch(dispatchId: string): Promise<Route[]> {
-  const supabase = await createServerClient();
-  const { data, error } = await supabase
-    .from('routes')
-    .select('id')
-    .eq('dispatch_id', dispatchId)
-    .order('created_at', { ascending: true });
-  if (error) throw new Error(`[dispatches.routes] ${error.message}`);
-  if (!data || data.length === 0) return [];
-  // Aprovechamos listRoutes para mantener el mismo mapper consistente.
-  const ids = data.map((r) => r.id as string);
-  const { rows } = await listRoutes({ limit: ids.length });
-  return rows.filter((r) => ids.includes(r.id));
+  const { rows } = await listRoutes({ dispatchId, limit: 200 });
+  return rows;
 }
 
 /**

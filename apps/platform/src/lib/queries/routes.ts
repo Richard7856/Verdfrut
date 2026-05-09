@@ -75,6 +75,8 @@ export async function listRoutes(opts?: {
   zoneId?: string;
   status?: RouteStatus | RouteStatus[];
   driverId?: string;
+  /** ADR-040: filtrar por tiro (dispatch). Útil para `listRoutesByDispatch`. */
+  dispatchId?: string;
   /** 0-indexed offset para paginación. Default 0. */
   offset?: number;
   /** Máximo de filas a devolver. Default ROUTES_PAGE_SIZE. */
@@ -97,6 +99,7 @@ export async function listRoutes(opts?: {
     q = Array.isArray(opts.status) ? q.in('status', opts.status) : q.eq('status', opts.status);
   }
   if (opts?.driverId) q = q.eq('driver_id', opts.driverId);
+  if (opts?.dispatchId) q = q.eq('dispatch_id', opts.dispatchId);
 
   const { data, error, count } = await q;
   if (error) throw new Error(`[routes.list] ${error.message}`);
