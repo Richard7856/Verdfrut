@@ -1934,3 +1934,42 @@ Mapbox geocoder funciona bien por dirección pero su POI registry no incluye mar
 - Issue #96: animación suave del polyline en el mapa cuando reorder cambia el orden (hoy se redibuja "salto" tras router.refresh).
 - Issue #97: keyboard shortcuts para reorder (Up/Down + Enter, Tab para target) — accessibility.
 - Issue #98: undo/redo del último reorder (Ctrl+Z) — reusa el snapshot inicial.
+
+## [2026-05-09] ADR-046: Enlace público read-only para tiros (`/share/dispatch/[token]`)
+
+**Contexto:** Cliente quiere compartir la vista del tiro (mapa + lista de rutas con paradas) con su equipo SIN requerir login. Use case: el operador en campo o el dueño quieren echar un vistazo a "cómo va el día" sin tener que crear cuenta. Solo lectura — nadie debe poder mover paradas o crear rutas desde la URL pública.
+
+**Decisión:**
+1. **Migración 030:** columna `dispatches.public_share_token UUID NULL`. NULL = compartir deshabilitado. UUID = enlace activo. UNIQUE INDEX (parcial WHERE NOT NULL) para garantizar que cada token apunte a UN dispatch.
+2. **Server actions:** `enableDispatchSharingAction(dispatchId)` genera token UUID y lo persiste; `disableDispatchSharingAction(dispatchId)` set NULL (revoca enlace).
+3. **Query pública `getDispatchByPublicToken(token)`:** valida formato UUID + lookup con `service_role` para bypass RLS (el visitante anónimo no tiene sesión).
+4. **Página `/share/dispatch/[token]/page.tsx`** fuera del grupo `(app)` → no aplica `requireRole`. Carga dispatch + rutas + stops + tiendas + vehicles + zona, usa `MultiRouteMapServer` + nuevo `PublicRouteCard` (versión read-only de `RouteStopsCard`).
+5. **`PublicRouteCard`:** mismo header con métricas (km, manejo, ETAs, kg, badge status) + lista de paradas con sequence/code/name/ETA. SIN drag handle, SIN dropdown "Mover a →", SIN botones de acción.
+6. **Botón "🔗 Compartir"** en `/dispatches/[id]` header (admin/dispatcher) abre modal:
+   - Si no hay token: warning "cualquiera con el link puede ver" + botón "Generar".
+   - Si ya hay token: input readonly con URL completa + botón "Copiar" (uses `navigator.clipboard`) + acciones secundarias "Regenerar link" y "Revocar enlace".
+7. **Meta tags:** `robots: { index: false, follow: false }` para que Google NO indexe operación interna del cliente.
+
+**Alternativas consideradas:**
+- *Token con expiración (ej. 7 días):* descartado V1. Si el cliente operativo ve el día, no le sirve un link que expira solo. Issue futuro #99 para agregar expiración opcional.
+- *Múltiples tokens por dispatch (uno por persona compartida):* descartado por complejidad. UN token por tiro es suficiente; rotar = nuevo token = invalida link viejo.
+- *Tabla separada `dispatch_share_tokens`:* descartado. Una columna en dispatches es más simple y hoy no necesitamos histórico de tokens. Refactor a tabla cuando agreguemos audit/expiración.
+- *Auth con magic link en vez de token UUID:* más seguro pero rompe el use case "WhatsApp el link al equipo". El cliente quiere compartir = visualmente acceder, no autenticar.
+- *Shorter URL (slug en vez de UUID):* tentador para legibilidad pero baja la entropía y permite collisions. UUID es estándar y suficientemente "ocultable" en WhatsApp.
+
+**Riesgos / Limitaciones:**
+- *Si el link se filtra (alguien lo copia y publica),* cualquier persona ve operación del cliente — incluyendo nombres de tiendas, direcciones, ETAs. Mitigación: el admin puede revocar instantáneamente. NO incluimos info ultra-sensible en la vista (sin precios, sin contactos personales).
+- *No hay rate limiting* en `/share/dispatch/[token]`. Un atacante con el token podría hacer scraping repetido. Aceptable para V1 — si el link ya está filtrado, scraping es secundario.
+- *service_role en página pública es seguro PORQUE solo se usa para SELECT por token específico.* No expone nada al cliente (RSC); el HTML rendido sí muestra los datos pero eso es la intención.
+- *Si rotan el token (regenerar link),* el link viejo deja de funcionar. Incluido como feature, NO bug. Documentado en el modal: "El link anterior dejará de funcionar al instante."
+- *El mapa usa `MultiRouteMap` que llama `/api/routes/[id]/polyline` con `auth-required` middleware (si existiera).* Hoy no hay middleware → fetcheo del polyline funciona desde la página pública. Si se agrega middleware después, romper. Issue #100 abierto.
+- *No hay logging/audit de quién accede al link público.* Imposible saber si el cliente lo abrió 1 vez o 1000. Aceptable; agregar `dispatch_share_access_log` table si crece.
+- *El admin/dispatcher es quien genera el link* — un zone_manager (rol restringido) NO puede compartir. Defensa correcta hoy; revisitar si zone_managers necesitan compartir su zona.
+
+**Oportunidades de mejora:**
+- Issue #99: expiración opcional del token (`public_share_token_expires_at TIMESTAMPTZ NULL`).
+- Issue #100: validar que `/api/routes/[id]/polyline` siga siendo accesible si se agrega middleware de auth (porque el mapa público lo usa).
+- Issue #101: agregar audit `dispatch_share_access_log(token, accessed_at, ip, user_agent)` cuando llegue compliance.
+- Issue #102: vista pública minimalista para mobile (sin sidebar leyenda, mapa fullscreen prioritario).
+- Issue #103: meta `og:image` con preview del mapa para que el link pegado en WhatsApp/Slack muestre thumbnail.
+- Issue #104: token rotación automática (cada N días) si se vuelve crítica la "frescura" del enlace.

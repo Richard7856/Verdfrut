@@ -225,3 +225,43 @@ export async function deleteDispatchAction(dispatchId: string): Promise<ActionRe
     revalidatePath('/routes');
   });
 }
+
+/**
+ * ADR-046: habilita el enlace público read-only del tiro. Genera token UUID
+ * y devuelve el path /share/dispatch/{token} para que el cliente arme la URL
+ * completa con su window.location.origin.
+ */
+export interface ShareLinkResult extends ActionResult {
+  token?: string;
+  path?: string;
+}
+
+export async function enableDispatchSharingAction(
+  dispatchId: string,
+): Promise<ShareLinkResult> {
+  await requireRole('admin', 'dispatcher');
+  try {
+    const id = requireUuid('dispatchId', dispatchId);
+    const { enableDispatchSharing } = await import('@/lib/queries/dispatches');
+    const token = await enableDispatchSharing(id);
+    revalidatePath(`/dispatches/${id}`);
+    return { ok: true, token, path: `/share/dispatch/${token}` };
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return { ok: false, error: err.message };
+    }
+    return { ok: false, error: err instanceof Error ? err.message : 'Error desconocido' };
+  }
+}
+
+export async function disableDispatchSharingAction(
+  dispatchId: string,
+): Promise<ActionResult> {
+  return runAction(async () => {
+    await requireRole('admin', 'dispatcher');
+    const id = requireUuid('dispatchId', dispatchId);
+    const { disableDispatchSharing } = await import('@/lib/queries/dispatches');
+    await disableDispatchSharing(id);
+    revalidatePath(`/dispatches/${id}`);
+  });
+}

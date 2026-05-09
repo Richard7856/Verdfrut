@@ -13,4 +13,9 @@ export interface Dispatch {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  /**
+   * ADR-046: token UUID para enlace público read-only en /share/dispatch/{token}.
+   * NULL = compartir deshabilitado.
+   */
+  publicShareToken: string | null;
 }

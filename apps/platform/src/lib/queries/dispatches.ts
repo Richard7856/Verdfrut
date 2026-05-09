@@ -15,10 +15,11 @@ interface DispatchRow {
   created_by: string;
   created_at: string;
   updated_at: string;
+  public_share_token: string | null;
 }
 
 const DISPATCH_COLS =
-  'id, name, date, zone_id, status, notes, created_by, created_at, updated_at';
+  'id, name, date, zone_id, status, notes, created_by, created_at, updated_at, public_share_token';
 
 function toDispatch(row: DispatchRow): Dispatch {
   return {
@@ -31,6 +32,7 @@ function toDispatch(row: DispatchRow): Dispatch {
     createdBy: row.created_by,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    publicShareToken: row.public_share_token,
   };
 }
 
@@ -126,4 +128,57 @@ export async function listDispatchSummaries(opts?: {
       completedStops: completed,
     };
   });
+}
+
+/**
+ * ADR-046: lookup público de dispatch por token. Usado por /share/dispatch/[token].
+ * Usa service_role para bypass de RLS — el visitante anónimo no tiene sesión.
+ * NULL si el token no existe o el dispatch no tiene `public_share_token` set.
+ */
+export async function getDispatchByPublicToken(token: string): Promise<Dispatch | null> {
+  // Validación básica del UUID antes de query (defensa contra tokens malformados).
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token)) {
+    return null;
+  }
+  // service_role bypass RLS — necesario para vista pública (sin sesión).
+  const { createServiceRoleClient } = await import('@verdfrut/supabase/server');
+  const admin = createServiceRoleClient();
+  const { data, error } = await admin
+    .from('dispatches')
+    .select(DISPATCH_COLS)
+    .eq('public_share_token', token)
+    .maybeSingle();
+  if (error || !data) return null;
+  return toDispatch(data as DispatchRow);
+}
+
+/**
+ * ADR-046: habilita compartir el dispatch generando un nuevo token UUID.
+ * Si ya tenía token, lo regenera (revoca enlaces previos).
+ */
+export async function enableDispatchSharing(dispatchId: string): Promise<string> {
+  const supabase = await createServerClient();
+  const { data, error } = await supabase
+    .from('dispatches')
+    .update({ public_share_token: crypto.randomUUID() })
+    .eq('id', dispatchId)
+    .select('public_share_token')
+    .single();
+  if (error || !data?.public_share_token) {
+    throw new Error(`[dispatches.enableSharing] ${error?.message ?? 'no token'}`);
+  }
+  return data.public_share_token as string;
+}
+
+/**
+ * ADR-046: revoca el enlace público (set NULL). Cualquier persona con el link
+ * viejo deja de tener acceso inmediatamente.
+ */
+export async function disableDispatchSharing(dispatchId: string): Promise<void> {
+  const supabase = await createServerClient();
+  const { error } = await supabase
+    .from('dispatches')
+    .update({ public_share_token: null })
+    .eq('id', dispatchId);
+  if (error) throw new Error(`[dispatches.disableSharing] ${error.message}`);
 }

@@ -451,6 +451,48 @@ Formato:
 **Solución propuesta:** comparar ETA pre/post recalc para la próxima parada pending; si delta >15min, push notif "Tu próxima ETA cambió: era X, ahora Y".
 **Estado:** abierto
 
+### #99 — Expiración opcional para enlaces públicos de tiro
+**Severidad:** importante (compliance)
+**Sprint:** backlog
+**Contexto:** ADR-046 — el token NO expira (válido hasta revocar). Para clientes con compliance estricto, expiración auto sería más seguro.
+**Solución propuesta:** columna `public_share_token_expires_at TIMESTAMPTZ NULL`. UI con default "7 días" + opción "Sin expiración".
+**Estado:** abierto
+
+### #100 — Polyline endpoint debe seguir accesible para vista pública
+**Severidad:** crítico potencial (futuro)
+**Sprint:** backlog
+**Contexto:** ADR-046 — `/share/dispatch/[token]` usa `MultiRouteMap` que fetchea `/api/routes/[id]/polyline`. Hoy ese endpoint NO requiere auth, OK. Si se agrega middleware de auth global, la vista pública rompe.
+**Solución propuesta:** crear `/api/share/[token]/polyline` que valida token primero. O whitelist `/api/routes/[id]/polyline` en el middleware (menos seguro).
+**Estado:** abierto, monitorear
+
+### #101 — Audit log de accesos a enlaces públicos
+**Severidad:** cosmético (compliance future)
+**Sprint:** backlog
+**Contexto:** ADR-046 — no sabemos quién/cuándo abre los links públicos.
+**Solución propuesta:** tabla `dispatch_share_access_log(token, accessed_at, ip, user_agent)`. Agregar trigger en page.tsx.
+**Estado:** abierto
+
+### #102 — Vista pública optimizada para mobile
+**Severidad:** cosmético
+**Sprint:** backlog
+**Contexto:** ADR-046 — la vista actual reusa el layout desktop. En mobile el mapa pierde altura útil.
+**Solución propuesta:** layout mobile-first con mapa colapsable + lista debajo.
+**Estado:** abierto
+
+### #103 — og:image preview del mapa para link público
+**Severidad:** cosmético (UX premium)
+**Sprint:** backlog
+**Contexto:** ADR-046 — el link compartido en WhatsApp/Slack se ve como URL plain.
+**Solución propuesta:** generar thumbnail del mapa via Mapbox Static Images API en `generateMetadata`. Cache.
+**Estado:** abierto
+
+### #104 — Rotación automática de tokens públicos
+**Severidad:** cosmético
+**Sprint:** backlog
+**Contexto:** ADR-046 — si el dispatcher olvida revocar, el link queda válido para siempre.
+**Solución propuesta:** cron diario que rota tokens >30 días viejos. Avisa al admin por push antes.
+**Estado:** abierto, baja prioridad
+
 ### #95 — Drag entre cards de distintas rutas (cross-route drag)
 **Severidad:** importante (UX premium)
 **Sprint:** backlog
@@ -622,9 +664,30 @@ Formato:
 | Importantes | 12 (#12, #22, #25, #29, #31, #32, #33, #50, #51, #52) |
 | Cosméticos | 18 (#9, #10, #20, #23, #26, #27, #28, #34, #35, #36, #37, #38, #53, #54, #55, #56, #57) |
 
-**Última actualización:** 2026-05-02, tras Sprints 14-16 (Tiros ADR-024, Mover paradas ADR-025, Theme + Mapa en vivo ADR-026). Cierre limpio para nueva sesión. **26 ADRs, 20 migraciones, 13 importantes / 13 cosméticos abiertos.** Listo para Fase 3 (dashboard cliente).
-**ADRs nuevos en este ciclo:** ADR-013 a ADR-018.
-**Resueltos en este ciclo:** Push real, replay del recorrido, asignación inline de chofer, navegación in-app, turn-by-turn con voz.
-**Issues nuevos:** #36 (off-route precision), #37 (hydration extension), #38 (es-MX voice fallback).
-**Issues nuevos:** #31 (iOS watchPosition), #32 (replay tardío), #33 (TTL breadcrumbs), #34 (interpolación marker), #35 (reasignar en PUBLISHED).
-**Total acumulado resuelto:** 6 críticos + 10 importantes + 4 fixes runtime = 20 issues cerrados.
+**Última actualización:** 2026-05-09, tras sesión cliente NETO Region Toluca. **45 ADRs, 29 migraciones tenant + 1 CP.** 0 críticos abiertos.
+
+**ADRs nuevos en este ciclo (S18 → ahora):** ADR-033 a ADR-045 (13 ADRs).
+
+**Issues nuevos del ciclo:**
+- #59 (region column en stores)
+- #60–#65 (post-S18: deploy Railway, push admin de chofer reorder, lock optimista, service_role bypass, validación geo, TZ Date.parse)
+- #66 (add stop en PUBLISHED), #67 (paginación AddStopButton), #68 (preview-then-create modal)
+- #69–#72 (greens dark mode, markers theme, popups CSS, live-route popup viejo)
+- #73–#76 (rollback dispatch huérfano, /routes agrupada, cancel tiro cascade, UNIQUE dispatches)
+- #77, #78 (assetlinks deploy, Lighthouse audit)
+- #79 cerrado por ADR-042 (coords Toluca refinadas con Google)
+- #80–#84 (geocoding UI, warning route detail, NETO CSV import, geocode_source col, PostGIS)
+- #85–#89 (warning ETAs obsoletas, drag horizontal cards, indicador in-flight, métricas globales fullscreen, keyboard shortcuts)
+- #90–#94 (bulk RPC recalc, Mapbox matrix flag, invalidar cache mapa, push chofer ETA cambia, surfacear delta optimización)
+- #95–#98 (drag cross-route, polyline animado, keyboard a11y reorder, undo/redo)
+
+**Total issues abiertos al cierre:** ~72 trackeados en este archivo (0 críticos, ~20 importantes, ~50 cosméticos).
+
+**Resueltos en este ciclo:**
+- Migraciones 028 (dispatch_required) + 029 (coord_verified) aplicadas
+- 30 stores con coord_verified=true (15 CDMX xlsx + 13 TOL URLs cliente + 2 TOL script Google)
+- APK demo Bubblewrap firmada y entregada
+- Drag-and-drop dnd-kit + auto-recalc ETAs/km
+- Bug isolation Mapbox markers (escapaban container al scroll)
+- Bug listRoutesByDispatch (mostraba 0 rutas con limit frágil)
+- Bug redirect post-creación (iba a /routes en vez de /dispatches)

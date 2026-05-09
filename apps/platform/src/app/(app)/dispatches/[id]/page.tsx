@@ -15,6 +15,7 @@ import { MultiRouteMapServer } from '@/components/map/multi-route-map-server';
 import { AssignRouteForm } from './assign-route-form';
 import { DispatchActions } from './dispatch-actions';
 import { RouteStopsCard } from './route-stops-card';
+import { ShareDispatchButton } from './share-dispatch-button';
 import type { ChatStatus, DispatchStatus, Store } from '@verdfrut/types';
 
 export const dynamic = 'force-dynamic';
@@ -77,6 +78,10 @@ export default async function DispatchDetailPage({ params }: Props) {
         action={
           <div className="flex items-center gap-2">
             <Badge tone={status.tone}>{status.text}</Badge>
+            <ShareDispatchButton
+              dispatchId={dispatch.id}
+              currentToken={dispatch.publicShareToken}
+            />
             <DispatchActions dispatch={dispatch} />
           </div>
         }

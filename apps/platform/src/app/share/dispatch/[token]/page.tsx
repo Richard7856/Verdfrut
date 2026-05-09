@@ -1,0 +1,141 @@
+// ADR-046: vista pública read-only del tiro. Sin auth — accesible a cualquiera
+// con la URL. El admin habilita/revoca el enlace desde /dispatches/[id].
+//
+// Seguridad:
+//   - Token UUID 122 bits (no brute-forceable).
+//   - service_role para bypass RLS (visitante anónimo no tiene sesión).
+//   - Solo lectura: ningún server action accesible desde aquí.
+//   - notFound() si token inválido o no asociado a un dispatch.
+
+import { notFound } from 'next/navigation';
+import { Badge, Card } from '@verdfrut/ui';
+import { getDispatchByPublicToken, listRoutesByDispatch } from '@/lib/queries/dispatches';
+import { listStopsForRoute } from '@/lib/queries/stops';
+import { listVehicles } from '@/lib/queries/vehicles';
+import { listStores } from '@/lib/queries/stores';
+import { listZones } from '@/lib/queries/zones';
+import { MultiRouteMapServer } from '@/components/map/multi-route-map-server';
+import { PublicRouteCard } from './public-route-card';
+import type { DispatchStatus, Store } from '@verdfrut/types';
+
+export const dynamic = 'force-dynamic';
+
+const DISPATCH_STATUS_LABEL: Record<DispatchStatus, { text: string; tone: 'neutral' | 'info' | 'success' | 'danger' }> = {
+  planning: { text: 'Planeación', tone: 'neutral' },
+  dispatched: { text: 'En curso', tone: 'info' },
+  completed: { text: 'Completado', tone: 'success' },
+  cancelled: { text: 'Cancelado', tone: 'danger' },
+};
+
+interface Props {
+  params: Promise<{ token: string }>;
+}
+
+export const metadata = {
+  title: 'VerdFrut — Vista del tiro',
+  // No quiero que esto aparezca en buscadores. La intención es compartir
+  // por WhatsApp, no que Google indexe operación interna del cliente.
+  robots: { index: false, follow: false },
+};
+
+export default async function PublicDispatchViewPage({ params }: Props) {
+  const { token } = await params;
+
+  // 1. Lookup por token (service_role bypass RLS).
+  const dispatch = await getDispatchByPublicToken(token);
+  if (!dispatch) notFound();
+
+  // 2. Cargar rutas + stops + vehicles + stores + zone (mismo data que /dispatches/[id]
+  //    pero sin necesidad de session — todo via service_role implícito al ser
+  //    queries server-side desde un page no autenticado).
+  const [routes, vehicles, stores, zones] = await Promise.all([
+    listRoutesByDispatch(dispatch.id),
+    listVehicles({}),
+    listStores({ activeOnly: false }),
+    listZones(),
+  ]);
+  const stopsPerRoute = await Promise.all(routes.map((r) => listStopsForRoute(r.id)));
+  const storesById = new Map<string, Store>(stores.map((s) => [s.id, s]));
+
+  const routesWithStops = routes
+    .map((r, idx) => ({ route: r, stops: stopsPerRoute[idx] ?? [] }))
+    .filter((x) => x.stops.length > 0);
+
+  const status = DISPATCH_STATUS_LABEL[dispatch.status];
+  const zone = zones.find((z) => z.id === dispatch.zoneId);
+  const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? '';
+
+  return (
+    <main
+      className="min-h-screen"
+      style={{ background: 'var(--vf-bg)', color: 'var(--vf-text)' }}
+    >
+      <div className="mx-auto max-w-7xl p-4 lg:p-6">
+        {/* Header simplificado: marca + status, sin acciones admin. */}
+        <header className="mb-4 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+              VerdFrut · Vista pública
+            </p>
+            <h1 className="text-xl font-semibold">{dispatch.name}</h1>
+            <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+              {zone?.name ?? '—'} · {dispatch.date} · {routes.length} ruta
+              {routes.length === 1 ? '' : 's'}
+            </p>
+          </div>
+          <Badge tone={status.tone}>{status.text}</Badge>
+        </header>
+
+        {dispatch.notes && (
+          <Card className="mb-4 border-[var(--color-border)] bg-[var(--vf-surface-2)]">
+            <p className="text-sm text-[var(--color-text)]">{dispatch.notes}</p>
+          </Card>
+        )}
+
+        {routesWithStops.length > 0 && (
+          <div className="mb-4">
+            <MultiRouteMapServer
+              routes={routesWithStops.map((x) => x.route)}
+              mapboxToken={mapboxToken}
+            />
+          </div>
+        )}
+
+        <section className="flex flex-col gap-4">
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+            Rutas del tiro
+          </h2>
+
+          {routes.length === 0 ? (
+            <Card className="border-[var(--color-border)] bg-[var(--vf-surface-2)]">
+              <p className="text-sm text-[var(--color-text-muted)]">
+                Este tiro no tiene rutas todavía.
+              </p>
+            </Card>
+          ) : (
+            <ul className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              {routes.map((r, idx) => {
+                const stops = stopsPerRoute[idx] ?? [];
+                const vehicle = vehicles.find((v) => v.id === r.vehicleId);
+                return (
+                  <li key={r.id}>
+                    <PublicRouteCard
+                      route={r}
+                      stops={stops}
+                      storesById={storesById}
+                      vehicle={vehicle}
+                    />
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+
+        <footer className="mt-8 border-t border-[var(--color-border)] pt-4 text-center text-[11px] text-[var(--color-text-subtle)]">
+          Vista de solo lectura · Generada por VerdFrut · El enlace puede ser revocado por el administrador
+        </footer>
+      </div>
+    </main>
+  );
+}
