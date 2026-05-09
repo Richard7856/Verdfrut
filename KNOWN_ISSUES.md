@@ -423,6 +423,41 @@ Formato:
 **Solución propuesta:** mini-card flotante esquina superior izquierda en fullscreen con totales agregados.
 **Estado:** abierto
 
+### #90 — Bulk update via RPC Postgres en recalculateRouteMetrics
+**Severidad:** cosmético (perf)
+**Sprint:** backlog
+**Contexto:** ADR-044 — recalc hace UPDATE secuencial por stop (1 round-trip por stop). Para rutas de 30+ stops puede tardar 600ms+.
+**Solución propuesta:** RPC Postgres `recalculate_route_metrics(route_id, stops_with_etas)` que recibe array y hace UPDATE bulk en una transacción.
+**Estado:** abierto
+
+### #91 — recalculateRouteMetrics con flag --use-mapbox-matrix
+**Severidad:** importante
+**Sprint:** backlog
+**Contexto:** ADR-044 — recalc usa haversine ×1.4. Para precisión, falta opción de usar matriz Mapbox real (cuando token está set).
+**Solución propuesta:** parámetro opt en recalc; cuando true, llamar a getMapboxMatrix con [depot, ...stops, depot] y usar esos durations/distances. Trade-off: +500ms latencia.
+**Estado:** abierto
+
+### #92 — Invalidar cache del mapa client-side post-recalc
+**Severidad:** cosmético
+**Sprint:** backlog
+**Contexto:** ADR-044 — al recalcular, el polyline en el mapa puede quedar desincronizado hasta refresh manual.
+**Solución propuesta:** revalidatePath ya hace soft refresh, pero el Mapbox client-side mantiene el source layer. Forzar reload del component map o invalidar el endpoint /api/routes/[id]/polyline.
+**Estado:** abierto
+
+### #93 — Push al chofer si reorder cambia >15min su próxima parada
+**Severidad:** importante (UX chofer)
+**Sprint:** backlog (con #91)
+**Contexto:** ADR-035 manda push al chofer cuando admin reorder en PUBLISHED/IN_PROGRESS, pero ADR-044 también recalcula ETAs y eso puede sorprender al chofer si su próxima ETA cambia mucho.
+**Solución propuesta:** comparar ETA pre/post recalc para la próxima parada pending; si delta >15min, push notif "Tu próxima ETA cambió: era X, ahora Y".
+**Estado:** abierto
+
+### #94 — Surfacear delta de optimización (haversine vs Mapbox real)
+**Severidad:** cosmético (UX premium)
+**Sprint:** backlog
+**Contexto:** ADR-044 deja claro que recalc local es haversine. El dispatcher no sabe cuánto perdería si NO re-optimiza.
+**Solución propuesta:** botón "¿Cuánto ahorraría re-optimizar?" → call lazy a VROOM, mostrar "12 km / 23 min menos" como hint. Si convence al user, acepta y se aplica.
+**Estado:** abierto, baja prioridad
+
 ### #89 — Keyboard shortcuts en fullscreen para reorder rápido
 **Severidad:** cosmético (productividad power users)
 **Sprint:** backlog

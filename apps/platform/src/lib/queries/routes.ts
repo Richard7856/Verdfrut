@@ -352,3 +352,184 @@ export async function assignDriverToRoute(
 
   if (error) throw new Error(`[routes.assignDriver] ${error.message}`);
 }
+
+/**
+ * Recalcula métricas y ETAs de una ruta a partir de sus stops actuales.
+ * ADR-044: invocado tras cualquier mutación de stops (reorder, move entre rutas,
+ * append, delete) para que la BD refleje el orden actual sin tener que llamar
+ * al optimizer Railway.
+ *
+ * Estrategia (rápida, suficiente para el dispatcher):
+ *   1. Lee stops ordenadas por `sequence` + tiendas + depot del vehículo.
+ *   2. Cumulative haversine × 1.4 (factor detour urbano) / 25 km/h.
+ *   3. ETA por stop: arrival = cum + travel; departure = arrival + service_time.
+ *   4. Total distance/duration incluye el cierre depot → última parada.
+ *   5. `estimated_start_at` se preserva si ya estaba (no resetea hora de salida);
+ *      si está NULL, asume 06:00 local del tenant.
+ *   6. Si la ruta no tiene depot resoluble, usa coords de la primera tienda.
+ *
+ * Limitaciones:
+ *   - Distancia es haversine, no ruta real Mapbox. Margen ~30% en zonas con
+ *     carreteras complejas. Para ETAs reales, el admin debe Re-optimizar.
+ *   - Si la ruta está PUBLISHED+ y tiene stops `arrived/completed`, mantiene
+ *     `actual_arrival_at` de esas, pero igual recalcula `planned_*` desde el
+ *     inicio (la planeación cambia). El UI debe seguir mostrando actual cuando
+ *     existe, planned como "estimado".
+ */
+const URBAN_DETOUR = 1.4;
+const ASSUMED_MS = 7; // 25 km/h en m/s
+const TENANT_TZ = process.env.NEXT_PUBLIC_TENANT_TIMEZONE ?? 'America/Mexico_City';
+const TZ_OFFSET_HOURS = 6; // CDMX UTC-6 sin DST. Si tenant no es MX, recalcular.
+
+function localShiftStartUnix(date: string, hh = 6, mm = 0): number {
+  // Toma una fecha YYYY-MM-DD y devuelve unix seconds para HH:MM en TZ tenant.
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCHours(hh + TZ_OFFSET_HOURS, mm, 0, 0);
+  return Math.floor(d.getTime() / 1000);
+}
+
+function haversineCoords(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const R = 6371000;
+  const r = (d: number) => (d * Math.PI) / 180;
+  const dLat = r(b.lat - a.lat);
+  const dLng = r(b.lng - a.lng);
+  const sa =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(r(a.lat)) * Math.cos(r(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(sa));
+}
+
+export async function recalculateRouteMetrics(routeId: string): Promise<void> {
+  const supabase = await createServerClient();
+
+  // 1. Cargar ruta
+  const { data: route, error: rErr } = await supabase
+    .from('routes')
+    .select('id, date, vehicle_id, estimated_start_at, status')
+    .eq('id', routeId)
+    .maybeSingle();
+  if (rErr || !route) throw new Error(`[routes.recalculateMetrics] route ${routeId}: ${rErr?.message ?? 'not found'}`);
+
+  // 2. Cargar stops (ordenadas por sequence)
+  const { data: stops, error: sErr } = await supabase
+    .from('stops')
+    .select('id, store_id, sequence')
+    .eq('route_id', routeId)
+    .order('sequence');
+  if (sErr) throw new Error(`[routes.recalculateMetrics] stops: ${sErr.message}`);
+
+  // Sin stops → reset métricas a 0/null
+  if (!stops || stops.length === 0) {
+    await supabase
+      .from('routes')
+      .update({
+        total_distance_meters: 0,
+        total_duration_seconds: 0,
+        estimated_end_at: null,
+      })
+      .eq('id', routeId);
+    return;
+  }
+
+  // 3. Cargar tiendas (coords + service_time) en bulk
+  const storeIds = stops.map((s) => s.store_id as string);
+  const { data: stores, error: stErr } = await supabase
+    .from('stores')
+    .select('id, lat, lng, service_time_seconds')
+    .in('id', storeIds);
+  if (stErr) throw new Error(`[routes.recalculateMetrics] stores: ${stErr.message}`);
+  const storeById = new Map(
+    (stores ?? []).map((s) => [
+      s.id as string,
+      { lat: s.lat as number, lng: s.lng as number, service: (s.service_time_seconds as number) ?? 1800 },
+    ]),
+  );
+
+  // 4. Resolver depot del vehículo (FK depot_id o coords manuales).
+  const { data: vehicle } = await supabase
+    .from('vehicles')
+    .select('depot_id, depot_lat, depot_lng')
+    .eq('id', route.vehicle_id as string)
+    .maybeSingle();
+
+  let depotCoord: { lat: number; lng: number } | null = null;
+  if (vehicle?.depot_id) {
+    const { data: depot } = await supabase
+      .from('depots')
+      .select('lat, lng')
+      .eq('id', vehicle.depot_id as string)
+      .maybeSingle();
+    if (depot) depotCoord = { lat: depot.lat as number, lng: depot.lng as number };
+  } else if (vehicle?.depot_lat && vehicle?.depot_lng) {
+    depotCoord = { lat: vehicle.depot_lat as number, lng: vehicle.depot_lng as number };
+  }
+  // Fallback: si no hay depot, usar la primera tienda como origen (no ideal pero no rompe).
+  if (!depotCoord) {
+    const first = storeById.get(stops[0]!.store_id as string);
+    if (first) depotCoord = { lat: first.lat, lng: first.lng };
+  }
+  if (!depotCoord) {
+    // No hay coords ni depot ni tiendas válidas — no podemos calcular.
+    return;
+  }
+
+  // 5. Start time: preservar si ya estaba (ruta ya optimizada antes), si no usar 06:00 local
+  const startUnix = route.estimated_start_at
+    ? Math.floor(new Date(route.estimated_start_at as string).getTime() / 1000)
+    : localShiftStartUnix(route.date as string, 6, 0);
+
+  // 6. Iterar stops cumulativo
+  let cumUnix = startUnix;
+  let cumDist = 0;
+  let cumDriveSec = 0;
+  let prev = depotCoord;
+  const stopUpdates: Array<{ id: string; arrival: string; departure: string }> = [];
+
+  for (const st of stops) {
+    const store = storeById.get(st.store_id as string);
+    if (!store) continue; // tienda borrada
+    const distMeters = Math.round(haversineCoords(prev, store) * URBAN_DETOUR);
+    const driveSec = Math.round(distMeters / ASSUMED_MS);
+    const arrivalUnix = cumUnix + driveSec;
+    const departureUnix = arrivalUnix + store.service;
+
+    stopUpdates.push({
+      id: st.id as string,
+      arrival: new Date(arrivalUnix * 1000).toISOString(),
+      departure: new Date(departureUnix * 1000).toISOString(),
+    });
+
+    cumDist += distMeters;
+    cumDriveSec += driveSec;
+    cumUnix = departureUnix;
+    prev = { lat: store.lat, lng: store.lng };
+  }
+
+  // 7. Cierre depot
+  const closingDist = Math.round(haversineCoords(prev, depotCoord) * URBAN_DETOUR);
+  cumDist += closingDist;
+  cumDriveSec += Math.round(closingDist / ASSUMED_MS);
+  const finalEndUnix = cumUnix + Math.round(closingDist / ASSUMED_MS);
+
+  // 8. UPDATE stops (one by one — Supabase REST no tiene bulk update por id).
+  //    Ojo: solo actualizamos planned_*; actual_* (cuando existe) no se toca.
+  for (const u of stopUpdates) {
+    await supabase
+      .from('stops')
+      .update({
+        planned_arrival_at: u.arrival,
+        planned_departure_at: u.departure,
+      })
+      .eq('id', u.id);
+  }
+
+  // 9. UPDATE route con totales + new estimated_end
+  await supabase
+    .from('routes')
+    .update({
+      total_distance_meters: cumDist,
+      total_duration_seconds: cumDriveSec,
+      estimated_end_at: new Date(finalEndUnix * 1000).toISOString(),
+    })
+    .eq('id', routeId);
+}

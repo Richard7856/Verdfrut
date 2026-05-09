@@ -4,6 +4,7 @@
 import 'server-only';
 import { createServerClient } from '@verdfrut/supabase/server';
 import type { Stop, StopStatus } from '@verdfrut/types';
+import { recalculateRouteMetrics } from './routes';
 
 interface StopRow {
   id: string;
@@ -159,6 +160,10 @@ export async function bulkReorderStops(
       .eq('route_id', routeId); // defensa: solo updateamos stops de esta ruta
     if (error) throw new Error(`[stops.bulkReorder.set] ${error.message}`);
   }
+
+  // ADR-044: recalcular ETAs + total km/min con haversine cumulative.
+  // Sin esto, el orden cambia pero las métricas quedan obsoletas.
+  await recalculateRouteMetrics(routeId);
 }
 
 /**
@@ -208,6 +213,9 @@ export async function appendStopToRoute(
     .single();
   if (error) throw new Error(`[stops.appendToRoute.insert] ${error.message}`);
 
+  // ADR-044: recalcular ETAs/totales tras agregar.
+  await recalculateRouteMetrics(routeId);
+
   return { id: data.id as string, sequence: data.sequence as number };
 }
 
@@ -252,6 +260,9 @@ export async function deleteStopFromRoute(stopId: string): Promise<void> {
       }
     }
   }
+
+  // ADR-044: recalcular ETAs/totales tras borrar la parada.
+  await recalculateRouteMetrics(stop.route_id as string);
 }
 
 /**
@@ -263,8 +274,9 @@ export async function deleteStopFromRoute(stopId: string): Promise<void> {
  *   - Append al final de la ruta destino (sequence = max+1).
  *   - Re-numera la origen para no dejar huecos.
  *
- * NO recalcula `planned_arrival_at` — el dispatcher debe re-optimizar el tiro
- * después si quiere ETAs frescos.
+ * ADR-044: tras el move, recalcula AMBAS rutas (origen sin la parada, destino
+ * con la parada nueva al final). Antes el dispatcher tenía que re-optimizar
+ * manualmente — UX confusa.
  */
 export async function moveStopToAnotherRoute(
   stopId: string,
@@ -361,6 +373,14 @@ export async function moveStopToAnotherRoute(
       }
     }
   }
+
+  // ADR-044: recalcular AMBAS rutas (orden de origen sin la parada movida,
+  // destino con la nueva al final). Sin esto, el card de origen muestra km
+  // "viejos" y el destino no tiene ETA para la parada nueva.
+  await Promise.all([
+    recalculateRouteMetrics(sourceRouteId),
+    recalculateRouteMetrics(targetRouteId),
+  ]);
 }
 
 /**

@@ -1854,3 +1854,42 @@ Mapbox geocoder funciona bien por dirección pero su POI registry no incluye mar
 - Issue #87: indicador visual de la parada que está siendo movida (ej. fade out durante el round-trip).
 - Issue #88: en fullscreen, agregar mini-tabla flotante con métricas globales del tiro arriba a la izquierda (km total, paradas total, kg total).
 - Issue #89: keyboard shortcuts en fullscreen para reorder rápido (J/K para navegar, Shift+↑/↓ para mover).
+
+## [2026-05-09] ADR-044: Auto-recalcular ETAs y métricas tras cualquier mutación de stops
+
+**Contexto:** Cliente reportó: *"vi que si muevo de camioneta la parada no se recalcula la ruta solo cambia de color y de menu, hay que hacer que se recalcule la ruta cuando se cambia de camioneta o el orden de las paradas"*. Bug real: al mover stops o reordenarlas, el `sequence` cambia pero `planned_arrival_at`, `planned_departure_at`, `total_distance_meters`, `total_duration_seconds` y `estimated_end_at` quedan obsoletos. El UI mostraba ETAs viejas + km incorrectos hasta que el dispatcher hacía Re-optimizar manualmente.
+
+**Decisión:** Helper server-side `recalculateRouteMetrics(routeId)` en `lib/queries/routes.ts` que se invoca automáticamente desde las 4 mutaciones de stops:
+
+1. `bulkReorderStops(routeId, ids)` — reorder dentro de una ruta.
+2. `appendStopToRoute(routeId, storeId)` — agregar parada nueva.
+3. `deleteStopFromRoute(stopId)` — borrar parada (recalcula con la routeId del stop antes de borrar).
+4. `moveStopToAnotherRoute(stopId, targetRouteId)` — recalcula AMBAS rutas (origen sin la parada, destino con la nueva).
+
+**Algoritmo:**
+- Lee stops ordenadas por `sequence` + tiendas (coords + service_time) + depot del vehículo.
+- Cumulative haversine × 1.4 (factor detour urbano) / 25 km/h.
+- Para cada stop: `arrival = cumulative + travel`, `departure = arrival + store.service_time_seconds`.
+- Total: `cum_dist + closing_dist_to_depot`, `cum_drive_seconds + closing_drive`.
+- `estimated_start_at` se preserva si ya tiene valor (mantiene la hora de salida que el optimizer V1 fijó); si NULL, default 06:00 local.
+
+**Alternativas consideradas:**
+- *Llamar al optimizer Railway en cada mutación:* descartado por costo y latencia. Cada move/reorder dispararía 1 call ($$ + ~3-5s de espera UX). El recalc local con haversine es <100ms.
+- *Solo recalcular en commit explícito (botón "Guardar":* descartado. Friction extra; el dispatcher hace move + ya espera ver el resultado.
+- *Recalcular ETAs preservando `actual_arrival_at` cuando existe:* implementado parcialmente — tocamos solo `planned_*`, los `actual_*` (timestamps reales del chofer) no se modifican.
+- *Mantener orden manual + recalcular ETAs (sin re-VROOM):* este es el approach elegido. Respeta la decisión humana del dispatcher; ETAs son haversine pero suficientes para planeación. Para precisión real, "Re-optimizar" sigue disponible.
+
+**Riesgos / Limitaciones:**
+- *Distancia haversine ×1.4 vs ruta real Mapbox:* margen ~30% en zonas con carreteras complejas (Toluca con caminos sinuosos). Para ETAs operativas reales, "Re-optimizar" llama a VROOM con matriz Mapbox.
+- *Los UPDATE por stop son secuenciales* (Supabase REST no permite bulk update por id). Para una ruta con 30 stops, recalc tarda ~600ms (30 round-trips). Aceptable para volúmenes esperados; si crece, agregar RPC Postgres o batch upsert.
+- *Stops sin coords resolubles* (tienda eliminada) se saltan. El cumulative no se cierra correctamente — al menos no rompe la query, pero las métricas pueden quedar low. Caso edge.
+- *Si el route's vehicle no tiene `depot_id` ni `depot_lat/lng`:* fallback usa la primera tienda como origen. Métricas resultantes son razonables pero el "cierre" es subóptimo.
+- *Race condition:* si dos admins reordenan al mismo tiempo, recalc del segundo puede leer state intermedio del primero. Probabilidad baja en operación real (<2 admins concurrentes); mitigación futura: optimistic locking con `routes.version` (issue #62 ya documenta esto).
+- *Time zone hardcoded a `America/Mexico_City` (UTC-6 sin DST).* Funciona para tenant CDMX. Cuando llegue tenant en otra TZ, refactor a usar Intl + tenant config (ya existe `NEXT_PUBLIC_TENANT_TIMEZONE` env var).
+
+**Oportunidades de mejora:**
+- Issue #90: bulk update via RPC Postgres → reduce 30 round-trips a 1.
+- Issue #91: opcional `--use-mapbox-matrix` flag en recalc para usar matriz real (cuando Mapbox token está set), trade-off: latencia +500ms.
+- Issue #92: invalidar cache del mapa client-side post-recalc para que el polyline se redibuje sin refresh manual.
+- Issue #93: en post-publish (PUBLISHED/IN_PROGRESS), agregar push al chofer "ETAs actualizadas" cuando reorder cambia >15 min su próxima parada.
+- Issue #94: surfacear delta en UI: "Re-optimizar te ahorraría 12 km / 23 min" — llamada lazy a VROOM solo cuando se hace click en el indicador.
