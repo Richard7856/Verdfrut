@@ -34,6 +34,12 @@ export interface MultiRouteEntry {
   }>;
   /** Coords del depot de este vehículo (puede repetirse entre rutas con el mismo CEDIS). */
   depot: { code: string; name: string; lat: number; lng: number } | null;
+  /**
+   * Cache-buster para forzar re-fetch del polyline cuando cambia depot/orden.
+   * Server pasa `route.updatedAt` (ISO timestamp); el cliente lo agrega como
+   * query string así el browser cache no atrapa el polyline anterior.
+   */
+  cacheKey?: string;
 }
 
 interface Props {
@@ -179,9 +185,14 @@ export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
               .addTo(map);
           }
 
-          // Polyline real desde Directions API.
+          // Polyline real desde Directions API. cacheKey = route.updatedAt → cuando
+          // el dispatcher cambia depot u ordena paradas (que actualiza el row), la
+          // URL cambia y el cache de browser/CDN no devuelve el polyline anterior.
           try {
-            const res = await fetch(`/api/routes/${r.routeId}/polyline`);
+            const url = r.cacheKey
+              ? `/api/routes/${r.routeId}/polyline?v=${encodeURIComponent(r.cacheKey)}`
+              : `/api/routes/${r.routeId}/polyline`;
+            const res = await fetch(url);
             const data = (await res.json()) as { geometry?: GeoJSON.LineString | null };
             const sourceId = `route-${r.routeId}`;
 

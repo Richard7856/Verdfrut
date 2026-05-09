@@ -12,16 +12,27 @@ interface Props {
   stops: RouteMapStop[];
   depot: RouteMapDepot | null;
   mapboxToken: string;
+  /**
+   * Cache-buster (ej. `route.updatedAt`) — cuando cambia depot/orden de paradas,
+   * el server pasa el nuevo timestamp y el fetch va al browser fresco en vez de
+   * devolver el polyline cacheado anterior.
+   */
+  cacheKey?: string;
 }
 
-export function RouteMapLoader({ routeId, stops, depot, mapboxToken }: Props) {
+export function RouteMapLoader({ routeId, stops, depot, mapboxToken, cacheKey }: Props) {
   const [geometry, setGeometry] = useState<GeoJSON.LineString | null>(null);
 
   useEffect(() => {
-    // Si no hay token público, ni intentar — el RouteMap ya valida.
     if (!mapboxToken) return;
     let cancelled = false;
-    fetch(`/api/routes/${routeId}/polyline`)
+    // Limpiar el polyline cacheado en el state si la cacheKey cambia — evita
+    // pintar la línea anterior mientras llega el fetch nuevo.
+    setGeometry(null);
+    const url = cacheKey
+      ? `/api/routes/${routeId}/polyline?v=${encodeURIComponent(cacheKey)}`
+      : `/api/routes/${routeId}/polyline`;
+    fetch(url)
       .then((r) => (r.ok ? r.json() : null))
       .then((data: { geometry?: GeoJSON.LineString | null } | null) => {
         if (cancelled) return;
@@ -31,7 +42,7 @@ export function RouteMapLoader({ routeId, stops, depot, mapboxToken }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [routeId, mapboxToken]);
+  }, [routeId, mapboxToken, cacheKey]);
 
   if (!mapboxToken) {
     return (

@@ -85,6 +85,9 @@ export async function MultiRouteMapServer({ routes, mapboxToken }: Props) {
         })
         .filter((x): x is NonNullable<typeof x> => x !== null),
       depot,
+      // Cache-buster: cambia con cualquier UPDATE a la ruta (depot override,
+      // métricas, ETAs). Asegura que el browser no muestre el polyline anterior.
+      cacheKey: r.updatedAt,
     };
   });
 

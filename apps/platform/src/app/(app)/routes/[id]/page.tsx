@@ -274,6 +274,7 @@ export default async function RouteDetailPage({ params }: PageProps) {
               stops={mapStops}
               depot={mapDepot}
               mapboxToken={mapboxToken}
+              cacheKey={route.updatedAt}
             />
           )}
         </div>

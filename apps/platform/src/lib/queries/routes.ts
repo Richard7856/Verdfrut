@@ -366,9 +366,12 @@ export async function assignDepotOverrideToRoute(
   depotId: string | null,
 ): Promise<void> {
   const supabase = await createServerClient();
+  // Seteamos updated_at explícito — el cliente usa este timestamp como
+  // cache-buster del polyline en el mapa. Sin esto, el browser puede mostrar
+  // la línea anterior aunque la BD tenga el depot nuevo.
   const { error } = await supabase
     .from('routes')
-    .update({ depot_override_id: depotId })
+    .update({ depot_override_id: depotId, updated_at: new Date().toISOString() })
     .eq('id', id)
     .in('status', ['DRAFT', 'OPTIMIZED', 'APPROVED']);
 

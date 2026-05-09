@@ -31,20 +31,28 @@ export async function GET(
   const sortedStops = [...stops].sort((a, b) => a.sequence - b.sequence);
   if (sortedStops.length === 0) return Response.json({ geometry: null });
 
-  // Resolver depot (por vehículo: depotId o coords manuales).
-  const [vehicle] = await getVehiclesByIds([route.vehicleId]);
-  if (!vehicle) return Response.json({ geometry: null });
-
-  let depotLng: number;
-  let depotLat: number;
-  if (vehicle.depotId) {
-    const depot = await getDepot(vehicle.depotId);
-    if (!depot) return Response.json({ geometry: null });
-    depotLng = depot.lng;
-    depotLat = depot.lat;
-  } else {
-    depotLng = vehicle.depotLng ?? 0;
-    depotLat = vehicle.depotLat ?? 0;
+  // Resolver depot — prioridad ADR-047: route.depotOverrideId > vehicle.depot_id > vehicle.depot_lat/lng.
+  let depotLng: number | null = null;
+  let depotLat: number | null = null;
+  if (route.depotOverrideId) {
+    const depot = await getDepot(route.depotOverrideId);
+    if (depot) {
+      depotLng = depot.lng;
+      depotLat = depot.lat;
+    }
+  }
+  if (depotLng === null || depotLat === null) {
+    const [vehicle] = await getVehiclesByIds([route.vehicleId]);
+    if (!vehicle) return Response.json({ geometry: null });
+    if (vehicle.depotId) {
+      const depot = await getDepot(vehicle.depotId);
+      if (!depot) return Response.json({ geometry: null });
+      depotLng = depot.lng;
+      depotLat = depot.lat;
+    } else {
+      depotLng = vehicle.depotLng ?? 0;
+      depotLat = vehicle.depotLat ?? 0;
+    }
   }
 
   // Resolver coords de cada parada en orden.
@@ -79,8 +87,11 @@ export async function GET(
       duration: result.duration,
     }, {
       headers: {
-        // Cache 5 min — la ruta no cambia mientras está OPTIMIZED/APPROVED.
-        'Cache-Control': 'private, max-age=300',
+        // Cache 60s. Antes era 5 min pero al permitir cambiar depot/orden de paradas
+        // desde el detalle del tiro (ADR-047, ADR-048), cache largo dejaba el
+        // polyline anterior pintado encima del nuevo. 60s da hit-rate suficiente
+        // para navegación normal sin atrapar cambios del dispatcher.
+        'Cache-Control': 'private, max-age=60',
       },
     });
   } catch (err) {
