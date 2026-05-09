@@ -46,6 +46,13 @@ interface CreateAndOptimizeInput {
   shiftStart?: string;
   /** Hora de fin (HH:MM). Default 14:00. */
   shiftEnd?: string;
+  /**
+   * ADR-040: tiro al que pertenece la ruta. Si null/undefined, se crea uno
+   * automáticamente con name "Tiro DD/MM" para que toda ruta viva dentro de
+   * un dispatch (constraint NOT NULL en DB). Si viene, se valida que la fecha
+   * y zona coincidan con el tiro existente.
+   */
+  dispatchId?: string | null;
 }
 
 export interface CreateAndOptimizeResult {
@@ -124,6 +131,66 @@ export async function createAndOptimizeRoute(
       depotsById,
     });
 
+    // 4.5. ADR-040: garantizar que existe un dispatch al cual asociar las rutas.
+    //   - Si el caller pasó dispatchId, validar que existe y coincide en (date, zone).
+    //   - Si no, auto-crear uno con name "Tiro DD/MM" + el name del input como notas.
+    // Toda ruta DEBE tener dispatch_id (constraint NOT NULL en DB desde migr 028).
+    let resolvedDispatchId: string;
+    {
+      const supabase = await (await import('@verdfrut/supabase/server')).createServerClient();
+      if (input.dispatchId) {
+        const { data: existing, error: dErr } = await supabase
+          .from('dispatches')
+          .select('id, date, zone_id')
+          .eq('id', input.dispatchId)
+          .maybeSingle();
+        if (dErr || !existing) {
+          throw new ValidationError('dispatchId', 'Tiro no encontrado');
+        }
+        if (existing.date !== input.date || existing.zone_id !== zoneId) {
+          throw new ValidationError(
+            'dispatchId',
+            'El tiro pertenece a otra fecha o zona — la ruta no se puede asociar.',
+          );
+        }
+        resolvedDispatchId = existing.id as string;
+      } else {
+        // Auto-crear con name humano-amigable. La fecha en formato DD/MM es lo
+        // que el dispatcher reconoce a simple vista; el name del input queda en
+        // notes para trazabilidad si lo necesita después.
+        const [yyyy, mm, dd] = input.date.split('-');
+        const { data: newDispatch, error: ndErr } = await supabase
+          .from('dispatches')
+          .insert({
+            name: `Tiro ${dd}/${mm}`,
+            date: input.date,
+            zone_id: zoneId,
+            notes: `Auto-creado al crear "${input.name}" (ADR-040).`,
+            created_by: profile.id,
+          })
+          .select('id')
+          .single();
+        if (ndErr || !newDispatch) {
+          // Si falla por UNIQUE (ya hay un "Tiro DD/MM" del mismo día/zona), reusar.
+          if (ndErr?.code === '23505') {
+            const { data: existing2 } = await supabase
+              .from('dispatches')
+              .select('id')
+              .eq('date', input.date)
+              .eq('zone_id', zoneId)
+              .eq('name', `Tiro ${dd}/${mm}`)
+              .maybeSingle();
+            if (!existing2) throw new Error(`[autoDispatch] ${ndErr.message}`);
+            resolvedDispatchId = existing2.id as string;
+          } else {
+            throw new Error(`[autoDispatch] ${ndErr?.message ?? 'fallo al auto-crear tiro'}`);
+          }
+        } else {
+          resolvedDispatchId = newDispatch.id as string;
+        }
+      }
+    }
+
     // 5. Crear una route DRAFT por vehículo y persistir sus stops.
     for (let i = 0; i < vehicles.length; i++) {
       const vehicle = vehicles[i];
@@ -144,6 +211,8 @@ export async function createAndOptimizeRoute(
         driverId: driverIdForVehicle,
         zoneId: vehicle.zoneId,
         createdBy: profile.id,
+        // ADR-040: dispatch_id NOT NULL — toda ruta vive dentro de un tiro.
+        dispatchId: resolvedDispatchId,
       });
       createdRouteIds.push(route.id);
 

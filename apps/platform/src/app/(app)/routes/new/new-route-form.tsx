@@ -9,7 +9,6 @@ import { useRouter } from 'next/navigation';
 import { Button, Card, CardHeader, Field, Input, Select, toast, cn } from '@verdfrut/ui';
 import type { Dispatch, Driver, Store, Vehicle, Zone } from '@verdfrut/types';
 import { createAndOptimizeRoute, cancelRouteAction } from '../actions';
-import { assignRouteToDispatchAction } from '../../dispatches/actions';
 
 interface Props {
   zones: Zone[];
@@ -94,6 +93,9 @@ export function NewRouteForm({ zones, stores, vehicles, drivers, dispatch }: Pro
         storeIds: Array.from(selectedStores),
         shiftStart,
         shiftEnd,
+        // ADR-040: si vino de un tiro existente, asociamos directo. Si no,
+        // el server auto-crea uno (toda ruta debe vivir en un dispatch).
+        dispatchId: dispatch?.id ?? null,
       });
 
       if (!res.ok) {
@@ -102,12 +104,9 @@ export function NewRouteForm({ zones, stores, vehicles, drivers, dispatch }: Pro
       }
 
       const created = res.routeIds ?? [];
-      // Si esta creación viene desde un tiro, vincular cada ruta nueva al dispatch.
-      if (dispatch && created.length > 0) {
-        await Promise.all(
-          created.map((rid) => assignRouteToDispatchAction(dispatch.id, rid)),
-        );
-      }
+      // ADR-040: ya no necesitamos `assignRouteToDispatchAction` aquí — el
+      // server action createAndOptimizeRoute ya asocia las rutas al dispatch
+      // (existente o auto-creado) atómicamente.
       const totalSelected = selectedStores.size;
       const unassignedCount = res.unassignedStoreIds?.length ?? 0;
       const unassignedRatio = totalSelected > 0 ? unassignedCount / totalSelected : 0;
@@ -188,6 +187,30 @@ export function NewRouteForm({ zones, stores, vehicles, drivers, dispatch }: Pro
     <form onSubmit={handleSubmit} className="grid grid-cols-1 gap-6 lg:grid-cols-[360px_1fr]">
       {/* COLUMNA IZQUIERDA — config */}
       <div className="flex flex-col gap-4">
+        {/* ADR-040: aviso del tiro al cual se asociarán las rutas. Si vino de
+            /dispatches/[id], muestra el tiro existente. Si no, anuncia el auto. */}
+        <div
+          className="rounded-[var(--radius-md)] border px-3 py-2 text-xs"
+          style={{
+            background: dispatch ? 'var(--vf-info-bg)' : 'var(--vf-bg-sub)',
+            borderColor: dispatch ? 'var(--vf-info-border)' : 'var(--vf-line)',
+            color: 'var(--vf-text)',
+          }}
+        >
+          {dispatch ? (
+            <>
+              <strong>Tiro:</strong> {dispatch.name} ({dispatch.date}) — las rutas que crees
+              quedan dentro de este tiro.
+            </>
+          ) : (
+            <>
+              <strong>Tiro:</strong> se creará automáticamente uno llamado{' '}
+              <span className="font-mono">Tiro {date.split('-').reverse().slice(0, 2).join('/')}</span>.
+              Después puedes agregar más rutas al mismo tiro desde{' '}
+              <a href="/dispatches" className="underline">/dispatches</a>.
+            </>
+          )}
+        </div>
         <Card>
           <CardHeader title="Configuración" description="Datos de la ruta" />
           <div className="flex flex-col gap-4">

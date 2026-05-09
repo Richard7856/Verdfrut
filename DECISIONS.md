@@ -1657,3 +1657,53 @@ Adicional: el constraint UNIQUE `idx_routes_vehicle_date_active` (vehicle_id, da
 - Issue #72: enriquecer popup de `live-route-map.tsx` con la misma lógica.
 - Click en stop de la lista debería resaltar el marker en el mapa (cross-sync). Hoy no hay sync entre lista y mapa en `/routes/[id]`.
 - Hover en marker abre popup automático (hoy hay que clickear) — UX más fluida.
+
+## [2026-05-08] ADR-040: Toda ruta debe pertenecer a un tiro (`dispatch_id NOT NULL`)
+
+**Contexto:** El cliente reportó fricción crítica del flujo: *"crear una por una es tardado y molesto, mejor siempre tiros aunque sea de una sola ruta… ya intenté usar tiros y no vi el caso si ya tengo rutas, lo veo como hasta trabajar doble"*. El modelo permitía rutas sueltas (`dispatch_id` nullable), lo que obligaba al dispatcher a:
+1. Crear ruta sin tiro
+2. Decidir después si crear un tiro
+3. Asociar la ruta al tiro (paso extra)
+O al revés: crear tiro vacío → crear ruta apuntando al tiro. Doble paso siempre.
+
+**Decisión:** Migración 028 + cambio arquitectónico. Toda ruta vive dentro de un tiro:
+
+1. **Migración SQL `028_dispatch_required.sql`:**
+   - Backfill: para cada combo `(date, zone_id)` con rutas huérfanas, crear UN tiro nuevo "Tiro DD/MM (auto)" y re-asociar todas las rutas. Rutas del mismo día/zona quedan en el mismo tiro (más natural que un tiro por ruta).
+   - `ALTER TABLE routes ALTER COLUMN dispatch_id SET NOT NULL` — constraint a nivel DB.
+   - Cambiar FK `routes_dispatch_id_fkey` de `ON DELETE SET NULL` a `ON DELETE RESTRICT` — no se puede borrar un tiro con rutas vivas. Defensivo contra borrado accidental.
+   - Migración idempotente con `DO $$` blocks que checan estado actual antes de aplicar.
+
+2. **`createAndOptimizeRoute` auto-crea dispatch:**
+   - Si `input.dispatchId` viene → validar (date, zone_id) coinciden con tiro existente, error si no.
+   - Si no viene → crear tiro nuevo `name="Tiro DD/MM"`, `notes="Auto-creado al crear ${routeName}"`, `created_by=admin actual`.
+   - Si UNIQUE collision (`23505`, ya hay un "Tiro DD/MM" del mismo día/zona) → reusar el existente.
+   - Las rutas se crean con `dispatch_id = resolvedDispatchId` directamente (no más `assignRouteToDispatchAction` post-creación).
+
+3. **UI `/routes/new`:**
+   - Banner arriba del form que dice qué tiro se va a usar:
+     - Verde si vino de `?dispatchId=...` — muestra `nombre + fecha`.
+     - Gris si auto-creará — muestra el nombre que generará y enlace a `/dispatches`.
+   - Form ya pasa `dispatchId` (existente) o `null` (auto) al action.
+   - Eliminado el `assignRouteToDispatchAction` redundante post-creación.
+
+**Alternativas consideradas:**
+- *Opción A: solo auto-crear dispatch (sin NOT NULL):* descartada. Queda la posibilidad de bug donde código futuro inserte ruta huérfana. NOT NULL en DB es la garantía.
+- *Opción B: `/routes` agrupa visualmente por tiro:* aplazado a sprint siguiente. Hoy queda como tabla plana — funciona, no es bloqueante.
+- *Backfill 1 dispatch por ruta huérfana:* descartado. Genera dispatches "vacíos" con 1 ruta cada uno — no representa la realidad operativa donde 1 tiro = N rutas relacionadas.
+- *FK `ON DELETE CASCADE`:* descartado. Borrar dispatch por error eliminaría rutas históricas. RESTRICT es más seguro; el dispatcher tiene que cancelar/borrar rutas primero (acción explícita).
+- *Eliminar la idea de "rutas sueltas" sin migración (solo con código):* descartado. Sin constraint DB, código futuro o inserts manuales pueden seguir creando rutas sin dispatch.
+
+**Riesgos / Limitaciones:**
+- *Auto-dispatch huérfano si el optimizer falla:* `createAndOptimizeRoute` crea el dispatch ANTES de llamar al optimizer. Si el optimizer falla, el dispatch queda creado sin rutas. Hoy los dispatches vacíos aparecen en `/dispatches` igual — el user puede borrarlos manualmente. Issue #73 abierto: hacer la creación atómica con rollback explícito del dispatch en el catch.
+- *FK RESTRICT bloquea workflow de "borrar tiro y todo lo de adentro":* si el dispatcher quiere eliminar un experimento del día, debe cancelar/borrar las rutas primero. Aceptable; previene pérdida de datos accidental. Si genera fricción, agregar UI "Cancelar tiro y todas sus rutas" que haga el cleanup explícito.
+- *Backfill agrupa por (date, zone) — pero no por tipo de operación:* si un tenant futuro tenía 2 lógicas operativas distintas el mismo día/zona (ej. Toluca-mañana y CDMX-tarde), las rutas quedan en el mismo tiro. Aceptable para caso CEDA actual (1 sola operación). Si crece, dispatcher mueve rutas con `moveStopToAnotherRouteAction` o crea tiros nuevos.
+- *Conflict UNIQUE en auto-dispatch:* asumimos que `(date, zone_id, name)` permite múltiples tiros con mismo nombre. Si en el futuro se agrega UNIQUE, el reuse path lo cubre.
+- *Migración aplicada DIRECTAMENTE en prod via MCP (no via `supabase db push`):* el archivo local existe para reproducibilidad, pero la BD prod ya está cambiada. Para tenants nuevos: el archivo se aplica al hacer `supabase reset`. Verificar en cada nuevo tenant.
+
+**Oportunidades de mejora:**
+- Issue #73: rollback del auto-dispatch si el optimizer falla (atomicidad).
+- Issue #74: `/routes` agrupar visualmente por tiro (lista expandible) — completa la UX de "tiros siempre".
+- Issue #75: UI "Cancelar tiro completo" que cancele todas las rutas + dispatch en una operación.
+- Issue #76: índice UNIQUE `(date, zone_id, lower(name))` en dispatches para evitar duplicados manuales del mismo nombre el mismo día/zona.
+- Issue #77: backfill futuro si llegan tenants con datos legacy — mismo patrón pero con mejor heurística (agrupación por created_at, vehicle_id, etc.).

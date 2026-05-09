@@ -337,6 +337,35 @@ Formato:
 **Solución propuesta:** portear a `ReactDOM.createPortal` o usar la API `Popup.setDOMContent` con un componente React. Permitiría theme tokens, componentes UI reutilizables, y eventos React (en vez de href strings).
 **Estado:** abierto
 
+### #73 — Auto-dispatch puede quedar huérfano si el optimizer falla
+**Severidad:** importante
+**Sprint:** backlog
+**Contexto:** ADR-040 — `createAndOptimizeRoute` crea el dispatch ANTES de llamar al optimizer. Si el optimizer falla (timeout, error de capacity, no asigna nada), el dispatch ya está en BD sin rutas asociadas.
+**Síntoma:** `/dispatches` muestra tiros vacíos que el dispatcher tiene que limpiar manual.
+**Solución propuesta:** mover el INSERT del dispatch al final del try block, después del optimizer. O envolver todo en una transacción Postgres con RPC. O agregar `ON ERROR DELETE FROM dispatches WHERE id = newDispatchId AND created_by = profile.id`.
+**Estado:** abierto
+
+### #74 — /routes lista plana — falta agrupar visualmente por tiro
+**Severidad:** importante (UX)
+**Sprint:** backlog (Sprint 20 candidato)
+**Contexto:** ADR-040 garantizó que toda ruta tiene tiro, pero `/routes` sigue mostrando lista plana. El cliente espera ver "tiros, expandir para ver sus rutas".
+**Solución propuesta:** rediseñar `/routes/page.tsx` con DataTable de tiros (group by dispatch_id), expandir muestra las rutas. Reusa `dispatches` query con join a routes. Considerar si `/routes` y `/dispatches` se fusionan.
+**Estado:** abierto
+
+### #75 — Falta acción "Cancelar tiro completo" (cascada de rutas)
+**Severidad:** cosmético
+**Sprint:** backlog
+**Contexto:** ADR-040 puso FK `ON DELETE RESTRICT` — el dispatcher no puede borrar un tiro con rutas vivas; debe cancelar las rutas una por una primero. UX engorrosa cuando quiere descartar todo un experimento.
+**Solución propuesta:** botón "Cancelar tiro y sus rutas" en `/dispatches/[id]` que en una transacción: cancela todas las rutas (UPDATE status='CANCELLED') y luego borra el dispatch.
+**Estado:** abierto
+
+### #76 — Falta UNIQUE `(date, zone_id, lower(name))` en dispatches
+**Severidad:** cosmético
+**Sprint:** backlog
+**Contexto:** ADR-040 usa el handle del UNIQUE collision (23505) para reusar tiros existentes con mismo nombre auto. Pero el constraint UNIQUE no existe — el `23505` viene de otros índices. Idealmente agregar el constraint para garantizar el comportamiento.
+**Solución propuesta:** migración 029 con `CREATE UNIQUE INDEX dispatches_unique_per_day_zone ON dispatches (date, zone_id, lower(name))`.
+**Estado:** abierto
+
 ### #72 — `live-route-map.tsx` (incidents) sigue con popup viejo
 **Severidad:** cosmético
 **Sprint:** backlog (junto con #71)
