@@ -367,6 +367,43 @@ Formato:
 **Fix:** push del repo + esperar redeploy automático Vercel (~1 min).
 **Estado:** abierto hasta deploy
 
+### #80 — Geocoding integrado en UI "crear tienda" (no existe esa página todavía)
+**Severidad:** importante (cuando llegue la UI)
+**Sprint:** backlog
+**Contexto:** ADR-042 — el script de geocoding refina tiendas existentes. Cuando se construya la UI para que admin agregue tiendas individualmente, debe geocodificar al guardar (no manualmente con script).
+**Solución propuesta:** server action `createStoreAction(input)` que llame Google Geocoding antes de INSERT, set `coord_verified=true` si geocoding succeed.
+**Estado:** abierto
+
+### #81 — Warning en route detail si stops tienen coord_verified=false
+**Severidad:** cosmético (UX informativa)
+**Sprint:** backlog
+**Contexto:** ADR-042 — el dispatcher debería ver claramente si su ruta incluye tiendas con coords aproximadas (ETAs no son confiables, optimizer puede haberlas mal-asignado).
+**Solución propuesta:** banner en `/routes/[id]` si N de los stops tienen `coord_verified=false`. Tooltip explica qué hacer (correr `geocode-stores.mjs` o validar manualmente).
+**Estado:** abierto
+
+### #82 — Importar coords oficiales NETO si el cliente las provee
+**Severidad:** baja (depende del cliente)
+**Sprint:** backlog
+**Contexto:** ADR-042 — Google geocoding tiene margen ~50-100m. Si NETO comparte CSV con coords desde su ERP, son las "ground truth".
+**Solución propuesta:** script `import-official-coords.mjs` que lea CSV y haga UPDATE + marca `coord_verified=true`.
+**Estado:** abierto, esperando que cliente comparta el CSV
+
+### #83 — Agregar columna `stores.geocode_source` para auditar origen de coords
+**Severidad:** cosmético
+**Sprint:** backlog
+**Contexto:** ADR-042 — hoy `coord_verified` es boolean pero no sabemos POR QUÉ está verified (Google? Cliente? Manual?). Útil para reportes y para revisar calidad.
+**Solución propuesta:** migración 030 con `ALTER TABLE stores ADD COLUMN geocode_source TEXT NULL CHECK (geocode_source IN ('nominatim','google','client_xlsx','manual','unknown'))`. Backfill: CDMX-* → 'client_xlsx', TOL-* → 'nominatim' (ahora se actualizará a 'google' al correr el script).
+**Estado:** abierto
+
+### #84 — Evaluar PostGIS para queries espaciales
+**Severidad:** baja (escala)
+**Sprint:** Sprint 21+
+**Contexto:** Hoy las queries "tiendas cercanas a X" usan haversine en código. Si la operación crece a >500 tiendas y queries frecuentes, PostGIS + GIST index sería más eficiente.
+**Solución propuesta:** ya hay extensión postgis instalada (migración 012). Agregar columna `geom GEOGRAPHY(POINT)` derivada de `(lat, lng)` con trigger.
+**Estado:** abierto, monitorear
+
+### #79 — Cerrado por ADR-042 (ya hay script + columna verified)
+
 ### #78 — Falta Lighthouse PWA audit antes de release Play Store
 **Severidad:** importante (pre-Play-Store)
 **Sprint:** backlog

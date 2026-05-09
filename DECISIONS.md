@@ -1757,3 +1757,48 @@ O al revés: crear tiro vacío → crear ruta apuntando al tiro. Doble paso siem
 - Generar splash screen optimizado por tamaños de pantalla (Bubblewrap genera básicos automáticamente).
 - Configurar Play Integrity API (anti-tampering) cuando vayamos a Play Store.
 - Sentry SDK Android para errors crash en la APK (independiente del Sentry web).
+
+## [2026-05-08] ADR-042: Refinar coords de tiendas con Google Geocoding API + columna `coord_verified`
+
+**Contexto:** El cliente compartió un screenshot de Google Maps con una ruta de Toluca y reportó que las ubicaciones que tenemos en BD están "muy mal" — confirmando la nota del ADR-033 que advertía sobre coords aproximadas. Diagnóstico:
+
+| Origen | Tiendas | Calidad |
+|--------|---------|---------|
+| `xlsx EXPANSION` (CDMX-*) | 15 | ✅ lat/lng exactas (vinieron en el archivo) |
+| `xlsx TOLUCA` (TOL-*) | 15 | ⚠️ Geocoded a Nominatim por código postal/municipio (margen 100m–2km) |
+
+Mapbox geocoder funciona bien por dirección pero su POI registry no incluye marca "Tiendas Neto" — confirmado, no nos sirve para refinar. Google Maps Geocoding usa el mismo dataset que el screenshot que mandó el cliente.
+
+**Decisión:**
+1. **Migración 029** — agregar columna `stores.coord_verified BOOLEAN NOT NULL DEFAULT false`. Backfill: marcar `CDMX-*` como verified=true (vienen del xlsx oficial). Las `TOL-*` quedan como false (Nominatim aproximado).
+2. **Script `scripts/geocode-stores.mjs`** — refina coords usando Google Geocoding API:
+   - Lee env vars de `apps/platform/.env.local` o shell.
+   - Default: dry-run (imprime delta entre coord actual vs Google).
+   - `--apply` → UPDATE en BD + marca `coord_verified=true`.
+   - `--code=TOL-XXXX` → solo una tienda.
+   - `--filter=ALL` → re-geocodifica todas (incluyendo verified).
+   - Sin dependencias externas (fetch directo a Supabase REST + Google API).
+   - Salvaguarda: tiendas con delta >5km se SKIP automáticamente al `--apply` para evitar moverlas a otra ciudad por error de Google. El admin debe revisar la dirección y reintentar con `--code`.
+3. **Filosofía:** toda tienda nueva nace con `coord_verified=false`. Para marcarla true: Google Geocoding (script), o validación manual del admin (futura UI), o import desde xlsx oficial del cliente.
+4. **Costo Google:** $5 USD por 1000 reqs; 30 tiendas demo = $0.15 USD; queda holgado en el free tier de $200/mes de Google Cloud.
+
+**Alternativas consideradas:**
+- *Mapbox Geocoding API:* descartado. Mapbox no tiene POIs comerciales mexicanos al nivel de Google.
+- *Cliente provee CSV con coords oficiales (NETO ERP):* mejor calidad pero bloqueado por proceso del cliente. Si llega, ese CSV se aplica directamente con el script (`--code` por cada uno).
+- *Geocoding manual desde Google Maps UI:* viable para ≤20 tiendas pero no escala. Mejor automatizar.
+- *PostGIS + reverse geocoding:* descartado, requiere cambio de schema (geography column) y no resuelve el problema (necesitamos forward geocoding).
+- *Híbrido Mapbox primero + Google fallback:* 30 tiendas no justifican la complejidad. Si llegamos a 500+, sí evaluar.
+
+**Riesgos / Limitaciones:**
+- *Google Geocoding rooftop puede dar la entrada principal del local pero no el muelle de carga.* Margen residual ~50-100m. Para anti-fraude geo del chofer (validación arrived <300m de la tienda), suficiente.
+- *Google API key expuesta a cualquier persona con acceso a `.env.local`/Vercel.* Mitigación: restringir la key a la IP del Vercel + Geocoding API only.
+- *El script asume que la `address` en BD es razonable.* Si el cliente nos dio direcciones con errores tipográficos, Google puede devolver cualquier cosa. La columna `coord_verified=true` después del script NO garantiza coord correcta — solo que Google la convirtió. Validación visual sigue siendo recomendable.
+- *Tiendas con delta >5km se skipean al --apply.* Si toda Toluca debe moverse drásticamente (caso límite), hay que correr `--code` una por una y revisar manualmente.
+- *No hay re-geocoding automático en cron.* Si una tienda cambia de domicilio, el admin tiene que re-correr el script manualmente. Para tenant a escala se puede agregar trigger / cron.
+
+**Oportunidades de mejora:**
+- Issue #80: integrar geocoding en el flujo "crear tienda" del admin UI (cuando llegue esa página).
+- Issue #81: warning en route detail si la ruta tiene tiendas con `coord_verified=false` ("ETAs poco confiables — verifica coords").
+- Issue #82: si el cliente eventualmente da CSV oficial con coords NETO, importarlas y marcar `coord_verified=true` con `notes='from-NETO-erp'` para trazabilidad.
+- Issue #83: agregar columna `stores.geocode_source TEXT` (`nominatim` / `google` / `client_xlsx` / `manual`) para auditoría.
+- Issue #84: evaluar PostGIS + GIST index sobre `(lat, lng)` para queries espaciales (ej. "tiendas a <500m del chofer").
