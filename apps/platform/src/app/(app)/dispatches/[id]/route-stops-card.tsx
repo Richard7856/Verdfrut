@@ -31,6 +31,7 @@ import { formatDuration } from '@verdfrut/utils';
 import type { Route, RouteStatus, Stop, Store, Vehicle } from '@verdfrut/types';
 import { moveStopToAnotherRouteAction } from '../actions';
 import { reorderStopsAction, assignDepotToRouteAction } from '../../routes/actions';
+import { AddStopButton } from '../../routes/[id]/add-stop-button';
 import { RemoveVehicleButton } from './remove-vehicle-button';
 
 const STATUS: Record<RouteStatus, { text: string; tone: 'neutral' | 'info' | 'success' | 'warning' | 'danger' }> = {
@@ -62,6 +63,8 @@ interface Props {
   isDepotOverride?: boolean;
   /** Lista de depots activos para el selector inline. */
   availableDepots?: Array<{ id: string; code: string; name: string }>;
+  /** Tiendas de la zona que NO están aún en esta ruta — para el botón "+ Agregar parada". */
+  availableStoresToAdd?: Array<{ id: string; code: string; name: string }>;
 }
 
 const EDITABLE_STATUSES = new Set<RouteStatus>(['DRAFT', 'OPTIMIZED', 'APPROVED']);
@@ -92,6 +95,7 @@ export function RouteStopsCard({
   effectiveDepot = null,
   isDepotOverride = false,
   availableDepots = [],
+  availableStoresToAdd = [],
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -369,6 +373,16 @@ export function RouteStopsCard({
             </ul>
           </SortableContext>
         </DndContext>
+      )}
+
+      {/* ADR-036: agregar parada manual a la ruta. Solo en pre-publicación.
+          Reusa el mismo componente que /routes/[id] para mantener un único
+          flow: agrega la parada al final, marca métricas como obsoletas, y el
+          dispatcher decide si re-optimizar o dejar el orden manual. */}
+      {EDITABLE_STATUSES.has(route.status) && availableStoresToAdd.length > 0 && (
+        <div className="mt-3 border-t pt-3" style={{ borderColor: 'var(--vf-line)' }}>
+          <AddStopButton routeId={route.id} availableStores={availableStoresToAdd} />
+        </div>
       )}
     </Card>
   );

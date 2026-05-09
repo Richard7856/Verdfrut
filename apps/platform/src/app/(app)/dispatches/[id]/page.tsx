@@ -97,6 +97,13 @@ export default async function DispatchDetailPage({ params }: Props) {
     .filter((d) => d.isActive)
     .map((d) => ({ id: d.id, code: d.code, name: d.name }));
 
+  // Tiendas disponibles para agregar manualmente: las activas de la zona del tiro.
+  // Cada card filtra después las que ya están en SU ruta (pueden estar en otra
+  // ruta del tiro y aun así ser candidato si el dispatcher decide moverla).
+  const allZoneStoresActive = stores.filter(
+    (s) => s.isActive && s.zoneId === dispatch.zoneId,
+  );
+
   // Choferes activos en la zona para el selector.
   const profilesByUserId = new Map(zoneUsers.map((p) => [p.id, p]));
   const availableDriverOpts = zoneDrivers
@@ -186,6 +193,13 @@ export default async function DispatchDetailPage({ params }: Props) {
                 if (d) effectiveDepot = { id: d.id, code: d.code, name: d.name };
               }
 
+              // Tiendas que esta ruta puede agregar = activas de la zona menos las
+              // que ya están en esta ruta (sí pueden venir de otras rutas del tiro).
+              const stopStoreIds = new Set(stops.map((s) => s.storeId));
+              const availableStoresForRoute = allZoneStoresActive
+                .filter((s) => !stopStoreIds.has(s.id))
+                .map((s) => ({ id: s.id, code: s.code, name: s.name }));
+
               return (
                 <li key={r.id}>
                   <RouteStopsCard
@@ -199,6 +213,7 @@ export default async function DispatchDetailPage({ params }: Props) {
                     effectiveDepot={effectiveDepot}
                     isDepotOverride={isDepotOverride}
                     availableDepots={availableDepotOptions}
+                    availableStoresToAdd={availableStoresForRoute}
                   />
                 </li>
               );
