@@ -330,6 +330,20 @@ Formato:
 **Solución propuesta:** override en `[data-theme=dark]`: `--vf-green-700: oklch(0.50 0.13 155)` y `--vf-green-500: oklch(0.65 0.16 155)`. Test con axe-core para AA contrast.
 **Estado:** abierto, monitorear
 
+### #71 — Popups del mapa son HTML strings, no React components
+**Severidad:** cosmético (refactor)
+**Sprint:** backlog
+**Contexto:** ADR-039 enriqueció los popups con HTML strings inline. Funciona pero no es theme-aware (Mapbox popup body es blanco fijo) y los strings escapados son frágiles (un nombre de tienda con `<`/`>` los rompe).
+**Solución propuesta:** portear a `ReactDOM.createPortal` o usar la API `Popup.setDOMContent` con un componente React. Permitiría theme tokens, componentes UI reutilizables, y eventos React (en vez de href strings).
+**Estado:** abierto
+
+### #72 — `live-route-map.tsx` (incidents) sigue con popup viejo
+**Severidad:** cosmético
+**Sprint:** backlog (junto con #71)
+**Contexto:** ADR-039 enriqueció `route-map.tsx` y `multi-route-map.tsx`. El de incidents tiene un caso de uso similar pero con tracking en vivo del chofer; merece su propia versión del popup con info distinta (última actualización GPS, distancia al stop, etc).
+**Solución propuesta:** después de #71, reusar el componente React.
+**Estado:** abierto
+
 ### #70 — Markers del live-map usan hex hardcoded sin theme awareness
 **Severidad:** cosmético
 **Sprint:** backlog

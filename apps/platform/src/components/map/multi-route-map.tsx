@@ -27,6 +27,10 @@ export interface MultiRouteEntry {
     sequence: number;
     lat: number;
     lng: number;
+    /** ADR-039: extra contexto en popup. */
+    address?: string | null;
+    plannedArrivalAt?: string | null;
+    status?: 'pending' | 'arrived' | 'completed' | 'skipped';
   }>;
   /** Coords del depot de este vehículo (puede repetirse entre rutas con el mismo CEDIS). */
   depot: { code: string; name: string; lat: number; lng: number } | null;
@@ -123,13 +127,37 @@ export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
               `display:flex;align-items:center;justify-content:center;` +
               `color:white;font-weight:600;font-size:11px;font-family:ui-sans-serif;`;
             el.textContent = String(s.sequence);
+            // ADR-039: popup enriquecido — ETA + dirección + status + CTA "Ver ruta"
+            const tz = 'America/Mexico_City';
+            const eta = s.plannedArrivalAt
+              ? new Intl.DateTimeFormat('es-MX', {
+                  timeZone: tz,
+                  hour: '2-digit',
+                  minute: '2-digit',
+                  hour12: false,
+                }).format(new Date(s.plannedArrivalAt))
+              : null;
+            const STATUS_LABEL_ES: Record<NonNullable<typeof s.status>, string> = {
+              pending: 'Pendiente',
+              arrived: 'En sitio',
+              completed: 'Completada',
+              skipped: 'Omitida',
+            };
+            const popupHTML =
+              `<div style="font-family:ui-sans-serif;color:#0f172a;min-width:200px;max-width:280px">` +
+                `<div style="font-size:11px;color:#64748b;margin-bottom:2px">${r.routeName} · ${r.vehicleLabel}</div>` +
+                `<div style="font-weight:700;font-size:13px;margin-bottom:2px">#${s.sequence} · ${s.storeCode}</div>` +
+                `<div style="font-size:13px;margin-bottom:4px">${s.storeName}</div>` +
+                (s.address ? `<div style="font-size:11px;color:#64748b;margin-bottom:6px;line-height:1.3">${s.address}</div>` : '') +
+                `<div style="display:flex;gap:8px;align-items:center;font-size:11px">` +
+                  (s.status ? `<span style="display:inline-block;padding:2px 6px;background:${color};color:white;border-radius:3px;font-weight:600">${STATUS_LABEL_ES[s.status]}</span>` : '') +
+                  (eta ? `<span style="color:#15803d;font-weight:600">ETA ${eta}</span>` : `<span style="color:#94a3b8;font-style:italic">sin ETA</span>`) +
+                `</div>` +
+                `<a href="/routes/${r.routeId}" style="display:inline-block;margin-top:8px;padding:5px 10px;background:#15803d;color:white;border-radius:4px;text-decoration:none;font-size:11px;font-weight:600">Ver ruta →</a>` +
+              `</div>`;
             new mapboxgl.Marker({ element: el, anchor: 'center' })
               .setLngLat([s.lng, s.lat])
-              .setPopup(new mapboxgl.Popup({ offset: 14 }).setHTML(
-                `<div style="font-family:ui-sans-serif;color:#0f172a">` +
-                `<strong>${r.routeName}</strong> · ${r.vehicleLabel}<br/>` +
-                `#${s.sequence} ${s.storeCode}<br/>${s.storeName}</div>`,
-              ))
+              .setPopup(new mapboxgl.Popup({ offset: 14, maxWidth: '300px' }).setHTML(popupHTML))
               .addTo(map);
           }
 

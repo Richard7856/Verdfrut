@@ -71,6 +71,10 @@ export async function MultiRouteMapServer({ routes, mapboxToken }: Props) {
             sequence: s.sequence,
             lat: store.lat,
             lng: store.lng,
+            // ADR-039: extra contexto para popup mejorado del marker.
+            address: store.address,
+            plannedArrivalAt: s.plannedArrivalAt,
+            status: s.status,
           };
         })
         .filter((x): x is NonNullable<typeof x> => x !== null),

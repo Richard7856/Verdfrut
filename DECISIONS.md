@@ -1621,3 +1621,39 @@ Adicional: el constraint UNIQUE `idx_routes_vehicle_date_active` (vehicle_id, da
 - Botón "mover a otra ruta del mismo tiro" en cada stop pending (issue: ya existe `moveStopToAnotherRoute`, falta UI en /routes/[id], hoy solo en /dispatches).
 - Toast en re-optimize que diga "X paradas no asignadas, las dejé al final sin ETA" (en vez del modal del flujo de creación).
 - Botón "Cancelar ruta" más visible en `/routes/[id]` para que el dispatcher pueda destrabarse sin SQL (verificar si ya existe vs route-actions.tsx).
+
+## [2026-05-08] ADR-039: Popup enriquecido del marker + remoción del mapa global de /routes
+
+**Contexto:** Tras el demo de la primera ruta, dos feedbacks del cliente sobre la UX de mapas:
+
+1. **Popup pobre:** click en un marker mostraba solo `#sequence · code | name | status` (texto plano). El dispatcher quería más contexto operativo (dirección, ETA, link al detalle) para tomar decisiones desde el mapa sin tener que abrir la lista.
+2. **Mapa redundante en `/routes`:** la página listaba todas las rutas del tenant Y mostraba un mapa colectivo arriba. El cliente lo describió: "el mapa allí no tiene sentido — la idea es entrar a la ruta para verla". El dispatcher prefiere lista limpia + entrar al detalle de una ruta para ver mapa.
+
+**Decisión:**
+
+1. **Popup enriquecido** (3 archivos: `route-map.tsx`, `multi-route-map.tsx`, `live-route-map.tsx` queda para sprint siguiente):
+   - Layout: `[ruta · vehículo]` (solo en multi) → `#sequence · code` (bold) → `name` → `address` (si hay) → row con `[badge status]` + `ETA HH:MM` (verde) o `sin ETA` (gris) → `[Ver ruta →]` CTA si tenemos `routeId`.
+   - Tipos `RouteMapStop` y `MultiRouteEntry.stops[]` extendidos con `address?` y `plannedArrivalAt?` opcionales.
+   - Server pages (`/routes/[id]/page.tsx`, `multi-route-map-server.tsx`) pasan los nuevos campos.
+   - HTML del popup mantiene colores hardcoded (`#0f172a`, `#15803d`) porque Mapbox popup body es siempre blanco — no respeta theme tokens.
+2. **Mapa removido de `/routes`:**
+   - `<MultiRouteMapServer>` y su import borrados de `apps/platform/src/app/(app)/routes/page.tsx`.
+   - `/routes` ahora muestra solo: filtros + tabla de rutas + paginación.
+   - Dispatcher entra a `/routes/[id]` para ver el mapa de UNA ruta. El "vista del día completa" puede ir a `/map` (live tracking) o `/dispatches/[id]` si se quiere agrupado por tiro.
+
+**Alternativas consideradas:**
+- *Mapa colapsable en `/routes` (botón "Mostrar mapa"):* descartado. El cliente fue claro: el mapa allí no aporta. Mejor remoción limpia que añadir interruptores que distraen.
+- *Popup minimalista con solo CTA "Ver detalle":* descartado. ETA y dirección son la info que el dispatcher consulta más frecuentemente — debe estar inline.
+- *Popup como React component (no HTML string):* deseable pero Mapbox popup vive fuera del React tree. Habría que portear con `ReactDOM.createPortal` y manejar lifecycle. Trade-off: más complejo pero theme-aware. Aplazado a backlog (issue #71).
+
+**Riesgos / Limitaciones:**
+- *Popup con CTA "Ver ruta" abre en misma pestaña:* si el dispatcher tenía paneles abiertos, los pierde. Mitigación: agregar `target="_blank"` en una iteración futura.
+- *Address en popup puede ser muy largo:* las direcciones reales de NETO miden 80-120 chars. El `max-width:280px` con `line-height:1.3` lo acomoda en 2-3 líneas. Visualmente OK.
+- *Mapa removido de `/routes` puede confundir a usuarios que estaban acostumbrados:* riesgo bajo (cliente nuevo, no había costumbre instalada).
+- *`live-route-map.tsx` (incidents) NO se actualizó* — sigue con popup viejo. El caso de uso es distinto (live tracking de chofer, otros datos). Lo dejamos para issue #72.
+
+**Oportunidades de mejora:**
+- Issue #71: portear popups a React components con createPortal — theme-aware + más maintainable.
+- Issue #72: enriquecer popup de `live-route-map.tsx` con la misma lógica.
+- Click en stop de la lista debería resaltar el marker en el mapa (cross-sync). Hoy no hay sync entre lista y mapa en `/routes/[id]`.
+- Hover en marker abre popup automático (hoy hay que clickear) — UX más fluida.

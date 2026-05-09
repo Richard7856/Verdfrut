@@ -23,6 +23,10 @@ export interface RouteMapStop {
   lat: number;
   lng: number;
   status: 'pending' | 'arrived' | 'completed' | 'skipped';
+  /** ADR-039: dirección de la tienda — popup la muestra para contexto operativo. */
+  address?: string | null;
+  /** ADR-039: ETA planeada del optimizer; si null/undefined, popup muestra "sin ETA". */
+  plannedArrivalAt?: string | null;
 }
 
 export interface RouteMapDepot {
@@ -39,6 +43,10 @@ interface Props {
   geometry: GeoJSON.LineString | null;
   /** Token público de Mapbox (NEXT_PUBLIC_MAPBOX_TOKEN). */
   mapboxToken: string;
+  /** ADR-039: si viene, popup del marker incluye CTA "Ver detalle" → /routes/[routeId]. */
+  routeId?: string;
+  /** Timezone para formatear ETA. Default America/Mexico_City. */
+  timezone?: string;
   className?: string;
 }
 
@@ -49,7 +57,55 @@ const STATUS_COLORS: Record<RouteMapStop['status'], string> = {
   skipped: '#dc2626',     // rojo
 };
 
-export function RouteMap({ stops, depot, geometry, mapboxToken, className }: Props) {
+const STATUS_LABEL: Record<RouteMapStop['status'], string> = {
+  pending: 'Pendiente',
+  arrived: 'En sitio',
+  completed: 'Completada',
+  skipped: 'Omitida',
+};
+
+/**
+ * ADR-039: HTML del popup del marker. Antes era 3 líneas (#sequence, name, status).
+ * Ahora incluye dirección, ETA con color según status, label en español, y opcionalmente
+ * CTA al detalle de la ruta. Diseñado para que el dispatcher tome decisiones desde el mapa.
+ *
+ * Inline styles porque Mapbox popup vive fuera del React tree y NO tiene acceso a
+ * tokens del tema. El bg del popup es siempre blanco (Mapbox built-in), por eso
+ * los colores son hardcoded — son legibles en cualquier theme de la app.
+ */
+function buildStopPopupHTML(
+  s: RouteMapStop,
+  routeId: string | undefined,
+  timezone: string,
+): string {
+  const eta = s.plannedArrivalAt
+    ? new Intl.DateTimeFormat('es-MX', {
+        timeZone: timezone,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }).format(new Date(s.plannedArrivalAt))
+    : null;
+  const statusColor = STATUS_COLORS[s.status];
+  const cta = routeId
+    ? `<a href="/routes/${routeId}" style="display:inline-block;margin-top:8px;padding:5px 10px;background:#15803d;color:white;border-radius:4px;text-decoration:none;font-size:11px;font-weight:600">Ver ruta →</a>`
+    : '';
+  return (
+    `<div style="font-family:ui-sans-serif;color:#0f172a;min-width:200px;max-width:260px">` +
+      `<div style="font-weight:700;font-size:13px;margin-bottom:2px">#${s.sequence} · ${s.storeCode}</div>` +
+      `<div style="font-size:13px;margin-bottom:4px">${s.storeName}</div>` +
+      (s.address ? `<div style="font-size:11px;color:#64748b;margin-bottom:6px;line-height:1.3">${s.address}</div>` : '') +
+      `<div style="display:flex;gap:8px;align-items:center;font-size:11px">` +
+        `<span style="display:inline-block;padding:2px 6px;background:${statusColor};color:white;border-radius:3px;font-weight:600">${STATUS_LABEL[s.status]}</span>` +
+        (eta ? `<span style="color:#15803d;font-weight:600">ETA ${eta}</span>` : `<span style="color:#94a3b8;font-style:italic">sin ETA</span>`) +
+      `</div>` +
+      cta +
+    `</div>`
+  );
+}
+
+export function RouteMap({ stops, depot, geometry, mapboxToken, routeId, timezone, className }: Props) {
+  const tz = timezone ?? 'America/Mexico_City';
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
 
@@ -107,9 +163,11 @@ export function RouteMap({ stops, depot, geometry, mapboxToken, className }: Pro
         el.textContent = String(s.sequence);
         new mapboxgl.Marker({ element: el, anchor: 'center' })
           .setLngLat([s.lng, s.lat])
-          .setPopup(new mapboxgl.Popup({ offset: 16 }).setHTML(
-            `<div style="font-family:ui-sans-serif;color:#0f172a"><strong>#${s.sequence} · ${s.storeCode}</strong><br/>${s.storeName}<br/><em>${s.status}</em></div>`,
-          ))
+          .setPopup(
+            new mapboxgl.Popup({ offset: 16, maxWidth: '280px' }).setHTML(
+              buildStopPopupHTML(s, routeId, tz),
+            ),
+          )
           .addTo(map);
       }
 

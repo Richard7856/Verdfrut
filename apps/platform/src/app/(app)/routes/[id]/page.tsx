@@ -116,11 +116,13 @@ export default async function RouteDetailPage({ params }: PageProps) {
   }
 
   // Build paradas para el mapa con coords de la tienda.
-  const mapStops: RouteMapStop[] = stops
-    .map((s) => {
-      const store = storesById.get(s.storeId);
-      if (!store) return null;
-      return {
+  // ADR-039: incluimos address + plannedArrivalAt para que el popup del marker
+  // tenga contexto operativo (no solo nombre).
+  const mapStops: RouteMapStop[] = stops.flatMap<RouteMapStop>((s) => {
+    const store = storesById.get(s.storeId);
+    if (!store) return [];
+    return [
+      {
         storeId: s.storeId,
         storeCode: store.code,
         storeName: store.name,
@@ -128,9 +130,11 @@ export default async function RouteDetailPage({ params }: PageProps) {
         lat: store.lat,
         lng: store.lng,
         status: s.status,
-      };
-    })
-    .filter((s): s is RouteMapStop => s !== null);
+        address: store.address,
+        plannedArrivalAt: s.plannedArrivalAt,
+      },
+    ];
+  });
 
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? '';
 
