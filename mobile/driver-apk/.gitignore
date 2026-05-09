@@ -9,8 +9,14 @@
 
 # Build artifacts (Bubblewrap genera muchos al build)
 build/
+app/build/
 .gradle/
 local.properties
+
+# Artifacts intermedios del firmado (apksigner)
+*.idsig
+app-release-aligned.apk
+app-release-bundle.aab.idsig
 
 # Output APK firmada — sí queremos referencia pero no en repo
 *.apk

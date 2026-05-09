@@ -395,6 +395,41 @@ Formato:
 **Solución propuesta:** migración 030 con `ALTER TABLE stores ADD COLUMN geocode_source TEXT NULL CHECK (geocode_source IN ('nominatim','google','client_xlsx','manual','unknown'))`. Backfill: CDMX-* → 'client_xlsx', TOL-* → 'nominatim' (ahora se actualizará a 'google' al correr el script).
 **Estado:** abierto
 
+### #85 — Reorder en post-publish desde dispatch card no avisa que ETAs quedan obsoletas
+**Severidad:** cosmético
+**Sprint:** backlog
+**Contexto:** ADR-043 agregó botones ↑↓ en `RouteStopsCard`. Cuando el dispatcher reordena post-publish (PUBLISHED/IN_PROGRESS), el server cambia `sequence` pero NO recalcula `planned_arrival_at`. La ETA visible por parada se vuelve obsoleta hasta re-optimizar.
+**Solución propuesta:** banner amarillo "Las ETAs ya no son confiables — re-optimiza" tras un swap post-publish (similar al pre-publish que ya muestra "Re-optimiza después de guardar").
+**Estado:** abierto
+
+### #86 — Drag horizontal entre cards reemplazaría dropdown "Mover a →"
+**Severidad:** cosmético (UX premium)
+**Sprint:** backlog
+**Contexto:** ADR-043 dejó el dropdown "Mover a →" para mover paradas entre rutas del mismo tiro. Funciona pero un drag horizontal sería más fluido (drag stop de Kangoo 1 → Kangoo 2).
+**Solución propuesta:** dnd-kit shared context entre cards, drop zone es la otra card.
+**Estado:** abierto
+
+### #87 — Indicador visual de parada en flight durante reorder/move
+**Severidad:** cosmético
+**Sprint:** backlog
+**Contexto:** ADR-043 — durante el round-trip al server, la parada se queda "estática" sin feedback claro. Si el server tarda 1-2s, el user no sabe si su click hizo algo.
+**Solución propuesta:** opacity 0.5 + spinner pequeño en la parada que está siendo movida.
+**Estado:** abierto
+
+### #88 — Métricas globales del tiro flotantes en fullscreen del mapa
+**Severidad:** cosmético
+**Sprint:** backlog
+**Contexto:** ADR-043 — fullscreen del mapa muestra el mapa + leyenda lateral, pero no agrega métricas globales (km totales del tiro, paradas totales, kg totales).
+**Solución propuesta:** mini-card flotante esquina superior izquierda en fullscreen con totales agregados.
+**Estado:** abierto
+
+### #89 — Keyboard shortcuts en fullscreen para reorder rápido
+**Severidad:** cosmético (productividad power users)
+**Sprint:** backlog
+**Contexto:** ADR-043 — fullscreen es para inspección visual + edición. Si el dispatcher hace muchos reorders, mouse + click es lento.
+**Solución propuesta:** J/K para navegar paradas, Shift+↑/↓ para mover. Solo activo en fullscreen.
+**Estado:** abierto, baja prioridad
+
 ### #84 — Evaluar PostGIS para queries espaciales
 **Severidad:** baja (escala)
 **Sprint:** Sprint 21+

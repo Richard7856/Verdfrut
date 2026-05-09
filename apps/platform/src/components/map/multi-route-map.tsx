@@ -62,6 +62,24 @@ export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  // ADR-043: fullscreen toggle. En fullscreen, el wrapper queda position:fixed
+  // ocupando viewport. Necesitamos resize del map al cambiar para que el canvas
+  // se reajuste correctamente.
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (mapRef.current) {
+      // Pequeño delay porque el cambio de className necesita aplicarse al DOM antes.
+      requestAnimationFrame(() => mapRef.current?.resize());
+    }
+    // ESC para salir de fullscreen
+    if (!isFullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsFullscreen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isFullscreen]);
 
   // Memorizar asignación de color por ruta (estable entre re-renders).
   const colorByRoute = useMemo(() => {
@@ -232,11 +250,33 @@ export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
   }
 
   return (
-    <div className={`grid gap-3 lg:grid-cols-[1fr_240px] ${className ?? ''}`}>
-      <div
-        ref={containerRef}
-        className="h-[500px] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)]"
-      />
+    <div
+      className={
+        isFullscreen
+          ? 'fixed inset-0 z-50 grid gap-3 bg-[var(--vf-bg)] p-3 lg:grid-cols-[1fr_280px]'
+          : `relative grid gap-3 lg:grid-cols-[1fr_240px] ${className ?? ''}`
+      }
+    >
+      <div className="relative">
+        <div
+          ref={containerRef}
+          className={
+            isFullscreen
+              ? 'h-full w-full overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)]'
+              : 'h-[500px] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)]'
+          }
+        />
+        {/* ADR-043: botón fullscreen flotante en la esquina superior derecha del mapa. */}
+        <button
+          type="button"
+          onClick={() => setIsFullscreen((v) => !v)}
+          aria-label={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+          title={isFullscreen ? 'Salir (Esc)' : 'Pantalla completa'}
+          className="absolute right-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-md border border-[var(--vf-line)] bg-[var(--vf-bg-elev)] text-base text-[var(--vf-text)] shadow-md hover:bg-[var(--vf-bg-sub)]"
+        >
+          {isFullscreen ? '✕' : '⛶'}
+        </button>
+      </div>
 
       {/* Leyenda */}
       <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--vf-surface-1)] p-3">

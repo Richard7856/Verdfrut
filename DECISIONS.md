@@ -1802,3 +1802,55 @@ Mapbox geocoder funciona bien por dirección pero su POI registry no incluye mar
 - Issue #82: si el cliente eventualmente da CSV oficial con coords NETO, importarlas y marcar `coord_verified=true` con `notes='from-NETO-erp'` para trazabilidad.
 - Issue #83: agregar columna `stores.geocode_source TEXT` (`nominatim` / `google` / `client_xlsx` / `manual`) para auditoría.
 - Issue #84: evaluar PostGIS + GIST index sobre `(lat, lng)` para queries espaciales (ej. "tiendas a <500m del chofer").
+
+## [2026-05-09] ADR-043: Mejoras al detalle del tiro — reorder ↑↓ + fullscreen mapa + métricas detalladas
+
+**Contexto:** Cliente probó el detalle del tiro (`/dispatches/[id]`) con 2 rutas Toluca y pidió 3 mejoras concretas:
+1. Botones ↑↓ para reordenar paradas dentro de cada ruta (como en driver app), aparte del dropdown "Mover a → otra ruta" que ya existía.
+2. Botón pantalla completa para el mapa, así puede inspeccionar geografía sin perder el detalle de la lista lateral.
+3. Más métricas por ruta visible en cada card (kg, tiempo manejo, ETAs salida/regreso) — antes solo mostraba `N paradas · X km`.
+
+**Decisión:**
+
+1. **Reorder ↑↓ en `RouteStopsCard`:**
+   - Cada parada del card tiene 2 botones (▲ ▼) a la izquierda del `#sequence`.
+   - Reusa `reorderStopsAction` (ADR-035) que ya soporta pre-publish (todas movibles) + post-publish (solo paradas pending). El componente respeta la restricción.
+   - Botón disabled cuando no se puede mover (1ra parada no puede subir, etc.).
+   - Click swap con la parada adyacente del subset elegible + envía orden completo al server. router.refresh post-success.
+   - Convive con el dropdown "Mover a →" que mueve entre rutas del MISMO tiro (sin cambios).
+
+2. **Fullscreen del mapa en `MultiRouteMap`:**
+   - Botón flotante esquina superior derecha del mapa: `⛶` para entrar, `✕` para salir.
+   - Cuando active, el wrapper aplica `fixed inset-0 z-50` con padding y bg del tema.
+   - `Esc` también sale.
+   - `requestAnimationFrame(() => mapRef.current.resize())` después del toggle para que el canvas Mapbox se reajuste a las nuevas dimensiones.
+   - La leyenda lateral también escala (240px en normal, 280px en fullscreen).
+
+3. **Métricas detalladas por ruta:**
+   - Header del card ahora muestra: `vehículo · N paradas · TOTAL_KG kg · X.X km · MM manejo` (línea 1).
+   - Línea 2: `Sale HH:MM · Regresa HH:MM · N ✓ M omitidas` (cuando hay datos).
+   - Cada parada del listado muestra ETA inline a la derecha: `06:30`.
+   - Cálculos:
+     - `totalKg = sum(stop.load[0])` (capacity dim 0 = peso).
+     - `completedStops`/`skippedStops` = filtro por status.
+     - Times formateados con `Intl.DateTimeFormat` en TZ del tenant (`America/Mexico_City`).
+
+**Alternativas consideradas:**
+- *Drag & drop con dnd-kit en lugar de ↑↓:* descartado. dnd-kit en cards angostas hace más mal que bien (gestos confusos, scroll choca con drag). Botones explícitos son más usables y consistentes con la driver app que ya usa el patrón.
+- *Fullscreen modal con backdrop:* descartado por complejidad. `position:fixed inset-0` es trivial, no rompe SSR, y el `Esc` keyboard handler basta.
+- *Métricas en un panel lateral aparte:* descartado. Densificar el header del card es lo que el dispatcher ya escanea — agregar un panel suma navegación.
+- *Native Fullscreen API (`element.requestFullscreen()`):* descartado. Browsers requieren user gesture válido + comportamiento distinto en iOS Safari. CSS fixed es suficiente y más predecible.
+
+**Riesgos / Limitaciones:**
+- *Reorder hace 1 round-trip al server por cada swap.* Si el dispatcher hace 5 swaps seguidos = 5 calls. Aceptable para volúmenes esperados (<20 stops/ruta). Si en futuro 50+ stops, agregar debounce con un commit final.
+- *Fullscreen no reposiciona la leyenda en mobile* (lg:grid-cols solo aplica >=1024px). En mobile el mapa ocupa todo y la leyenda se va abajo. Aceptable — el dispatcher usa desktop.
+- *La ETA visible por parada es `planned_arrival_at`, calculada cuando se optimizó.* Si reordenas con ↑↓, el server no recalcula ETAs (solo cambia `sequence`). El dispatcher debe hacer "Re-optimizar" para actualizar ETAs. Issue conocido — el card YA dice "ETA inline" como referencia, no compromiso.
+- *El swap en ↑↓ usa el subset elegible.* En post-publish, una parada pending no puede saltarse a una completed (la completed bloquea posiciones). Si todos los pending están al final (caso normal post-progress), solo se reordena entre ellas. Comportamiento correcto.
+- *Orden visual de stops asume `sequence` consistente.* El server `bulkReorderStops` renumera atómicamente, pero si hay un crash a mitad puede quedar 1..N con un hueco. Defensivo: ordenamos en cliente por `sequence` antes de renderizar.
+
+**Oportunidades de mejora:**
+- Issue #85: cuando hay reorder en post-publish, mostrar warning "Las ETAs ya no son confiables — re-optimiza si quieres recalcularlas" (similar al banner de re-optimizar pre-publish).
+- Issue #86: drag horizontal entre cards (drag stop de Kangoo 1 → Kangoo 2) reemplazaría el dropdown "Mover a →" con UX más fluida. Más trabajo, menor prioridad.
+- Issue #87: indicador visual de la parada que está siendo movida (ej. fade out durante el round-trip).
+- Issue #88: en fullscreen, agregar mini-tabla flotante con métricas globales del tiro arriba a la izquierda (km total, paradas total, kg total).
+- Issue #89: keyboard shortcuts en fullscreen para reorder rápido (J/K para navegar, Shift+↑/↓ para mover).
