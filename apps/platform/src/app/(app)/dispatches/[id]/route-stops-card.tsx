@@ -26,11 +26,11 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Badge, Card, toast } from '@verdfrut/ui';
+import { Badge, Card, Select, toast } from '@verdfrut/ui';
 import { formatDuration } from '@verdfrut/utils';
 import type { Route, RouteStatus, Stop, Store, Vehicle } from '@verdfrut/types';
 import { moveStopToAnotherRouteAction } from '../actions';
-import { reorderStopsAction } from '../../routes/actions';
+import { reorderStopsAction, assignDepotToRouteAction } from '../../routes/actions';
 import { RemoveVehicleButton } from './remove-vehicle-button';
 
 const STATUS: Record<RouteStatus, { text: string; tone: 'neutral' | 'info' | 'success' | 'warning' | 'danger' }> = {
@@ -56,6 +56,12 @@ interface Props {
   capacityCajas: number;
   /** Timezone del tenant para formatear ETAs. */
   timezone?: string;
+  /** ADR-047: depot resuelto que la ruta usa hoy (override o el del vehículo). */
+  effectiveDepot?: { id: string; code: string; name: string } | null;
+  /** Si el effectiveDepot viene del override (true) o del vehículo (false). */
+  isDepotOverride?: boolean;
+  /** Lista de depots activos para el selector inline. */
+  availableDepots?: Array<{ id: string; code: string; name: string }>;
 }
 
 const EDITABLE_STATUSES = new Set<RouteStatus>(['DRAFT', 'OPTIMIZED', 'APPROVED']);
@@ -83,6 +89,9 @@ export function RouteStopsCard({
   siblings,
   capacityCajas,
   timezone = 'America/Mexico_City',
+  effectiveDepot = null,
+  isDepotOverride = false,
+  availableDepots = [],
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -199,6 +208,22 @@ export function RouteStopsCard({
     });
   }
 
+  // ADR-047: cambiar el CEDIS de salida directamente desde la card del tiro.
+  // El select dispara una transition; al guardar el server recalcula km/ETAs
+  // automáticamente y revalida el path para que esta card se refresque.
+  function handleDepotChange(newDepotId: string) {
+    const value = newDepotId === '' ? null : newDepotId;
+    startTransition(async () => {
+      const res = await assignDepotToRouteAction(route.id, value);
+      if (res.ok) {
+        toast.success(value ? 'CEDIS actualizado' : 'CEDIS volvió al del camión');
+        router.refresh();
+      } else {
+        toast.error('Error al cambiar CEDIS', res.error);
+      }
+    });
+  }
+
   // Format helpers
   const fmtTime = (iso: string | null) =>
     iso
@@ -262,6 +287,44 @@ export function RouteStopsCard({
         <p className="mt-2 rounded border border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] px-2 py-1 text-xs text-[var(--color-warning-fg)]">
           ⚠️ La ruta excede la capacidad del vehículo. Re-optimiza o mueve paradas.
         </p>
+      )}
+
+      {/* ADR-047: selector inline de CEDIS de salida. Editable solo en pre-publicación.
+          En post-publish queda como display read-only para que el dispatcher vea de
+          dónde sale la ruta sin tener que entrar al detalle. */}
+      {availableDepots.length > 0 && (
+        <div className="mt-2 flex items-center gap-2 rounded border border-[var(--color-border)] bg-[var(--vf-surface-2)] px-2 py-1.5 text-xs">
+          <span className="shrink-0 text-[var(--color-text-muted)]">CEDIS salida:</span>
+          {EDITABLE_STATUSES.has(route.status) ? (
+            <>
+              <Select
+                value={isDepotOverride ? (effectiveDepot?.id ?? '') : ''}
+                onChange={(e) => handleDepotChange(e.target.value)}
+                disabled={pending}
+                className="flex-1 text-xs"
+              >
+                <option value="">— Usar el del camión{effectiveDepot && !isDepotOverride ? ` (${effectiveDepot.code})` : ''} —</option>
+                {availableDepots.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.code} · {d.name}
+                  </option>
+                ))}
+              </Select>
+              {isDepotOverride && (
+                <span className="shrink-0 rounded bg-[var(--color-info-bg,rgba(59,130,246,0.1))] px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-info-fg,#3b82f6)]">
+                  override
+                </span>
+              )}
+            </>
+          ) : (
+            <span className="font-mono text-[var(--color-text)]">
+              {effectiveDepot?.code ?? '—'}
+              {isDepotOverride && (
+                <span className="ml-1 text-[10px] text-[var(--color-text-muted)]">· override</span>
+              )}
+            </span>
+          )}
+        </div>
       )}
 
       {error && (

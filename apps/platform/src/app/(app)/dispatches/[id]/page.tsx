@@ -13,6 +13,7 @@ import { listVehicles } from '@/lib/queries/vehicles';
 import { listDrivers } from '@/lib/queries/drivers';
 import { listUsers } from '@/lib/queries/users';
 import { listStores } from '@/lib/queries/stores';
+import { listDepots } from '@/lib/queries/depots';
 import { MultiRouteMapServer } from '@/components/map/multi-route-map-server';
 import { AssignRouteForm } from './assign-route-form';
 import { DispatchActions } from './dispatch-actions';
@@ -43,7 +44,7 @@ export default async function DispatchDetailPage({ params }: Props) {
   const dispatch = await getDispatch(id);
   if (!dispatch) notFound();
 
-  const [routes, allRoutesData, zones, vehicles, stores, zoneDrivers, zoneUsers] = await Promise.all([
+  const [routes, allRoutesData, zones, vehicles, stores, zoneDrivers, zoneUsers, allDepots] = await Promise.all([
     listRoutesByDispatch(id),
     listRoutes({ date: dispatch.date, zoneId: dispatch.zoneId, limit: 200 }),
     listZones(),
@@ -51,6 +52,7 @@ export default async function DispatchDetailPage({ params }: Props) {
     listStores({ activeOnly: false }),
     listDrivers({ zoneId: dispatch.zoneId, activeOnly: true }),
     listUsers({ role: 'driver', zoneId: dispatch.zoneId }),
+    listDepots(),
   ]);
   const stopCounts = await countStopsForRoutes(routes.map((r) => r.id));
   // Cargar paradas de cada ruta del tiro (paralelo).
@@ -87,6 +89,13 @@ export default async function DispatchDetailPage({ params }: Props) {
       label: `${v.plate}${v.alias ? ` · ${v.alias}` : ''}`,
       zoneId: v.zoneId,
     }));
+
+  // Lista de depots para los selectores inline en cada card de ruta. ADR-047
+  // permite override cross-zona, así que mostramos todos los depots activos.
+  const depotsById = new Map(allDepots.map((d) => [d.id, d]));
+  const availableDepotOptions = allDepots
+    .filter((d) => d.isActive)
+    .map((d) => ({ id: d.id, code: d.code, name: d.name }));
 
   // Choferes activos en la zona para el selector.
   const profilesByUserId = new Map(zoneUsers.map((p) => [p.id, p]));
@@ -161,6 +170,22 @@ export default async function DispatchDetailPage({ params }: Props) {
               const vehicle = vehicles.find((v) => v.id === r.vehicleId);
               // capacity = [peso, vol, cajas] — el tercer dim es lo que usamos como cap visible.
               const capacityCajas = (vehicle?.capacity?.[2] as number | undefined) ?? 0;
+
+              // Resolver depot effective para esta ruta (ADR-047: override > vehicle).
+              let effectiveDepot: { id: string; code: string; name: string } | null = null;
+              let isDepotOverride = false;
+              if (r.depotOverrideId) {
+                const d = depotsById.get(r.depotOverrideId);
+                if (d) {
+                  effectiveDepot = { id: d.id, code: d.code, name: d.name };
+                  isDepotOverride = true;
+                }
+              }
+              if (!effectiveDepot && vehicle?.depotId) {
+                const d = depotsById.get(vehicle.depotId);
+                if (d) effectiveDepot = { id: d.id, code: d.code, name: d.name };
+              }
+
               return (
                 <li key={r.id}>
                   <RouteStopsCard
@@ -171,6 +196,9 @@ export default async function DispatchDetailPage({ params }: Props) {
                     vehicles={vehicles}
                     siblings={siblings}
                     capacityCajas={capacityCajas}
+                    effectiveDepot={effectiveDepot}
+                    isDepotOverride={isDepotOverride}
+                    availableDepots={availableDepotOptions}
                   />
                 </li>
               );
