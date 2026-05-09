@@ -60,6 +60,8 @@ export interface CreateAndOptimizeResult {
   error?: string;
   routeIds?: string[];
   unassignedStoreIds?: string[];
+  /** ADR-040: dispatch id (existente o auto-creado) — el form redirige a su detalle. */
+  dispatchId?: string;
 }
 
 /**
@@ -242,8 +244,15 @@ export async function createAndOptimizeRoute(
     const unassignedStoreIds = getUnassignedStoreIds(optResponse, stores);
 
     revalidatePath('/routes');
+    revalidatePath('/dispatches');
+    revalidatePath(`/dispatches/${resolvedDispatchId}`);
 
-    return { ok: true, routeIds: createdRouteIds, unassignedStoreIds };
+    return {
+      ok: true,
+      routeIds: createdRouteIds,
+      unassignedStoreIds,
+      dispatchId: resolvedDispatchId,
+    };
   } catch (err) {
     // C3 — rollback manual: cancelar todas las rutas que alcanzamos a crear.
     if (createdRouteIds.length > 0) {

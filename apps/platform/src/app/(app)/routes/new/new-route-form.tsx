@@ -158,10 +158,15 @@ export function NewRouteForm({ zones, stores, vehicles, drivers, dispatch }: Pro
         toast.success('Ruta optimizada', `${created.length} ruta(s) generadas.`);
       }
 
-      // Si vino de un tiro, regresamos al detalle del tiro (allí están listadas las rutas nuevas).
-      if (dispatch) {
-        router.push(`/dispatches/${dispatch.id}`);
+      // ADR-040: redirigir siempre al detalle del tiro (existente o auto-creado).
+      // En `/dispatches/[id]` se ve el mapa unificado con todas las rutas del tiro,
+      // que es lo que el dispatcher quiere después de crear (especialmente cuando
+      // creó N>1 rutas en una corrida — antes el redirect a /routes era confuso).
+      const targetDispatchId = dispatch?.id ?? res.dispatchId;
+      if (targetDispatchId) {
+        router.push(`/dispatches/${targetDispatchId}`);
       } else if (created.length === 1 && created[0]) {
+        // Fallback (no debería pasar tras ADR-040 — toda ruta tiene tiro).
         router.push(`/routes/${created[0]}`);
       } else {
         router.push('/routes');
