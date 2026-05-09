@@ -359,6 +359,21 @@ Formato:
 **Solución propuesta:** botón "Cancelar tiro y sus rutas" en `/dispatches/[id]` que en una transacción: cancela todas las rutas (UPDATE status='CANCELLED') y luego borra el dispatch.
 **Estado:** abierto
 
+### #77 — APK demo abre con barra Chrome si assetlinks.json no está deployado
+**Severidad:** cosmético
+**Sprint:** S19+ (al deployar)
+**Contexto:** ADR-041 — la APK demo está firmada con SHA-256 listado en `apps/driver/public/.well-known/assetlinks.json`. Si ese archivo no responde 200 desde `verdfrut-driver.vercel.app` (porque el deploy aún no incluye el cambio), Android no valida el dominio y muestra la PWA con barra Chrome arriba (modo "Custom Tab").
+**Verificación:** `curl -I https://verdfrut-driver.vercel.app/.well-known/assetlinks.json` debe responder 200, content-type application/json.
+**Fix:** push del repo + esperar redeploy automático Vercel (~1 min).
+**Estado:** abierto hasta deploy
+
+### #78 — Falta Lighthouse PWA audit antes de release Play Store
+**Severidad:** importante (pre-Play-Store)
+**Sprint:** backlog
+**Contexto:** ADR-041 — Play Store requiere PWA con score Lighthouse >= 90 para que TWA cargue full-screen sin reportes. Hoy no hemos auditado.
+**Solución:** correr `lighthouse https://verdfrut-driver.vercel.app --preset=desktop --only-categories=pwa` y arreglar lo que falle (típicamente: meta theme-color, descriptions, etc.).
+**Estado:** abierto
+
 ### #76 — Falta UNIQUE `(date, zone_id, lower(name))` en dispatches
 **Severidad:** cosmético
 **Sprint:** backlog

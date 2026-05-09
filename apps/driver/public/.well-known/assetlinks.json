@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.verdfrut.driver",
+      "sha256_cert_fingerprints": [
+        "0F:FB:14:C4:65:5F:76:0A:BD:89:DB:E3:0E:4D:AA:77:2E:CB:BD:39:18:94:1B:1E:94:F1:A2:CD:F2:F9:FC:78"
+      ]
+    }
+  }
+]

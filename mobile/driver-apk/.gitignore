@@ -1,0 +1,26 @@
+# Secretos: NUNCA commitear el keystore ni sus passwords.
+# Si pierdes el keystore, NO puedes actualizar la APK firmada con él.
+# Guárdalo aparte (1Password, vault, USB encriptado, etc.).
+.keystore/
+*.jks
+*.keystore
+*.password
+*.passwords.txt
+
+# Build artifacts (Bubblewrap genera muchos al build)
+build/
+.gradle/
+local.properties
+
+# Output APK firmada — sí queremos referencia pero no en repo
+*.apk
+*.aab
+app-release-bundle.aab
+app-release-signed.apk
+
+# Bubblewrap creará estos al init
+android.keystore
+*.json.bak
+
+# macOS
+.DS_Store

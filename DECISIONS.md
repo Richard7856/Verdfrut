@@ -1707,3 +1707,53 @@ O al revés: crear tiro vacío → crear ruta apuntando al tiro. Doble paso siem
 - Issue #75: UI "Cancelar tiro completo" que cancele todas las rutas + dispatch en una operación.
 - Issue #76: índice UNIQUE `(date, zone_id, lower(name))` en dispatches para evitar duplicados manuales del mismo nombre el mismo día/zona.
 - Issue #77: backfill futuro si llegan tenants con datos legacy — mismo patrón pero con mejor heurística (agrupación por created_at, vehicle_id, etc.).
+
+## [2026-05-08] ADR-041: APK demo via TWA (Bubblewrap) — sin reescritura del PWA
+
+**Contexto:** El cliente pidió "que sea APK bien la del chofer" para probar en campo cómo se comporta vs PWA en navegador. Sprint 18 ya descartó migrar a Expo (rewrite de 2-3 semanas). Necesitamos una APK que envuelva la PWA actual sin tocar código de driver app.
+
+**Decisión:** Generar APK como **Trusted Web Activity (TWA)** usando `@bubblewrap/core` programáticamente. La APK es un shell Android que carga `https://verdfrut-driver.vercel.app` en pantalla completa (sin barra de Chrome cuando `assetlinks.json` valida el dominio).
+
+**Stack:**
+- Bubblewrap CLI inicialmente — descartado porque init es interactivo y no se puede pipear `yes` (se rompe en prompt de packageId).
+- Bubblewrap Core programmatic — TwaGenerator + TwaManifest leídos desde `twa-manifest.json` pre-generado (sin prompts).
+- JDK 17 (Temurin) descargado en `~/.bubblewrap/jdk/` por Bubblewrap.
+- Android SDK descargado en `~/.bubblewrap/android_sdk/`. Build-tools 35 + platform 36 requirieron `sdkmanager --licenses` con `yes |` para aceptar EULA.
+- Firmado: `apksigner` directo del SDK (no Bubblewrap ApkSigner — su API en CJS no expone constructor en ESM).
+
+**Decisiones del cliente:**
+- Package ID: `com.verdfrut.driver`.
+- Domain: `verdfrut-driver.vercel.app` (sin custom domain por ahora).
+- Distribución: solo sideload (no Play Store) — esta APK es para demo de campo.
+- Cuando llegue producción: regenerar con custom domain (`app.verdfrut.com` o equivalente) + keystore "release" + subir a Play Store.
+
+**Archivos del proyecto** (`mobile/driver-apk/`):
+- `twa-manifest.json` — config TWA (packageId, host, theme colors, signing key path).
+- `scripts/init-twa.mjs` — Node script que invoca `TwaGenerator.createTwaProject()` sin prompts.
+- `scripts/build-apk.mjs` — Node script que compila Gradle + invoca `apksigner` para firmar.
+- `.keystore/verdfrut-driver-demo.jks` — keystore RSA 2048, validez 10000 días, demo (passwords débiles intencionales).
+- `.keystore/PASSWORDS.txt` — credenciales + SHA-256.
+- `apps/driver/public/.well-known/assetlinks.json` — reclama el dominio para la APK firmada con SHA-256 demo.
+- `README.md` — guía de regeneración + sideload + troubleshooting.
+
+**Alternativas consideradas:**
+- *Expo / React Native rewrite:* descartado en S18. Demasiado trabajo para una demo de campo.
+- *Capacitor (Ionic):* viable pero más setup que TWA. TWA es lo más cerca a "PWA pero APK".
+- *PWABuilder.com (online):* genera APK desde URL del PWA. Bueno como alternativa pero menos control sobre el keystore (sin Play Signing requiere upload del jks online).
+- *Bubblewrap CLI interactivo:* falla con `yes |` en prompt de packageId. Pasar por @bubblewrap/core programmatically es más confiable y reproducible.
+
+**Riesgos / Limitaciones:**
+- *Si `assetlinks.json` no responde 200 con el SHA-256 correcto, la APK abre la PWA en "Custom Tab" (con barra de URL Chrome) en vez de modo trusted full-screen.* No es bloqueante operativamente — la app funciona — pero se ve menos nativa. Verificar con `curl -I https://verdfrut-driver.vercel.app/.well-known/assetlinks.json` después de cada deploy.
+- *La APK requiere que el chofer tenga Chrome instalado* (o WebView). Android moderno lo trae por default.
+- *Cambios al PWA NO requieren regenerar APK.* La APK carga el sitio en vivo. Solo se regenera APK si cambia: manifest, dominio, keystore, o se bumpa versión Android.
+- *Keystore demo con passwords débiles* (`VerdFrutDemo2026`). NO commitear (.gitignore lo bloquea), pero hay que rotar antes de prod.
+- *Sin Play Store:* sideload requiere que el chofer active "instalar apps de fuentes desconocidas" en su Android. Algunos dispositivos corporativos lo tienen bloqueado por MDM.
+- *Bubblewrap usa minSdkVersion=21* (Android 5.0 Lollipop) — cubre 99%+ del parque actual. Si un chofer tiene un teléfono <2014, no instalará.
+
+**Oportunidades de mejora:**
+- Ejecutar Lighthouse PWA audit antes de generar APK release (issue #78).
+- Para Play Store: agregar feature graphic 1024x500 + screenshots de la PWA en mobile (Playwright).
+- Alinear el `theme_color` de manifest.json con el primary del sistema de tokens (hoy `#16a34a`, debería derivarse de `--vf-green-700`).
+- Generar splash screen optimizado por tamaños de pantalla (Bubblewrap genera básicos automáticamente).
+- Configurar Play Integrity API (anti-tampering) cuando vayamos a Play Store.
+- Sentry SDK Android para errors crash en la APK (independiente del Sentry web).

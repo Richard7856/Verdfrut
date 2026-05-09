@@ -1,0 +1,14 @@
+{
+  "name": "verdfrut-driver-apk",
+  "version": "0.1.0-demo",
+  "private": true,
+  "type": "module",
+  "description": "TWA wrapper for VerdFrut driver PWA. See README.md.",
+  "scripts": {
+    "init": "node scripts/init-twa.mjs",
+    "build": "node scripts/build-apk.mjs"
+  },
+  "dependencies": {
+    "@bubblewrap/core": "^1.24.1"
+  }
+}
