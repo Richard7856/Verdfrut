@@ -30,7 +30,7 @@ import { Badge, Card, Select, toast } from '@verdfrut/ui';
 import { formatDuration } from '@verdfrut/utils';
 import type { Route, RouteStatus, Stop, Store, Vehicle } from '@verdfrut/types';
 import { moveStopToAnotherRouteAction } from '../actions';
-import { reorderStopsAction, assignDepotToRouteAction } from '../../routes/actions';
+import { reorderStopsAction, assignDepotToRouteAction, deleteStopFromRouteAction } from '../../routes/actions';
 import { AddStopButton } from '../../routes/[id]/add-stop-button';
 import { RemoveVehicleButton } from './remove-vehicle-button';
 
@@ -212,6 +212,21 @@ export function RouteStopsCard({
     });
   }
 
+  // ADR-036: borrar parada pending desde la card del tiro. El action ya re-numera
+  // sequences en server. Solo paradas pending — completed/skipped/arrived no se
+  // borran (son histórico operativo del chofer).
+  function handleDeleteStop(stopId: string) {
+    startTransition(async () => {
+      const res = await deleteStopFromRouteAction(stopId);
+      if (res.ok) {
+        toast.success('Parada eliminada');
+        router.refresh();
+      } else {
+        toast.error('No se pudo eliminar', res.error);
+      }
+    });
+  }
+
   // ADR-047: cambiar el CEDIS de salida directamente desde la card del tiro.
   // El select dispara una transition; al guardar el server recalcula km/ETAs
   // automáticamente y revalida el path para que esta card se refresque.
@@ -361,12 +376,14 @@ export function RouteStopsCard({
                     item={item}
                     draggable={rowDraggable}
                     canMoveBetweenRoutes={canMove && isPending}
+                    canDelete={EDITABLE_STATUSES.has(route.status) && isPending && !pending}
                     isPostPublishDimmed={isPostPublish && !isPending}
                     isMovingBetweenRoutes={isMoving}
                     siblings={editableSiblings}
                     vehicles={vehicles}
                     fmtTime={fmtTime}
                     onMove={(targetId) => handleMove(item.stop.id, targetId)}
+                    onDelete={() => handleDeleteStop(item.stop.id)}
                   />
                 );
               })}
@@ -392,22 +409,26 @@ function SortableStopRow({
   item,
   draggable,
   canMoveBetweenRoutes,
+  canDelete,
   isPostPublishDimmed,
   isMovingBetweenRoutes,
   siblings,
   vehicles,
   fmtTime,
   onMove,
+  onDelete,
 }: {
   item: StopRowData;
   draggable: boolean;
   canMoveBetweenRoutes: boolean;
+  canDelete: boolean;
   isPostPublishDimmed: boolean;
   isMovingBetweenRoutes: boolean;
   siblings: Array<{ id: string; name: string; vehicleId: string }>;
   vehicles: Vehicle[];
   fmtTime: (iso: string | null) => string;
   onMove: (targetRouteId: string) => void;
+  onDelete: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: item.stop.id, disabled: !draggable });
@@ -457,6 +478,22 @@ function SortableStopRow({
             disabled={isMovingBetweenRoutes}
             onMove={onMove}
           />
+        )}
+        {canDelete && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (confirm(`¿Quitar ${item.storeCode} ${item.storeName} de esta ruta?`)) {
+                onDelete();
+              }
+            }}
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-danger-fg,#dc2626)]"
+            title="Quitar parada de esta ruta"
+            aria-label="Quitar parada"
+          >
+            <span className="text-base leading-none">×</span>
+          </button>
         )}
         {item.stop.status !== 'pending' && (
           <span className="text-[10px] uppercase tracking-wide text-[var(--color-text-subtle)]">
