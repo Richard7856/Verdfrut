@@ -1,248 +1,173 @@
-# VerdFrut — Roadmap V2 (post field test)
+# TripDrive — Roadmap (post ADR-049 rebrand)
 
-> Roadmap nuevo armado el 2026-05-07 después del deploy a producción.
-> Prioridad #1: estabilizar sistema de rutas para field test real, NO añadir features nuevas hasta validar lo que tenemos en operación real.
+> Actualizado el 2026-05-09. La plataforma se llama **TripDrive** (dominio `tripdrive.xyz`). El primer cliente productivo es **VerdFrut**, alias operativo de su contrato con NETO Tiendas en CDMX y Toluca.
 
 ---
 
-## Estado actual (cerrado)
+## ✅ Estado cerrado al 2026-05-09
 
 ```
 ✅ Fase 0  — Fundación (monorepo, schema, Docker)
-✅ Fase 1  — Logística mínima + optimizer
+✅ Fase 1  — Logística mínima + optimizer VROOM
 ✅ Fase 2  — Driver PWA + supervisión en vivo
 ✅ Fase 3  — Dashboard cliente con KPIs + drill-downs + export XLSX
-✅ Sprint 17 — Control Plane foundation (apps/control-plane + schema)
-✅ DEPLOY  — Producción en Vercel + Railway
-✅ Field-test prep — Maps/Waze + Reportar problema + bug fixes (6)
+✅ Sprint 17 — Control Plane foundation
+✅ DEPLOY  — Producción Vercel + Railway
+✅ Sprint 18 — Estabilizar post field-test (ADRs 023-032)
+✅ Sprint 18 bonus — ADRs 033-048: reorder, dnd-kit, dispatch_id NOT NULL,
+                     APK TWA, geocoding Places, enlace público, depot override,
+                     agregar/quitar camionetas + dedupe cross-ruta
+✅ Rebrand — VerdFrut (producto) → TripDrive (producto) / VerdFrut (cliente)
 ```
 
-**31 ADRs documentados. 22 migraciones tenant + 1 control plane. 4 servicios live en producción.**
+**49 ADRs documentados. 31 migraciones tenant + 1 control plane. 4 servicios live.**
 
 ---
 
-## Sprint 18 — Estabilizar campo (semana 1 post-field-test)
+## 🚧 Sprint 19 — Pre field-test cliente real *(3-5 días, en curso)*
 
-**Objetivo:** lo que aprendamos del field test del 2026-05-08, atacarlo. No añadir features hasta que el flujo principal sea sólido al 100%.
+> Antes del field test con NETO. Cerrar todo lo bloqueante operacional.
 
-### S18.1 — Bug hunt post-field-test (~2-3 días)
+### S19.1 — Coords ambiguas Toluca *(~30 min)*
+- TOL-1977 Avándaro → pedir URL Maps al cliente
+- TOL-1274 Amanalco → pedir URL Maps al cliente
+- TOL-657 San Juan Huertas → confirmar la coord aplicada
 
-Después del field test, todo lo que el chofer reporte se documenta en `KNOWN_ISSUES.md` con prioridad. Pueden ser:
-- UX confuso ("no encontré el botón de X")
-- Bugs reales (un step que se traba)
-- Problemas operativos (el GPS no llegó en zona Y)
+### S19.2 — Tokens en Vercel *(~10 min)*
+- `MAPBOX_DIRECTIONS_TOKEN` en platform → habilita matrix real (no haversine)
+- `ANTHROPIC_API_KEY` en driver → AI mediator clasifica en prod
 
-Atacar TODO lo crítico antes de Sprint 18.2.
+### S19.3 — APK full TWA *(~30 min)*
+- Deploy de `apps/driver/public/.well-known/assetlinks.json`
+- Regenerar APK con SHA-256 confirmado (issue #77)
 
-### S18.2 — Transfer de paradas a otro chofer (~3 días)
+### S19.4 — Cron schedules en n8n *(~30 min)*
+- `mark-timed-out-chats` (cada 1 min)
+- `reconcile-orphan-users` (1×/día)
+- `archive-breadcrumbs` (1×/semana)
 
-**Caso real reportado:** "las camionetas se quedan paradas (llantas, motor) y el pedido tiene que pasar a otro chofer".
+### S19.5 — Smoke con NETO *(1 día)*
+- Tiro real CDMX 1 camioneta con MAPBOX activado
+- Comparar métricas haversine vs Mapbox
+- Confirmar APK abre sin barra Chrome
+- Validar coords corregidas en mapa real
 
-**Driver side (~1 día):**
-- En el chat realtime, agregar opción "Mi camión NO puede continuar la ruta" con razón (motor / llanta / accidente / otro).
-- Marca la ruta como `INTERRUPTED` (necesita migration de enum).
+---
 
-**Admin side (~2 días):**
-- En `/routes/[id]` con status IN_PROGRESS, botón "Transferir paradas pendientes".
-- Modal: select chofer activo + vehículo disponible + razón.
-- Server action `transferRouteRemainder`:
-  1. Ruta original → `INTERRUPTED` con metadata.notes = razón.
-  2. Crea ruta nueva con stops `pending` re-asignados al new chofer.
-  3. Push notification al new chofer.
-  4. Log en audit_log.
+## 🧪 Sprint 20 — Field test + bug hunt *(variable, depende del campo)*
 
-**Testing:** simular avería en field test artificial.
+- Field test con choferes reales NETO (1-2 días)
+- Cualquier issue reportado → `KNOWN_ISSUES.md` + priorizar
+- UX feedback del dispatcher con tiros productivos
 
-### S18.3 — Chat AI mediator (~3-4 días)
+---
 
-**Caso:** choferes reportan cosas no accionables ("hay tráfico", "manifestación", "ya voy"). Eso quema la atención del zone_manager.
+## 🛠 Sprint 21 — Robustez del split/merge *(3-4 días)*
 
-**Arquitectura:**
+> Issues abiertos por ADR-048 y ADR-047.
+
+- **#108** `restructureDispatchInternal` → RPC Postgres atómica
+- **#109** Surfacing visual de unassigned stops tras redistribuir
+- **#110** Preservar depot override por chofer al redistribuir
+- **#111** Banner comparativo "Antes 105 km · Ahora 95 km" tras redistribuir
+- **#112** Confirm si las rutas tenían reorders manuales recientes
+- **#95** Drag cross-route entre cards del tiro
+
+---
+
+## ⚡ Sprint 22 — Performance + observabilidad *(~1 semana)*
+
+- **S22.1** Lighthouse audit driver PWA (bundle, TTI 3G)
+- **S22.2** N+1 audit (`/routes`, `/dispatches`, `/dashboard`)
+- **S22.3** Sentry / LogTail integración
+- **#67** Paginación de listas
+- **S22.4** Mover `dispatch_share_access_log` y observabilidad de enlaces públicos
+
+---
+
+## ✨ Sprint 23 — Polish + compliance *(~1 semana)*
+
+- Custom domains:
+  - `app.tripdrive.xyz` (platform)
+  - `driver.tripdrive.xyz` (driver)
+  - `admin.tripdrive.xyz` (control-plane)
+  - `verdfrut.tripdrive.xyz` (tenant VerdFrut)
+- **#20** Compresión defensiva iOS Low Power Mode
+- % completitud paradas en `/routes`
+- Backlog cosméticos: atacar 5-6 por sprint
+
+---
+
+## 🔧 Sprint 24 — Rebranding interno fase 2 *(~2 días)*
+
+> ADR-049 fase 2: renombrar packages, cookies y tokens internos. Postergado hasta DESPUÉS del field test para evitar disruptión.
+
+- `@verdfrut/*` → `@tripdrive/*` en `packages/*` y todos los `package.json`
+- Aliasar `--vf-*` CSS vars → `--td-*` (mantener legacy 1 sprint)
+- Cookie `vf-theme` → `td-theme` con fallback de lectura
+- Rename repo GitHub `Verdfrut` → `TripDrive` (validar redirects)
+- Crear org GitHub `@tripdrive` si no existe
+
+---
+
+## 🎯 Condicionales (triggers definidos)
+
+### Sprint 25 — Multi-CEDIS formal *(si NETO abre CEDIS Toluca real)*
+- Tabla pivot `depot_zones (depot_id, zone_id)` (#106)
+- Zona "Toluca" formal en BD con sus stores asignados
+- UI para depots cross-zone en `/settings/depots`
+
+### Sprint 26 — Control Plane KPIs *(si llega 2º cliente)*
+- Endpoint `POST /api/sync/[slug]` que pulla KPIs del tenant
+- Cron diario en n8n
+- Page `/` del CP con agregaciones reales (era Sprint 21 viejo)
+
+### Sprint 27 — Onboarding Wizard *(post 2º cliente)*
+- `provision-tenant.sh` portado a TS llamando Management API
+- Modal "Onboardear cliente" en `/tenants/new`
+- Polling de status `provisioning` → `active`
+- Auto-config de redirect URLs
+
+### Sprint 28 — Migración driver a Expo *(si iOS GPS background bloqueante)*
+- Evaluar 4-8 semanas post field-test
+- Triggers: iOS Safari GPS background, choferes piden "app real", App Store/Play Store presence
+- 3-4 semanas de migración
+
+---
+
+## 📊 Vista temporal
 
 ```
-Chofer escribe mensaje
-  ↓
-classifyDriverMessage(text) — Claude vía @verdfrut/ai
-  ├─ trivial → AI responde + marca message como auto_resolved
-  └─ real_problem → flow normal (push al zone_manager)
-```
+┌──────────────────────────────────────────────────────────────────────┐
+│ MAY 2026                                                             │
+└──────────────────────────────────────────────────────────────────────┘
+   ─ S19 Pre field-test (3-5d) ──┐
+                                  └─ S20 Field test NETO (variable) ──┐
+                                                                       │
+   JUN 2026                                                            │
+   ─ S21 Robustez split/merge (3-4d) ──────────────────────────────────┘
+   ─ S22 Performance + observabilidad (1 sem)
+   ─ S23 Polish + dominios .tripdrive.xyz (1 sem)
 
-**Categorías triviales (auto-respondidas):**
-- Tráfico / manifestación / cierre vial
-- "Voy en camino" / "estoy cerca"
-- Preguntas sobre cómo usar la app
-- "Está difícil llegar"
+   JUL 2026
+   ─ S24 Rebranding interno fase 2 (2d)
+   ─ Backlog continuo + atender condicionales según triggers
 
-**Categorías reales (escalan):**
-- Avería del camión
-- Accidente
-- Robo / asalto
-- Tienda hostil / problema con receptor
-- Mercancía dañada / faltante grave
-- Cualquier cosa que el modelo dude → escala (sesgo a la seguridad)
-
-**Auditoría:** todo mensaje + clasificación + respuesta AI se loguea en una nueva tabla `chat_ai_decisions` para revisar quincenalmente y ajustar el prompt.
-
-**Cost:** ~$0.001 per mensaje con Claude Haiku — irrelevante.
-
-### S18.4 — Quitar `DEMO_MODE_BYPASS_GEO` permanente (~10 min)
-
-Después del field test, quitar el código + commit con mensaje claro. El bypass cumplió su propósito (demo) y ya no debe vivir en código de producción ni siquiera apagado por env.
-
-### S18.5 — `ANTHROPIC_API_KEY` en Vercel driver (~5 min)
-
-Si no se hizo durante prep, hacerlo ahora para que OCR de tickets funcione en field tests subsecuentes.
-
----
-
-## Sprint 19 — Performance + observabilidad (~1 semana)
-
-### S19.1 — Lighthouse audit del driver PWA (~1 día)
-
-Métricas baseline + tunear:
-- Bundle size del driver (probably oversized — revisar tree-shaking de mapbox-gl, exceljs no debería estar ahí)
-- Time-to-interactive en 3G (chofer puede estar en zona con red mala)
-- Service Worker cache strategy (ya tenemos Serwist — confirmar que cachea lo correcto)
-
-### S19.2 — N+1 queries audit (~1 día)
-
-Server Components pueden tener N+1 sin que se note hasta producción. Auditar:
-- `/routes` con N rutas → N queries de stops
-- `/dispatches` con N tiros → N queries de routes
-- `/dashboard/stores/[id]` → query del store + N reports + N drivers
-
-Convertir a JOINs o batched queries donde aplique.
-
-### S19.3 — Sentry / LogTail (~1 día)
-
-Error monitoring real para producción. Sin esto, los errores que el chofer ve en campo se pierden. Vercel runtime logs sirven para debug pero no son persistentes.
-
-### S19.4 — Cron de chat timeout funcionando (~30 min)
-
-`POST /api/cron/mark-timed-out-chats` ya existe pero requiere n8n con `CRON_SECRET`. Configurar en n8n cloud o GitHub Actions con schedule cada 1 min.
-
-### S19.5 — Cron de orphan auth users (~30 min)
-
-`POST /api/cron/reconcile-orphan-users` también existe — config 1×/día en n8n.
-
----
-
-## Sprint 20 — Polish + compliance (~1 semana)
-
-### S20.1 — Custom domains (~1 día)
-
-Cuando tengas dominio real:
-- `platform.verdfrut.com`
-- `driver.verdfrut.com`
-- `cp.verdfrut.com`
-
-Vercel auto-genera certs SSL. Pasar A records de DNS, listo. Suma 30 min por dominio. Después del field test exitoso esto da peso al producto frente al cliente.
-
-### S20.2 — Drag-drop reorder cross-list de paradas (issue #24, ~1 día)
-
-Hoy puedes mover paradas DENTRO de una ruta (drag-drop) y ENTRE rutas (dropdown "Mover a →" en `/dispatches/[id]`). El issue #24 pide drag-drop cross-route directo. Quality of life para dispatcher.
-
-### S20.3 — Compresión defensiva iOS Low Power Mode (issue #20, ~30 min)
-
-Timeout de 5s en `compressImage`, fallback a subir original sin comprimir. iOS LP mode puede tardar mucho.
-
-### S20.4 — % completitud paradas en `/routes` (~30 min)
-
-Agregar columna en la tabla con barra visual de completitud por ruta.
-
-### S20.5 — KNOWN_ISSUES backlog (~variable)
-
-Lista actual: 9 importantes + 13 cosméticos. Atacar 5-6 cosméticos por sprint hasta vaciar.
-
----
-
-## Sprint 21 — Control Plane Sprint 18 original (~1 semana)
-
-Lo que originalmente era Sprint 18 del Control Plane (KPIs cross-tenant + sync diario) — postergado a este punto porque:
-1. Solo tienes 1 tenant hoy. KPIs cross-tenant es overkill.
-2. Cuando llegue el 2º cliente real, retomar.
-
-Cuando se active:
-- Endpoint `POST /api/sync/[slug]` que pulla KPIs del tenant via service role.
-- Cron diario en n8n.
-- Page `/` del CP con agregaciones reales.
-
----
-
-## Sprint 22 — Onboarding Wizard (~1 semana)
-
-Continuación natural del control plane. Postergado por las mismas razones. Cuando se active:
-- Replicate `provision-tenant.sh` en TS llamando Management API.
-- Modal "Onboardear cliente" en `/tenants/new`.
-- Polling de status `provisioning` → `active`.
-- Auto-config de redirect URLs.
-
----
-
-## Fase 7 (futuro, condicional)
-
-### Migración a Expo (React Native)
-
-**Trigger:** después de 4-8 semanas de operación real con la PWA, evaluar:
-- ¿iOS bloqueando GPS background es bloqueante operativamente? (issue #31)
-- ¿Choferes piden "app real instalable"?
-- ¿El cliente exige presencia en App Store / Play Store?
-
-Si los triggers se cumplen → migrar driver app a Expo (NO Android Studio nativo). 3-4 semanas, reusa packages TS existentes.
-
-### Migración Control Plane a proyecto Supabase separado (Escenario 3 de ADR-030)
-
-**Trigger:** llegada del 2º cliente competidor real. Comando:
-
-```bash
-pg_dump --schema=control_plane $CURRENT_DB | psql $NEW_CP_DB
-```
-
-+ rotar service_role keys en el deploy nuevo.
-
----
-
-## Resumen visual de prioridades
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Field test 2026-05-08                    │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-              ┌───────────────┴───────────────┐
-              ▼                               ▼
-    ┌──────────────────────┐       ┌──────────────────────┐
-    │ Sprint 18 — Estabilizar │       │   Sprint 19 — Perf   │
-    │ • Bug hunt        2-3d │       │  • Lighthouse     1d │
-    │ • Route transfer  3d   │       │  • N+1 audit      1d │
-    │ • Chat AI         3-4d │       │  • Sentry         1d │
-    │ • Cleanup demo    10m  │       │  • Crons          1h │
-    └──────────────────────┘       └──────────────────────┘
-              │                               │
-              └───────────────┬───────────────┘
-                              ▼
-                  ┌──────────────────────┐
-                  │ Sprint 20 — Polish    │
-                  │ • Custom domains      │
-                  │ • Cosméticos          │
-                  │ • #24 / #20 / #28     │
-                  └──────────────────────┘
-                              │
-                              ▼
-                ┌──────────────────────────┐
-                │ Triggers de Fase 7       │
-                │ • iOS bloqueando ops?    │
-                │ • 2º cliente competidor? │
-                └──────────────────────────┘
+   ┌──────────────────────────────────────────────────────────────────┐
+   │ Triggers monitoreados continuamente:                              │
+   │ • NETO abre CEDIS Toluca → S25                                    │
+   │ • 2º cliente firmado     → S26, S27                               │
+   │ • iOS GPS bloqueante     → S28                                    │
+   └──────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Lo que NO va en este roadmap (intencional)
+## ❌ Lo que NO va en este roadmap (intencional)
 
 - **Custom features per cliente** (color de marca, logos): cuando aparezcan los pedidos.
 - **Marketplace de choferes / ride-sharing logic**: no es el negocio.
-- **App pública para clientes finales** (consumidores): no es el modelo.
-- **Pagos en línea**: cliente paga a VerdFrut por canales tradicionales.
-- **Multi-idioma**: solo es-MX.
+- **App pública para consumidores finales**: no es el modelo.
+- **Pagos en línea**: el cliente paga a TripDrive por canales tradicionales.
+- **Multi-idioma**: solo es-MX hasta confirmar 2º mercado.
 - **API pública para integraciones de 3ros**: no aplica V1-V2.

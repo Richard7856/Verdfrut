@@ -13,7 +13,7 @@ export default async function LoginPage({ searchParams }: PageProps) {
   return (
     <Card className="border-[var(--color-border)]">
       <div className="mb-6 text-center">
-        <h1 className="text-2xl font-semibold text-[var(--color-text)]">VerdFrut</h1>
+        <h1 className="text-2xl font-semibold text-[var(--color-text)]">TripDrive</h1>
         <p className="mt-1 text-sm text-[var(--color-text-muted)]">App de chofer</p>
       </div>
       <LoginForm next={next} initialError={error} />

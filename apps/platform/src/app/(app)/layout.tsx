@@ -1,4 +1,4 @@
-// Layout principal de la app autenticada — sidebar + topbar siguiendo identidad VerdFrut.
+// Layout principal de la app autenticada — sidebar + topbar siguiendo identidad TripDrive.
 // Incluye el listener de notificaciones para admin/dispatcher (toast + sonido al
 // llegar nuevos reportes) y carga el count inicial de incidencias para el badge
 // realtime del sidebar.

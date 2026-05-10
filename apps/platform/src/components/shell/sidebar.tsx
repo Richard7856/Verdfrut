@@ -1,5 +1,5 @@
-// Sidebar de navegación. Sigue la identidad visual VerdFrut:
-//   - Brand mark verde con leaf + wordmark "verdfrut" + badge env (PROD)
+// Sidebar de navegación. Sigue la identidad visual TripDrive:
+//   - Brand mark verde con leaf + wordmark "tripdrive" + badge env (PROD)
 //   - Items agrupados por sección (GENERAL / OPERACIÓN / CATÁLOGO / SISTEMA)
 //   - Filtra por rol del usuario.
 // El sidebar es SIEMPRE oscuro (no toggle dark) — decisión de marca.
@@ -89,9 +89,9 @@ export function Sidebar({
       >
         <BrandMark />
         <span className="text-[15px] font-semibold tracking-tight">
-          verd
+          trip
           <em className="not-italic font-semibold" style={{ color: 'var(--vf-green-500)' }}>
-            frut
+            drive
           </em>
         </span>
         <EnvBadge label={ENV_LABEL} />

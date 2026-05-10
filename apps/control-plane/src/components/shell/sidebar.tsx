@@ -1,4 +1,4 @@
-// Sidebar del Control Plane. Identidad VerdFrut — siempre oscuro, badge "CTRL"
+// Sidebar del Control Plane. Identidad TripDrive — siempre oscuro, badge "CTRL"
 // para distinguir visualmente del platform / driver.
 
 'use client';
@@ -41,16 +41,16 @@ export function Sidebar() {
         borderRight: '1px solid color-mix(in oklch, var(--vf-bg-side) 70%, white 8%)',
       }}
     >
-      {/* Brand: verdfrut + CTRL badge */}
+      {/* Brand: tripdrive + CTRL badge */}
       <div
         className="flex h-[var(--vf-top-h,56px)] items-center gap-2.5 px-4"
         style={{ borderBottom: '1px solid color-mix(in oklch, var(--vf-bg-side) 70%, white 6%)' }}
       >
         <BrandMark />
         <span className="text-[15px] font-semibold tracking-tight">
-          verd
+          trip
           <em className="not-italic font-semibold" style={{ color: 'var(--vf-green-500)' }}>
-            frut
+            drive
           </em>
         </span>
         <CtrlBadge />

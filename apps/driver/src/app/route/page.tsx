@@ -66,7 +66,7 @@ export default async function RoutePage() {
     <main className="min-h-dvh bg-[var(--vf-bg)] safe-top safe-bottom">
       <header className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
         <div>
-          <h1 className="text-lg font-semibold text-[var(--color-text)]">VerdFrut</h1>
+          <h1 className="text-lg font-semibold text-[var(--color-text)]">TripDrive</h1>
           <p className="text-xs text-[var(--color-text-muted)]">{profile.fullName}</p>
         </div>
         <div className="flex items-center gap-3">

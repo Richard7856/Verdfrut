@@ -18,7 +18,7 @@ interface Props {
 
 const COPY: Record<string, { title: string; subtitle: string; cta: string }> = {
   invite: {
-    title: '¡Bienvenido a VerdFrut!',
+    title: '¡Bienvenido a TripDrive!',
     subtitle: 'Tu cuenta está lista. Toca el botón para activarla y establecer tu contraseña.',
     cta: 'Activar mi cuenta',
   },

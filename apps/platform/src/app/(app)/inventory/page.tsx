@@ -16,7 +16,7 @@ export default async function InventoryPage() {
       />
       <EmptyState
         title="Inventario — fuera de scope V1"
-        description="VerdFrut V1 trabaja con demanda agregada por tienda (kg/m³/cajas). El módulo de inventario por SKU se evalúa para V2 si los clientes lo requieren."
+        description="TripDrive V1 trabaja con demanda agregada por tienda (kg/m³/cajas). El módulo de inventario por SKU se evalúa para V2 si los clientes lo requieren."
       />
     </>
   );

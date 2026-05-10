@@ -1,7 +1,7 @@
 {
-  "name": "VerdFrut Conductor",
-  "short_name": "VerdFrut",
-  "description": "App de chofer y supervisor de zona — VerdFrut",
+  "name": "TripDrive Conductor",
+  "short_name": "TripDrive",
+  "description": "App de chofer y supervisor de zona — TripDrive",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

@@ -1,6 +1,6 @@
 // Token de sesión para el Control Plane — Sprint 17.
 //
-// V1 sin Supabase Auth: el staff de VerdFrut entra con una shared password
+// V1 sin Supabase Auth: el staff de TripDrive entra con una shared password
 // (env CP_SHARED_PASSWORD). Tras validar, emitimos una cookie firmada con HMAC
 // que prueba "este browser conoce la password". No hay revocación granular —
 // rotar `CP_COOKIE_SECRET` invalida todas las sesiones existentes.

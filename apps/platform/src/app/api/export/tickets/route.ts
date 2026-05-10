@@ -74,7 +74,7 @@ export async function GET(req: NextRequest): Promise<Response> {
 
 async function buildWorkbook(reports: ExportReport[]): Promise<ExcelJS.Workbook> {
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'VerdFrut';
+  wb.creator = 'TripDrive';
   wb.created = new Date();
 
   // -- Hoja 1: Tickets (resumen, 1 fila por reporte con ticket) ---------------

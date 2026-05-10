@@ -6,8 +6,9 @@ import { Geist, Geist_Mono } from 'next/font/google';
 import { Toaster } from '@verdfrut/ui';
 import './globals.css';
 
-// Geist es la fuente oficial de la identidad VerdFrut. next/font la auto-hostea
+// Geist es la fuente oficial de la identidad TripDrive. next/font la auto-hostea
 // y la inyecta como CSS variable, que tokens.css ya consume vía --vf-font-sans.
+// (El prefijo --vf-* es legacy del primer nombre, ADR-049 plan de migración.)
 const geistSans = Geist({
   subsets: ['latin'],
   variable: '--font-geist-sans',
@@ -22,10 +23,10 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: 'VerdFrut',
-    template: '%s · VerdFrut',
+    default: 'TripDrive',
+    template: '%s · TripDrive',
   },
-  description: 'Plataforma de optimización y ejecución de rutas de reparto',
+  description: 'TripDrive — plataforma de optimización y ejecución de rutas de reparto',
 };
 
 export const viewport: Viewport = {
@@ -35,6 +36,7 @@ export const viewport: Viewport = {
 };
 
 // Tema leído de cookie `vf-theme` (set por <ThemeToggle/>). Default: light.
+// (Cookie name `vf-*` legacy — se conserva para no invalidar preferencias guardadas.)
 // Renderizar SSR con data-theme correcto evita flash claro→oscuro.
 import { getThemeFromCookies } from '@/lib/theme';
 

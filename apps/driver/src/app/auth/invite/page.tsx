@@ -27,7 +27,7 @@ export default async function InvitePage({ searchParams }: Props) {
     <main className="flex min-h-dvh items-center justify-center bg-[var(--vf-bg)] p-4 safe-top safe-bottom">
       <div className="w-full max-w-sm">
         <div className="mb-6 text-center">
-          <h1 className="text-3xl font-bold text-[var(--vf-green-600,#15803d)]">VerdFrut</h1>
+          <h1 className="text-3xl font-bold text-[var(--vf-green-600,#15803d)]">TripDrive</h1>
         </div>
         <InviteActivateClient tokenHash={tokenHash} type={type as 'invite' | 'recovery' | ''} />
       </div>

@@ -33,7 +33,7 @@ export default async function OverviewPage() {
     <>
       <PageHeader
         title="Overview"
-        description="Estado agregado de todos los tenants gestionados por VerdFrut"
+        description="Estado agregado de todos los tenants gestionados por TripDrive"
       />
 
       <div className="mb-8 grid grid-cols-2 gap-3 lg:grid-cols-4">

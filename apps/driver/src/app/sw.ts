@@ -39,7 +39,7 @@ self.addEventListener('push', (event) => {
   try {
     payload = event.data.json();
   } catch {
-    payload = { title: 'VerdFrut', body: event.data.text() };
+    payload = { title: 'TripDrive', body: event.data.text() };
   }
 
   event.waitUntil(

@@ -70,7 +70,7 @@ const TEMPLATES: Record<string, Template> = {
       ],
     ],
     notes:
-      '# Tiendas — VerdFrut\n# zone_code debe coincidir con un código de zona existente.\n# Coordenadas dentro de México (lat 14.3-32.8, lng -118.7 a -86.5).\n# Ventanas en HH:MM 24h hora local del tenant.\n# service_time_seconds: tiempo estimado por parada.\n# demand_*: demanda multidimensional para el optimizador (peso/volumen/cajas).\n',
+      '# Tiendas — TripDrive\n# zone_code debe coincidir con un código de zona existente.\n# Coordenadas dentro de México (lat 14.3-32.8, lng -118.7 a -86.5).\n# Ventanas en HH:MM 24h hora local del tenant.\n# service_time_seconds: tiempo estimado por parada.\n# demand_*: demanda multidimensional para el optimizador (peso/volumen/cajas).\n',
   },
 
   vehicles: {
@@ -89,7 +89,7 @@ const TEMPLATES: Record<string, Template> = {
       ['DEF-456-B', 'Kangoo 2', 'CDMX', 'VLLJ', '650', '3', '40'],
     ],
     notes:
-      '# Camiones — VerdFrut\n# zone_code y depot_code deben existir previamente.\n# Si depot_code está vacío, el camión sale del default de la zona.\n# Capacidad multidimensional [peso_kg, volumen_m3, cajas].\n',
+      '# Camiones — TripDrive\n# zone_code y depot_code deben existir previamente.\n# Si depot_code está vacío, el camión sale del default de la zona.\n# Capacidad multidimensional [peso_kg, volumen_m3, cajas].\n',
   },
 
   users: {
@@ -130,7 +130,7 @@ const TEMPLATES: Record<string, Template> = {
       ],
     ],
     notes:
-      '# Usuarios — VerdFrut\n# Roles válidos: admin, dispatcher, zone_manager, driver.\n# zone_code obligatorio para zone_manager y driver. Vacío para admin/dispatcher.\n# license_number solo aplica a drivers.\n# Cada usuario recibirá email con link para establecer contraseña.\n',
+      '# Usuarios — TripDrive\n# Roles válidos: admin, dispatcher, zone_manager, driver.\n# zone_code obligatorio para zone_manager y driver. Vacío para admin/dispatcher.\n# license_number solo aplica a drivers.\n# Cada usuario recibirá email con link para establecer contraseña.\n',
   },
 
   depots: {
@@ -160,7 +160,7 @@ const TEMPLATES: Record<string, Template> = {
       ],
     ],
     notes:
-      '# CEDIS — VerdFrut\n# zone_code debe coincidir con un código de zona existente.\n# code es único por zona. Ej: VLLJ, AZCA, ECTA.\n# Coordenadas dentro de México.\n',
+      '# CEDIS — TripDrive\n# zone_code debe coincidir con un código de zona existente.\n# code es único por zona. Ej: VLLJ, AZCA, ECTA.\n# Coordenadas dentro de México.\n',
   },
 };
 

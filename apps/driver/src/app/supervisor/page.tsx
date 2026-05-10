@@ -14,7 +14,7 @@ export default async function SupervisorPage() {
     <main className="min-h-dvh bg-[var(--vf-bg)] safe-top safe-bottom">
       <header className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
         <div>
-          <h1 className="text-lg font-semibold text-[var(--color-text)]">VerdFrut · Supervisión</h1>
+          <h1 className="text-lg font-semibold text-[var(--color-text)]">TripDrive · Supervisión</h1>
           <p className="text-xs text-[var(--color-text-muted)]">{profile.fullName}</p>
         </div>
         <form action={logoutAction}>

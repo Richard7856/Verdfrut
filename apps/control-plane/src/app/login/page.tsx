@@ -3,7 +3,7 @@
 import { Card } from '@verdfrut/ui';
 import { LoginForm } from './login-form';
 
-export const metadata = { title: 'Login · VerdFrut Control Plane' };
+export const metadata = { title: 'Login · TripDrive Control Plane' };
 
 interface SearchParams {
   next?: string;

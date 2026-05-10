@@ -1,11 +1,16 @@
-# VerdFrut
+# TripDrive
 
-SaaS multi-tenant para optimización y ejecución de rutas de reparto.
+**SaaS multi-tenant para optimización y ejecución de rutas de reparto.**
 
-VerdFrut (operador) provee el servicio a empresas distribuidoras (Neto, OXXO, etc.). Cada cliente opera su flota desde el panel logístico, sus choferes ejecutan con la PWA, sus encargados de zona supervisan en vivo, y VerdFrut ve KPIs agregados desde un panel super admin.
+🌐 [tripdrive.xyz](https://tripdrive.xyz) *(pendiente de configurar DNS)*
+
+TripDrive (operador) provee el servicio a empresas distribuidoras. El primer cliente productivo es **VerdFrut** (alias *NETO Tiendas* en CDMX y Toluca). Cada cliente opera su flota desde el panel logístico, sus choferes ejecutan con la PWA, sus encargados de zona supervisan en vivo, y TripDrive ve KPIs agregados desde un panel super admin.
 
 📖 **[PROJECT_BRIEF.md](./PROJECT_BRIEF.md)** — objetivo, decisiones arquitectónicas, convenciones, contratos.
-📖 **[DECISIONS.md](./DECISIONS.md)** — ADRs detallados con alternativas y riesgos.
+📖 **[DECISIONS.md](./DECISIONS.md)** — ADRs detallados con alternativas y riesgos (49 al cierre).
+📖 **[BRAND.md](./BRAND.md)** — guidelines de marca: nombre, dominio, paleta, tono.
+
+> ⚠ **Nota de naming interno:** los packages del monorepo todavía se llaman `@verdfrut/*` (legacy del primer nombre). El rebranding a `@tripdrive/*` está documentado en ADR-049 y se ejecuta en una fase 2 atómica para no romper imports en medio del field test. Public-facing (UI, dominio, marca) ya dice TripDrive.
 
 ---
 
@@ -15,7 +20,7 @@ VerdFrut (operador) provee el servicio a empresas distribuidoras (Neto, OXXO, et
 apps/
 ├── platform/         # Logística + Dashboard cliente (Next.js)
 ├── driver/           # PWA chofer + supervisor de zona (Next.js)
-└── control-plane/    # Super admin VerdFrut (Next.js)
+└── control-plane/    # Super admin TripDrive (Next.js)
 
 packages/
 ├── types/            # Interfaces TS compartidas
@@ -84,49 +89,53 @@ pnpm migrate:all         # aplicar migraciones a todos los tenants
 
 ---
 
-## Roadmap
+## Estado del producto
 
-| Fase | Objetivo | Estado |
-|------|----------|--------|
-| 0 | Fundación: monorepo, schema base, Docker | ✅ Completa |
-| 1 | Logística mínima + optimizer | ✅ Completa |
-| 2 | Driver app con flujos de ejecución | 🔜 Siguiente — ver [FASE_2_KICKOFF.md](./FASE_2_KICKOFF.md) |
-| 3 | Supervisión + GPS realtime | 🔜 |
-| 4 | OCR de tickets | 🔜 |
-| 5 | Dashboard de ventas del cliente | 🔜 |
-| 6 | Control plane VerdFrut | 🔜 |
-| 7 (futura) | Migración a nativa (si hace falta) | — |
-| 8 (futura) | Billing automatizado | — |
+| Sprint | Objetivo | Estado |
+|---|---|---|
+| 0 | Fundación: monorepo, schema base, Docker | ✅ |
+| 1 | Logística mínima + optimizer VROOM | ✅ |
+| 2 | Driver PWA con flujos de ejecución | ✅ |
+| 3 | Supervisión + GPS realtime | ✅ |
+| 4 | OCR de tickets (Claude Vision) | ✅ |
+| 5 | Dashboard cliente con KPIs | ✅ |
+| 6 | Control plane SaaS | ✅ |
+| 17 | Sprint 17 — Foundation Control Plane | ✅ |
+| 18 | Estabilización post field-test | ✅ |
+| **19** | **Pre field-test cliente real (TripDrive×VerdFrut)** | 🚧 actual |
 
-Detalles en [PROJECT_BRIEF.md](./PROJECT_BRIEF.md#roadmap-resumido).
+49 ADRs documentados. 31 migraciones tenant + 1 control plane. 4 servicios live en producción.
+
+Detalles en [ROADMAP.md](./ROADMAP.md).
 
 ## Documentos clave
 
+- [BRAND.md](./BRAND.md) — identidad TripDrive (nombre, dominio, paleta, tono)
 - [PROJECT_BRIEF.md](./PROJECT_BRIEF.md) — objetivo, ADRs resumidos, convenciones, contratos
 - [DECISIONS.md](./DECISIONS.md) — ADRs detallados con alternativas y riesgos
+- [ROADMAP.md](./ROADMAP.md) — sprints actuales y futuros
 - [BOOTSTRAP.md](./BOOTSTRAP.md) — cómo crear el primer admin y datos iniciales
-- [KNOWN_ISSUES.md](./KNOWN_ISSUES.md) — issues abiertos vivo (cierre = eliminación)
-- [FASE_2_KICKOFF.md](./FASE_2_KICKOFF.md) — plan de arranque para Fase 2 (driver app)
+- [KNOWN_ISSUES.md](./KNOWN_ISSUES.md) — issues abiertos vivo
 
 ---
 
 ## Multi-tenant
 
-Cada cliente (Neto, OXXO, etc.) tiene su propio proyecto Supabase. La resolución del tenant ocurre por subdominio:
+Cada cliente tiene su propio proyecto Supabase. La resolución del tenant ocurre por subdominio:
 
-- `neto.verdfrut.com` → proyecto Supabase de Neto
-- `oxxo.verdfrut.com` → proyecto Supabase de OXXO
-- `driver.verdfrut.com` → app de chofer (tenant resuelto en login)
-- `admin.verdfrut.com` → control plane VerdFrut
+- `verdfrut.tripdrive.xyz` → proyecto Supabase de VerdFrut (NETO)
+- `<cliente>.tripdrive.xyz` → proyecto Supabase del cliente
+- `driver.tripdrive.xyz` → app de chofer (tenant resuelto en login)
+- `admin.tripdrive.xyz` → control plane TripDrive
 
-El **registro de tenants** vive en `/etc/verdfrut/tenants.json` en el VPS (NUNCA en el repo). El package `@verdfrut/supabase/tenant-registry` lo lee con cache de 60s.
+El **registro de tenants** vive en `/etc/tripdrive/tenants.json` en el VPS (NUNCA en el repo). El package `@verdfrut/supabase/tenant-registry` lo lee con cache de 60s (renombre del package pendiente, ADR-049 fase 2).
 
 Para provisionar un nuevo tenant:
 
 ```bash
 SUPABASE_MANAGEMENT_API_TOKEN=xxx \
 SUPABASE_ORG_ID=xxx \
-./scripts/provision-tenant.sh neto "Tiendas Neto" America/Mexico_City
+./scripts/provision-tenant.sh <slug> "<Nombre Comercial>" America/Mexico_City
 ```
 
 ---

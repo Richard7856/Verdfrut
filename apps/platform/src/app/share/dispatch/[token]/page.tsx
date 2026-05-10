@@ -32,7 +32,7 @@ interface Props {
 }
 
 export const metadata = {
-  title: 'VerdFrut — Vista del tiro',
+  title: 'TripDrive — Vista del tiro',
   // No quiero que esto aparezca en buscadores. La intención es compartir
   // por WhatsApp, no que Google indexe operación interna del cliente.
   robots: { index: false, follow: false },
@@ -75,7 +75,7 @@ export default async function PublicDispatchViewPage({ params }: Props) {
         <header className="mb-4 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-              VerdFrut · Vista pública
+              TripDrive · Vista pública
             </p>
             <h1 className="text-xl font-semibold">{dispatch.name}</h1>
             <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
@@ -133,7 +133,7 @@ export default async function PublicDispatchViewPage({ params }: Props) {
         </section>
 
         <footer className="mt-8 border-t border-[var(--color-border)] pt-4 text-center text-[11px] text-[var(--color-text-subtle)]">
-          Vista de solo lectura · Generada por VerdFrut · El enlace puede ser revocado por el administrador
+          Vista de solo lectura · Generada por TripDrive · El enlace puede ser revocado por el administrador
         </footer>
       </div>
     </main>

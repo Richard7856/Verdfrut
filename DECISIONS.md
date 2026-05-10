@@ -2028,3 +2028,53 @@ Espejo: en cada `RouteStopsCard` un botón sutil **"Quitar"** (`RemoveVehicleBut
 - Issue #110: preservar `depot_override_id` por chofer/vehicle al redistribuir.
 - Issue #111: comparar métricas pre vs post redistribución (banner "Antes: 105 km · Ahora: 95 km").
 - Issue #112: confirmar antes de `Add Vehicle` si las rutas tenían reorders manuales recientes (para no perder ese trabajo).
+
+## [2026-05-09] ADR-049: Rebranding de la plataforma — VerdFrut → TripDrive
+
+**Contexto:** "VerdFrut" se eligió al arrancar el proyecto cuando se asumía que era una herramienta interna para un solo cliente (el contrato con NETO Tiendas en CDMX/Toluca). Al consolidarse el modelo multi-tenant y aparecer la posibilidad de un 2º cliente, el nombre dejó de funcionar como marca de producto SaaS: (a) refiere a una vertical específica (frutas y verduras) que limita la percepción para otros mercados, (b) tiene connotación coloquial es-MX que no escala a mercados en/LatAm hispano, (c) es el nombre comercial del **cliente** (VerdFrut S.A. de C.V.), lo cual generaría confusión cuando lleguen tenants competidores. La plataforma necesita marca propia separada del cliente.
+
+**Decisión:** El producto se rebrandea a **TripDrive** con dominio `tripdrive.xyz`. La separación queda:
+- **TripDrive** = la plataforma SaaS (lo que se factura, lo que aparece en navegador, lo que tiene dominio).
+- **VerdFrut** = primer tenant productivo. Sigue siendo cliente, sigue operando NETO. En las pantallas internas del tenant aparece la marca TripDrive con eventual cobranding cliente cuando aplique.
+
+La migración se ejecuta en **dos fases** para no romper deploy en medio del field test:
+
+**Fase 1 (commit de hoy):** todo lo público.
+- `README.md`, `BRAND.md`, `ROADMAP.md` reescritos.
+- Strings user-facing en las 3 apps (titles, metadata, h1, manifest PWA, exports, plantillas CSV, comentarios de header).
+- Type-check 10/10 garantizado.
+- Sin cambios en packages internos (`@verdfrut/*`), CSS vars (`--vf-*`), ni cookies (`vf-theme`) — esos son tokens estables que rompen builds o invalidan estado del usuario.
+
+**Fase 2 (Sprint 24, post field-test):**
+- Rename `@verdfrut/*` → `@tripdrive/*` en `packages/*` y todos los imports (operación atómica).
+- Aliasar `--vf-*` → `--td-*` (mantener legacy 1 sprint para no romper componentes externos).
+- Renombrar cookie `vf-theme` → `td-theme` con fallback de lectura.
+- Rename repo GitHub `Verdfrut` → `TripDrive`.
+- Crear org GitHub `@tripdrive` si conviene.
+
+**Alternativas consideradas:**
+- *Antroute (`antroute.xyz`):* primera propuesta, descartada por el user — "se escucha menos comercial". La metáfora de optimización por colonias de hormigas era fuerte pero el nombre sonaba más técnico/abstracto que comercial-B2B.
+- *Trazo, Trayecto, Plexo:* descartadas por sonar "muy español-romántico" para un SaaS B2B internacional.
+- *Routyx, Trakto, Karto, Iter:* descartadas por sonar más a infra/desarrollador que a producto vendible a directores de logística.
+- *Beetrack-style (Trakly, Routekit, Snaproute):* descartadas en favor de TripDrive porque éste explica producto a la primera ("conducir un viaje").
+
+**TripDrive ganó porque:**
+1. Compuesto autoexplicativo: Trip (viaje, tiro) + Drive (conducir, propulsar).
+2. Pronunciable en es y en sin code-switching incómodo.
+3. Aplica a vertical retail (NETO) y se extiende sin esfuerzo a otras verticales (food delivery, B2B distribución, e-commerce 3PL).
+4. Dominio `.xyz` disponible (`.com` por validar, aceptable comprometerse con `.xyz` para SaaS B2B).
+5. Trademark probablemente limpio en MX clase 42 (software) y 39 (transporte) — validar antes de invertir en logos definitivos.
+
+**Riesgos / Limitaciones:**
+- *El package legacy `@verdfrut/*` queda en código hasta Sprint 24.* Cualquier desarrollador nuevo va a preguntar "¿por qué los packages no se llaman como la plataforma?". Mitigación: el README lo aclara, el ADR está vinculado.
+- *Cookies `vf-theme` legacy* — preferencias guardadas siguen funcionando, pero la cookie name "huele" a la marca vieja. Cambio diferido a Sprint 24.
+- *El cliente VerdFrut puede percibir la separación como pérdida de identidad.* Mitigación: se les comunica que TripDrive es **su** plataforma white-label internamente — pueden seguir mostrando su marca cobrandeada cuando corresponda.
+- *`.xyz` tiene menos credibilidad que `.com` para algunas industrias.* Aceptable para B2B SaaS moderno (ej. cosmos.network, brave.com→search.brave.xyz). Si el cliente NETO o futuros piden `.com`, validar y comprar.
+- *El rebranding fase 2 es ~2 días de trabajo de pure rename* — operación que es low-risk pero high-tedious. Mejor hacerlo en momento de calma operativa.
+
+**Oportunidades de mejora:**
+- Issue #113: validar trademark MX (IMPI clase 42 + 39) y US (USPTO) antes del lanzamiento público.
+- Issue #114: comprar `tripdrive.com` si está disponible (alta prioridad si lo está) y redirigir a `.xyz` o viceversa.
+- Issue #115: diseño de logo definitivo (la mascota/símbolo está pendiente — referencia a hormiga de Ant Colony Optimization sobrevive como ilustración secundaria, no como mark principal).
+- Issue #116: setup de email transaccional `hola@tripdrive.xyz`, `soporte@tripdrive.xyz`.
+- Issue #117: registrar handles sociales `@tripdrive` en LinkedIn / X / Instagram antes que squatters.

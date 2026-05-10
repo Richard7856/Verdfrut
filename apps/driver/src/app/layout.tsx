@@ -23,16 +23,16 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: 'VerdFrut Conductor',
-    template: '%s · VerdFrut',
+    default: 'TripDrive Conductor',
+    template: '%s · TripDrive',
   },
-  description: 'App de chofer y supervisor de zona — VerdFrut',
+  description: 'App de chofer y supervisor de zona — TripDrive',
   manifest: '/manifest.json',
   // iOS: meta tags equivalentes para que se comporte como app instalada.
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: 'VerdFrut',
+    title: 'TripDrive',
   },
   formatDetection: {
     telephone: false,

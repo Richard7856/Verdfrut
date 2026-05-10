@@ -92,7 +92,7 @@ export default async function TenantsPage() {
     <>
       <PageHeader
         title="Tenants"
-        description="Clientes (proyectos Supabase) gestionados por VerdFrut"
+        description="Clientes (proyectos Supabase) gestionados por TripDrive"
         action={
           <Link
             href="/tenants/new"

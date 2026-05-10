@@ -13,7 +13,7 @@ export function Topbar() {
     >
       <div className="flex items-center gap-3">
         <span className="text-xs uppercase tracking-[0.08em] text-[var(--color-text-muted)]">
-          Operación VerdFrut
+          Operación TripDrive
         </span>
       </div>
       <div className="flex items-center gap-3">
