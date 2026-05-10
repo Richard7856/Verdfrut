@@ -8,13 +8,15 @@
 //   - notFound() si token inválido o no asociado a un dispatch.
 
 import { notFound } from 'next/navigation';
+import { headers } from 'next/headers';
 import { Badge, Card } from '@verdfrut/ui';
 import { getDispatchByPublicToken, listRoutesByDispatch } from '@/lib/queries/dispatches';
-import { listStopsForRoute } from '@/lib/queries/stops';
+import { listStopsForRoutes } from '@/lib/queries/stops';
 import { listVehicles } from '@/lib/queries/vehicles';
 import { listStores } from '@/lib/queries/stores';
 import { listZones } from '@/lib/queries/zones';
 import { MultiRouteMapServer } from '@/components/map/multi-route-map-server';
+import { consume as rateLimit, LIMITS } from '@/lib/rate-limit';
 import { PublicRouteCard } from './public-route-card';
 import type { DispatchStatus, Store } from '@verdfrut/types';
 
@@ -41,6 +43,22 @@ export const metadata = {
 export default async function PublicDispatchViewPage({ params }: Props) {
   const { token } = await params;
 
+  // P0-4: rate limit por IP. Sin esto un scraper puede pegar al endpoint
+  // sin freno aunque conozca el token. 30 hits/min generoso para refresh
+  // legítimo del equipo cliente, restrictivo contra automatización.
+  // IP viene de x-forwarded-for (Vercel) o x-real-ip; fallback a 'anon' para
+  // que la cota sea global cuando no podemos identificar.
+  const hdrs = await headers();
+  const ip =
+    hdrs.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    hdrs.get('x-real-ip') ||
+    'anon';
+  if (!rateLimit(ip, 'share-dispatch', LIMITS.shareDispatch)) {
+    // 404 en vez de 429 para no filtrar que el token existe. El UX para el
+    // usuario legítimo es: espera 1 min y refresca.
+    notFound();
+  }
+
   // 1. Lookup por token (service_role bypass RLS).
   const dispatch = await getDispatchByPublicToken(token);
   if (!dispatch) notFound();
@@ -54,7 +72,10 @@ export default async function PublicDispatchViewPage({ params }: Props) {
     listStores({ activeOnly: false }),
     listZones(),
   ]);
-  const stopsPerRoute = await Promise.all(routes.map((r) => listStopsForRoute(r.id)));
+  // P1-1: batch en lugar de N+1. Importante en endpoint público: si muchos
+  // usuarios refrescan a la vez, multiplicaba RTT por ruta.
+  const stopsByRouteId = await listStopsForRoutes(routes.map((r) => r.id));
+  const stopsPerRoute = routes.map((r) => stopsByRouteId.get(r.id) ?? []);
   const storesById = new Map<string, Store>(stores.map((s) => [s.id, s]));
 
   const routesWithStops = routes

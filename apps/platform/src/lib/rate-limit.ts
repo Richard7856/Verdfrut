@@ -26,4 +26,9 @@ export function consume(userId: string, key: string, cfg: BucketConfig): boolean
 
 export const LIMITS = {
   chatManagerMessage: { windowMs: 60_000, max: 60 } satisfies BucketConfig,
+  /**
+   * P0-4: vista pública /share/dispatch/[token]. 30 hits/min por IP — generoso
+   * para que el equipo del cliente refresque, restrictivo contra scrapers.
+   */
+  shareDispatch: { windowMs: 60_000, max: 30 } satisfies BucketConfig,
 };

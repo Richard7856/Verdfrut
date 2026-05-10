@@ -56,6 +56,40 @@ export async function listStopsForRoute(routeId: string): Promise<Stop[]> {
   return (data ?? []).map(toStop);
 }
 
+/**
+ * P1-1: batch helper para `/dispatches/[id]` y `/share/dispatch/[token]`.
+ * Antes: `Promise.all(routes.map(r => listStopsForRoute(r.id)))` = N queries.
+ * Ahora: 1 query con `in(route_id, [...])` + group en memoria.
+ * El orden de los stops dentro de cada ruta sigue siendo por sequence.
+ *
+ * Devuelve un Map<routeId, Stop[]> para preservar el agrupamiento por ruta —
+ * los callers iteran `routeIds` y leen `result.get(routeId) ?? []`.
+ */
+export async function listStopsForRoutes(
+  routeIds: string[],
+): Promise<Map<string, Stop[]>> {
+  const result = new Map<string, Stop[]>();
+  if (routeIds.length === 0) return result;
+
+  const supabase = await createServerClient();
+  const { data, error } = await supabase
+    .from('stops')
+    .select(STOP_COLS)
+    .in('route_id', routeIds)
+    .order('route_id')
+    .order('sequence');
+
+  if (error) throw new Error(`[stops.listForRoutes] ${error.message}`);
+
+  // Pre-inicializar el Map para que routes sin stops devuelvan [] (no undefined).
+  for (const id of routeIds) result.set(id, []);
+  for (const row of data ?? []) {
+    const list = result.get(row.route_id as string);
+    if (list) list.push(toStop(row));
+  }
+  return result;
+}
+
 interface CreateStopsInput {
   routeId: string;
   stops: Array<{

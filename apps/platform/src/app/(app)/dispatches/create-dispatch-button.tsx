@@ -6,25 +6,32 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@verdfrut/ui';
+import { todayInZone } from '@verdfrut/utils';
 import type { Zone } from '@verdfrut/types';
 import { createDispatchAction } from './actions';
 
 interface Props {
   zones: Zone[];
+  /**
+   * Fecha "hoy" en la TZ del tenant, calculada en el servidor.
+   * P0-1: el componente client-side antes calculaba la fecha local con math
+   * manual de offset, lo que producía la fecha equivocada cuando el navegador
+   * del dispatcher estaba en otra TZ que el tenant. Ahora viene del server.
+   */
+  defaultDate?: string;
 }
 
-function todayLocalISO(): string {
-  const now = new Date();
-  const tz = now.getTimezoneOffset();
-  return new Date(now.getTime() - tz * 60_000).toISOString().slice(0, 10);
-}
+const TENANT_TZ = process.env.NEXT_PUBLIC_TENANT_TIMEZONE ?? 'America/Mexico_City';
 
-export function CreateDispatchButton({ zones }: Props) {
+export function CreateDispatchButton({ zones, defaultDate }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const [name, setName] = useState('');
-  const [date, setDate] = useState(todayLocalISO());
+  // Fallback al cliente con TZ del tenant si el server no la pasó (no rompe
+  // server components nuevos vs viejos). `todayInZone` SÍ está bien hecha,
+  // a diferencia del cálculo manual previo.
+  const [date, setDate] = useState(defaultDate ?? todayInZone(TENANT_TZ));
   const [zoneId, setZoneId] = useState(zones[0]?.id ?? '');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState<string | null>(null);

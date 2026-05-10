@@ -2078,3 +2078,56 @@ La migración se ejecuta en **dos fases** para no romper deploy en medio del fie
 - Issue #115: diseño de logo definitivo (la mascota/símbolo está pendiente — referencia a hormiga de Ant Colony Optimization sobrevive como ilustración secundaria, no como mark principal).
 - Issue #116: setup de email transaccional `hola@tripdrive.xyz`, `soporte@tripdrive.xyz`.
 - Issue #117: registrar handles sociales `@tripdrive` en LinkedIn / X / Instagram antes que squatters.
+
+## [2026-05-10] ADR-050: Sprint de fortalecimiento — auditoría priorizada y fixes P0/P1
+
+**Contexto:** Antes de seguir con features nuevas (Sprint 19 pre-field-test), se hizo una auditoría sistemática del code base buscando bugs, problemas de performance, agujeros de seguridad y deuda técnica. Resultado: 20 hallazgos accionables (5 P0, 7 P1, 7 P2, 1 ya cubierto). El sprint cierra los 5 P0 y los 2 P1 de mayor impacto que se podían atacar sin migración de infra (Sentry, Postgres rate-limit table quedan para próximo ciclo).
+
+**Decisión:** Aplicar 7 fixes concretos en un solo commit, mantener type-check 10/10, sin cambios funcionales visibles al usuario (solo defensivos y de performance).
+
+### Fixes aplicados
+
+1. **P0-1 · Timezone bug en `CreateDispatchButton`:** el cálculo manual `new Date(now.getTime() - tz * 60_000)` invertía el offset y producía la fecha equivocada cuando el navegador del dispatcher estaba en otra TZ que el tenant. Ahora la fecha "hoy" viene del server vía `todayInZone(TENANT_TZ)` (helper que ya existía en `@verdfrut/utils`). El cliente conserva fallback con el mismo helper si el server no pasa la prop.
+
+2. **P0-2 · Promise chain confusa en outbox handler `send_chat_message`:** el wrap `.then(r => r.ok ? {ok:true} : r)` era redundante (`runAndClassify` solo lee `ok/error`) y oscurecía el tipo. Removido — la llamada ahora es directa.
+
+3. **P0-3 · Validación de UUIDs en `reorderStopsByDriverAction`:** los IDs de stops llegaban del cliente y se metían directo en queries `.eq('id', ...)`. Aunque Supabase escapa params, validar el formato UUID antes de la query es defensa en profundidad. Helper `assertAllUuids` agregado en `apps/driver/src/app/route/actions.ts`.
+
+4. **P0-4 · Rate limit en `/share/dispatch/[token]`:** el endpoint público no tenía freno contra scraping. Ahora aplica `consume(ip, 'share-dispatch', LIMITS.shareDispatch)` con 30 hits/min por IP. Al exceder responde con `notFound()` (no 429) para no filtrar que el token existe.
+
+5. **P1-1 · N+1 stops queries en `/dispatches/[id]` y `/share/dispatch/[token]`:** `Promise.all(routes.map(r => listStopsForRoute(r.id)))` pegaba a la BD N veces por render. Nuevo helper `listStopsForRoutes(routeIds[])` hace una sola query con `in(route_id, [...])` y devuelve `Map<routeId, Stop[]>`. Mejora ~5× en tiros con 5+ rutas, crítico en el endpoint público.
+
+6. **P1-2 · Fire-and-forget en escalación de chat push:** si el push a zone managers fallaba, el error solo iba a `console.error` y el zone manager no se enteraba del chat. Ahora la cadena `mediateChatMessage → sendChatPushToZoneManagers` está envuelta en doble try/catch, y los fallos persisten una fila en `chat_ai_decisions` con `category='unknown'` + prefijo `ESCALATION_PUSH_FAILED:` en `rationale` (para que un cron o pantalla de audit los re-envíe).
+
+7. **Branding follow-through:** durante el rebrand a TripDrive (ADR-049), no se actualizaron tres comentarios menores. Limpiados.
+
+### Hallazgos diferidos (no urgentes)
+
+- **P1 · Rate limiter in-memory** (`apps/driver/src/lib/rate-limit.ts`): aceptado en V1, migración a Postgres `rate_limit_buckets` queda para Sprint 22 (Performance + Observabilidad).
+- **P2 · Logging estructurado:** 50+ `console.log/error` distribuidos. Setup pino + niveles + transporte a Sentry/LogTail va junto con S22.3.
+- **P2 · `<img>` en chat-thread.tsx:** migrar a `<Image>` de Next.js — issue #118.
+- **P2 · `any` casts en server actions:** zod validation gradual — issue #119.
+- **P2 · Duplicación de `new Date().toISOString()`:** crear helper `now()` en `@verdfrut/utils` — issue #120.
+- **P2 · `MX_BBOX` hardcoded:** mover a config del tenant para preparación multi-país — issue #121.
+
+### Alternativas consideradas
+
+- *Rate limiter en Postgres ya:* descartado para no inflar el sprint. El in-memory mitiga 80% del riesgo (scrapers casuales). Atacantes determinados todavía pueden saturar — issue documentado.
+- *Logging estructurado ya:* descartado porque requiere decidir pino vs winston, setup de Sentry, rotar 50+ call sites. Mejor en su sprint dedicado.
+- *Migración a categoría enum nueva (`escalation_push_failed`):* descartado a favor de usar `'unknown' + rationale prefix` — evita migración por un caso edge.
+
+### Riesgos / Limitaciones
+
+- *Rate-limit in-memory* se resetea con cada deploy / restart de instancia Vercel. Un atacante puede esperar 5 min y repetir. Mitigación: monitorear logs de errores 404 anómalos del endpoint `/share/dispatch/*`.
+- *Audit de escalation_push_failed en `chat_ai_decisions`* es un workaround — la pantalla de audit existente no filtra por `category='unknown' AND rationale LIKE 'ESCALATION_PUSH_FAILED%'`. Hasta que se agregue, los fallos solo son visibles vía SQL directo.
+- *El batch `listStopsForRoutes`* no preserva el orden de `routeIds` en el resultado interno, pero el caller siempre re-mappea por id — así que da igual. Documentado en el JSDoc.
+
+### Oportunidades de mejora
+
+- Issue #118: `<img>` → `<Image>` en chat thread (~30 min, P2).
+- Issue #119: zod schemas para server actions (~2 días, P2).
+- Issue #120: helper `now()` en `@verdfrut/utils` (~15 min, P2).
+- Issue #121: `tenant.boundingBox` cargado en context (~1 día, P2).
+- Issue #122: pantalla `/audit/chat-failures` que filtre `rationale LIKE 'ESCALATION_PUSH_FAILED%'`.
+- Issue #123: ampliar enum `chat_ai_decisions.category` con `escalation_push_failed` cuando se justifique.
+- Issue #124: migrar rate-limit in-memory a tabla Postgres con expiry (Sprint 22).

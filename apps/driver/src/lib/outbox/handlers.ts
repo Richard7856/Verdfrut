@@ -144,10 +144,11 @@ export async function processItem(item: OutboxItem): Promise<ProcessResult> {
     }
     case 'send_chat_message': {
       const p = item.payload as SendChatMessagePayload;
+      // P0-2: el wrap previo con `.then(r => r.ok ? {ok:true} : r)` era redundante
+      // (runAndClassify ya lee solo ok/error) y confundía el tipo. Llamamos
+      // directamente — sendDriverMessage devuelve Result que es compatible.
       return runAndClassify(() =>
-        sendDriverMessage(p.reportId, { text: p.text ?? null, imageUrl: p.imageUrl ?? null }).then(
-          (r) => (r.ok ? { ok: true } : r),
-        ),
+        sendDriverMessage(p.reportId, { text: p.text ?? null, imageUrl: p.imageUrl ?? null }),
       );
     }
     case 'resolve_chat_by_driver': {

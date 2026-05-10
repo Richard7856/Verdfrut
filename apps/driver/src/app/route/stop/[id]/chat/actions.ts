@@ -87,28 +87,84 @@ export async function sendDriverMessage(
   // AI mediator (S18.8) — solo aplica cuando hay texto. Si es solo imagen, escalamos siempre.
   // El proceso: clasifica → si trivial inserta auto-reply, si no escala con push.
   // Todo en background — no bloquea la respuesta al chofer.
+  //
+  // P1-2: la cadena de escalado tiene 2 capas de fire-and-forget. Si el push
+  // falla, antes solo se logueaba — el zone_manager NO se enteraba del chat.
+  // Ahora envolvemos la escalada en un await interno con doble try, y si la
+  // entrega falla, persistimos audit en `chat_ai_decisions` para que un cron
+  // o pantalla operativa pueda re-enviar manualmente. Sigue siendo
+  // fire-and-forget al caller (no bloquea la respuesta del chofer).
+  const triggeringMessageId = data.id;
   if (body.text && body.text.trim().length > 0) {
-    void mediateChatMessage({
-      reportId,
-      messageId: data.id,
-      driverText: body.text,
-      isFirstMessage,
-      zoneId,
-    }).catch((err) => {
-      // Falla del mediator → escalar normal por seguridad.
-      console.error('[chat.mediator] falló:', err);
-      if (isFirstMessage && zoneId) {
-        void sendChatPushToZoneManagers({ reportId, zoneId });
+    void (async () => {
+      try {
+        await mediateChatMessage({
+          reportId,
+          messageId: triggeringMessageId,
+          driverText: body.text!,
+          isFirstMessage,
+          zoneId,
+        });
+      } catch (err) {
+        console.error('[chat.mediator] falló — escalando manualmente:', err);
+        if (isFirstMessage && zoneId) {
+          try {
+            await sendChatPushToZoneManagers({ reportId, zoneId });
+          } catch (pushErr) {
+            await persistEscalationFailure(reportId, triggeringMessageId, body.text!, pushErr);
+          }
+        }
       }
-    });
+    })();
   } else if (isFirstMessage && zoneId) {
     // Solo imagen sin texto → escalar siempre.
-    void sendChatPushToZoneManagers({ reportId, zoneId }).catch((e) => {
-      console.error('[chat.push] fanout falló:', e);
-    });
+    void (async () => {
+      try {
+        await sendChatPushToZoneManagers({ reportId, zoneId });
+      } catch (e) {
+        await persistEscalationFailure(reportId, triggeringMessageId, '[imagen]', e);
+      }
+    })();
   }
 
   return { ok: true, data: { id: data.id } };
+}
+
+/**
+ * P1-2: persiste un fallo de escalación de push para que un proceso humano o
+ * un cron pueda re-enviarlo. Hoy se loguea + se inserta una fila en
+ * `chat_ai_decisions` con category='escalation_push_failed' para que aparezca
+ * en cualquier audit dashboard del mediator. Si la inserción también falla,
+ * el último recurso es console.error — pero al menos no perdemos en silencio
+ * en el 99% de los casos.
+ */
+async function persistEscalationFailure(
+  reportId: string,
+  triggeringMessageId: string,
+  driverText: string,
+  err: unknown,
+): Promise<void> {
+  const msg = err instanceof Error ? err.message : String(err);
+  console.error('[chat.escalation] push falló:', { reportId, messageId: triggeringMessageId, msg });
+  try {
+    const { createServiceRoleClient } = await import('@verdfrut/supabase/server');
+    const admin = createServiceRoleClient();
+    // El enum `category` actual es trivial|real_problem|unknown. Marcamos como
+    // unknown con prefix claro en `rationale` para que la pantalla de audit
+    // (futura) pueda filtrar por "ESCALATION_PUSH_FAILED:". Cuando justifique,
+    // ampliar el enum con un valor dedicado (migración + ADR).
+    await admin.from('chat_ai_decisions').insert({
+      report_id: reportId,
+      message_id: triggeringMessageId,
+      category: 'unknown',
+      confidence: null,
+      rationale: `ESCALATION_PUSH_FAILED: ${msg.slice(0, 480)}`,
+      driver_message_text: driverText.slice(0, 500),
+      classified_at: new Date().toISOString(),
+    });
+  } catch (auditErr) {
+    console.error('[chat.escalation] audit insert también falló:', auditErr);
+  }
 }
 
 interface MediateOpts {

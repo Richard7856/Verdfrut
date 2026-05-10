@@ -7,7 +7,7 @@ import { Badge, Card, PageHeader, Button } from '@verdfrut/ui';
 import { requireRole } from '@/lib/auth';
 import { getDispatch, listRoutesByDispatch } from '@/lib/queries/dispatches';
 import { listRoutes, countStopsForRoutes } from '@/lib/queries/routes';
-import { listStopsForRoute } from '@/lib/queries/stops';
+import { listStopsForRoutes } from '@/lib/queries/stops';
 import { listZones } from '@/lib/queries/zones';
 import { listVehicles } from '@/lib/queries/vehicles';
 import { listDrivers } from '@/lib/queries/drivers';
@@ -54,9 +54,12 @@ export default async function DispatchDetailPage({ params }: Props) {
     listUsers({ role: 'driver', zoneId: dispatch.zoneId }),
     listDepots(),
   ]);
-  const stopCounts = await countStopsForRoutes(routes.map((r) => r.id));
-  // Cargar paradas de cada ruta del tiro (paralelo).
-  const stopsPerRoute = await Promise.all(routes.map((r) => listStopsForRoute(r.id)));
+  // P1-1: una sola query batch en lugar de N. Para tiros con 5+ rutas reduce
+  // el tiempo total ~5x (cuello de botella era RTT por ruta, no scan).
+  const routeIds = routes.map((r) => r.id);
+  const stopCounts = await countStopsForRoutes(routeIds);
+  const stopsByRouteId = await listStopsForRoutes(routeIds);
+  const stopsPerRoute = routes.map((r) => stopsByRouteId.get(r.id) ?? []);
   const storesById = new Map<string, Store>(stores.map((s) => [s.id, s]));
   const siblings = routes.map((r) => ({
     id: r.id,

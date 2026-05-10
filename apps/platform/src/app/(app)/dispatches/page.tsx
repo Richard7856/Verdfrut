@@ -4,6 +4,7 @@
 import Link from 'next/link';
 import { Badge, Card, EmptyState, PageHeader, Button } from '@verdfrut/ui';
 import { requireRole } from '@/lib/auth';
+import { todayInZone } from '@verdfrut/utils';
 import { listDispatchSummaries, type DispatchSummary } from '@/lib/queries/dispatches';
 import { listZones } from '@/lib/queries/zones';
 import type { DispatchStatus } from '@verdfrut/types';
@@ -11,6 +12,8 @@ import { CreateDispatchButton } from './create-dispatch-button';
 
 export const metadata = { title: 'Tiros' };
 export const dynamic = 'force-dynamic';
+
+const TENANT_TZ = process.env.NEXT_PUBLIC_TENANT_TIMEZONE ?? 'America/Mexico_City';
 
 const STATUS_LABEL: Record<DispatchStatus, { text: string; tone: 'neutral' | 'info' | 'success' | 'warning' | 'danger' }> = {
   planning: { text: 'Planeación', tone: 'neutral' },
@@ -33,7 +36,7 @@ export default async function DispatchesPage() {
       <PageHeader
         title="Tiros"
         description="Herramienta opcional para AGRUPAR rutas existentes que salen juntas (ej. mismo CEDIS, misma hora). Crea las rutas primero en Rutas; aquí las agrupas para publicarlas en bloque y monitorearlas como una sola operación."
-        action={<CreateDispatchButton zones={zones} />}
+        action={<CreateDispatchButton zones={zones} defaultDate={todayInZone(TENANT_TZ)} />}
       />
 
       {summaries.length === 0 ? (

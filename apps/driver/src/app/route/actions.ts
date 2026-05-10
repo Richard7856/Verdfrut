@@ -22,6 +22,18 @@ interface ActionResult {
 
 const TENANT_TZ = process.env.NEXT_PUBLIC_TENANT_TIMEZONE ?? 'America/Mexico_City';
 
+// P0-3: validación defensiva de UUIDs en arrays que vienen del cliente.
+// Supabase REST escapa parámetros, pero queremos rechazar inputs malformados
+// antes de pegarle a la BD — error temprano + log claro.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function assertAllUuids(ids: string[], label: string): void {
+  for (const id of ids) {
+    if (typeof id !== 'string' || !UUID_RE.test(id)) {
+      throw new Error(`${label} contiene un id inválido: ${String(id).slice(0, 60)}`);
+    }
+  }
+}
+
 /**
  * Reordena las paradas PENDIENTES de la ruta activa del chofer.
  *
@@ -47,6 +59,11 @@ export async function reorderStopsByDriverAction(
 
     if (!Array.isArray(orderedPendingStopIds) || orderedPendingStopIds.length === 0) {
       return { ok: false, error: 'No se recibieron paradas para reordenar.' };
+    }
+    try {
+      assertAllUuids(orderedPendingStopIds, 'orderedPendingStopIds');
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : 'IDs inválidos' };
     }
 
     // 1. driver_id del chofer
