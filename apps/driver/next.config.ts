@@ -1,6 +1,7 @@
 import type { NextConfig } from 'next';
 import path from 'node:path';
 import withSerwistInit from '@serwist/next';
+import { withSentryConfig } from '@sentry/nextjs';
 
 // Serwist envuelve la config de Next y compila nuestro service worker fuente
 // (src/app/sw.ts) a public/sw.js. El SW se registra automáticamente por
@@ -24,6 +25,7 @@ const nextConfig: NextConfig = {
   transpilePackages: [
     '@verdfrut/ai',
     '@verdfrut/maps',
+    '@verdfrut/observability',
     '@verdfrut/supabase',
     '@verdfrut/types',
     '@verdfrut/ui',
@@ -56,4 +58,14 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default withSerwist(nextConfig);
+// Wrappear con Serwist primero (compila el SW) y luego Sentry (source maps).
+// Orden importa: Sentry necesita la config final para inyectar sus webpack
+// loaders.
+export default withSentryConfig(withSerwist(nextConfig), {
+  org: process.env.SENTRY_ORG ?? 'tripdrive',
+  project: process.env.SENTRY_PROJECT ?? 'tripdrive',
+  silent: !process.env.CI,
+  tunnelRoute: '/monitoring',
+  hideSourceMaps: true,
+  disableLogger: true,
+});

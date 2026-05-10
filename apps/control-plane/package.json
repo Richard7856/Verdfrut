@@ -11,6 +11,8 @@
     "clean": "rm -rf .turbo .next *.tsbuildinfo"
   },
   "dependencies": {
+    "@sentry/nextjs": "^8.55.2",
+    "@verdfrut/observability": "workspace:*",
     "@verdfrut/supabase": "workspace:*",
     "@verdfrut/types": "workspace:*",
     "@verdfrut/ui": "workspace:*",

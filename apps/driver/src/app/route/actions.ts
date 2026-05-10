@@ -13,6 +13,7 @@ import 'server-only';
 import { revalidatePath } from 'next/cache';
 import { createServerClient, createServiceRoleClient } from '@verdfrut/supabase/server';
 import { todayInZone } from '@verdfrut/utils';
+import { logger } from '@verdfrut/observability';
 import { requireDriverProfile } from '@/lib/auth';
 
 interface ActionResult {
@@ -169,7 +170,7 @@ export async function reorderStopsByDriverAction(
       });
     } catch (err) {
       // Audit failure NO debe revertir el reorden (las stops ya están en orden nuevo).
-      console.error('[reorderStopsByDriverAction] audit falló (reorden persistió):', err);
+      await logger.warn('reorderStopsByDriver: audit insert falló (reorden persistió igual)', { err });
     }
 
     revalidatePath('/route');

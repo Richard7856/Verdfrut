@@ -1,5 +1,6 @@
 import type { NextConfig } from 'next';
 import path from 'node:path';
+import { withSentryConfig } from '@sentry/nextjs';
 
 const nextConfig: NextConfig = {
   // Indica a Turbopack que el root del workspace está dos niveles arriba.
@@ -7,6 +8,7 @@ const nextConfig: NextConfig = {
     root: path.resolve(process.cwd(), '../..'),
   },
   transpilePackages: [
+    '@verdfrut/observability',
     '@verdfrut/supabase',
     '@verdfrut/types',
     '@verdfrut/ui',
@@ -28,4 +30,11 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withSentryConfig(nextConfig, {
+  org: process.env.SENTRY_ORG ?? 'tripdrive',
+  project: process.env.SENTRY_PROJECT ?? 'tripdrive',
+  silent: !process.env.CI,
+  tunnelRoute: '/monitoring',
+  hideSourceMaps: true,
+  disableLogger: true,
+});

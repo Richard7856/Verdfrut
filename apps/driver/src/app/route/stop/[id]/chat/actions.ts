@@ -16,6 +16,7 @@
 // Cada decisión queda en chat_ai_decisions para auditar y calibrar.
 
 import { createServerClient, createServiceRoleClient } from '@verdfrut/supabase/server';
+import { logger } from '@verdfrut/observability';
 import { sendChatPushToZoneManagers } from '@/lib/push-fanout';
 import { consume, LIMITS } from '@/lib/rate-limit';
 import { classifyDriverMessage } from '@verdfrut/ai';
@@ -106,7 +107,9 @@ export async function sendDriverMessage(
           zoneId,
         });
       } catch (err) {
-        console.error('[chat.mediator] falló — escalando manualmente:', err);
+        await logger.error('chat.mediator falló — escalando manualmente', {
+          reportId, messageId: triggeringMessageId, err,
+        });
         if (isFirstMessage && zoneId) {
           try {
             await sendChatPushToZoneManagers({ reportId, zoneId });
@@ -145,7 +148,9 @@ async function persistEscalationFailure(
   err: unknown,
 ): Promise<void> {
   const msg = err instanceof Error ? err.message : String(err);
-  console.error('[chat.escalation] push falló:', { reportId, messageId: triggeringMessageId, msg });
+  await logger.error('chat.escalation push falló', {
+    reportId, messageId: triggeringMessageId, err,
+  });
   try {
     const { createServiceRoleClient } = await import('@verdfrut/supabase/server');
     const admin = createServiceRoleClient();
@@ -163,7 +168,7 @@ async function persistEscalationFailure(
       classified_at: new Date().toISOString(),
     });
   } catch (auditErr) {
-    console.error('[chat.escalation] audit insert también falló:', auditErr);
+    await logger.error('chat.escalation audit insert también falló', { auditErr });
   }
 }
 
@@ -200,7 +205,9 @@ async function mediateChatMessage(opts: MediateOpts): Promise<void> {
       .select('id')
       .single();
     if (replyErr) {
-      console.error('[chat.mediator.autoReply] insert falló:', replyErr.message);
+      await logger.error('chat.mediator.autoReply insert falló', {
+        reportId, err: replyErr.message,
+      });
     } else {
       autoReplyMessageId = replyRow?.id ?? null;
     }
@@ -218,15 +225,17 @@ async function mediateChatMessage(opts: MediateOpts): Promise<void> {
     auto_reply_message_id: autoReplyMessageId,
   });
   if (auditErr) {
-    console.error('[chat.mediator.audit] insert falló:', auditErr.message);
+    await logger.warn('chat.mediator.audit insert falló', {
+      reportId, err: auditErr.message,
+    });
   }
 
   // Escalar a admin/dispatcher/zone_manager si NO es trivial. Solo en primer mensaje
   // (resto va al chat normal sin push).
   // 'unknown' → escalamos por seguridad.
   if (result.category !== 'trivial' && isFirstMessage && zoneId) {
-    void sendChatPushToZoneManagers({ reportId, zoneId }).catch((e) => {
-      console.error('[chat.push] fanout falló:', e);
+    void sendChatPushToZoneManagers({ reportId, zoneId }).catch(async (e) => {
+      await logger.error('chat.push fanout falló', { reportId, zoneId, err: e });
     });
   }
 }

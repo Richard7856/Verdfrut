@@ -10,6 +10,7 @@
 import 'server-only';
 import webpush from 'web-push';
 import { createServiceRoleClient } from '@verdfrut/supabase/server';
+import { logger } from '@verdfrut/observability';
 
 let vapidConfigured = false;
 function ensureVapidConfigured(): boolean {
@@ -41,7 +42,7 @@ interface ChatPushParams {
  */
 export async function sendChatPushToZoneManagers(params: ChatPushParams): Promise<void> {
   if (!ensureVapidConfigured()) {
-    console.warn('[chat.push] VAPID no configurado — push omitido', params);
+    await logger.warn('chat.push VAPID no configurado — push omitido', { ...params });
     return;
   }
 
@@ -60,11 +61,11 @@ export async function sendChatPushToZoneManagers(params: ChatPushParams): Promis
     );
 
   if (error) {
-    console.error('[chat.push] error leyendo subscriptions:', error);
+    await logger.error('chat.push error leyendo subscriptions', { zoneId: params.zoneId, err: error });
     return;
   }
   if (!subs || subs.length === 0) {
-    console.warn(`[chat.push] sin destinatarios suscritos para zona ${params.zoneId}`);
+    await logger.warn('chat.push sin destinatarios suscritos', { zoneId: params.zoneId });
     return;
   }
 

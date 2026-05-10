@@ -2131,3 +2131,79 @@ La migración se ejecuta en **dos fases** para no romper deploy en medio del fie
 - Issue #122: pantalla `/audit/chat-failures` que filtre `rationale LIKE 'ESCALATION_PUSH_FAILED%'`.
 - Issue #123: ampliar enum `chat_ai_decisions.category` con `escalation_push_failed` cuando se justifique.
 - Issue #124: migrar rate-limit in-memory a tabla Postgres con expiry (Sprint 22).
+
+## [2026-05-10] ADR-051: Observabilidad de errores con Sentry (Free tier, single project)
+
+**Contexto:** Antes de este ADR, los errores en producción solo iban a `console.error` y se perdían en los logs runtime de Vercel (efímeros, sin agrupación ni alertas). El cliente NETO empezó a usar la plataforma real y necesitamos saber cuándo algo se rompe en campo *antes* de que el dispatcher llame. La auditoría de ADR-050 identificó ~50 `console.error` distribuidos como deuda P2. Toca el momento de invertir en observability.
+
+**Decisión:** Adoptar **Sentry** como plataforma de error tracking y performance monitoring, con setup compartido para las 3 apps del monorepo.
+
+### Stack final
+
+1. **Package nuevo `@verdfrut/observability`** que centraliza:
+   - `logger` con métodos `error/warn/info/debug` — API que reemplaza `console.*`.
+   - `initSentry(Sentry, opts)` — factory de configuración con sample rates, ignoreErrors, tags por app.
+   - `configureLogger({ app })` — setea el tag global de cada app.
+
+2. **`@sentry/nextjs` 8.55** en las 3 apps (`apps/platform`, `apps/driver`, `apps/control-plane`).
+
+3. **Por app:** 3 archivos de runtime config (`sentry.client.config.ts`, `sentry.server.config.ts`, `sentry.edge.config.ts`) + `instrumentation.ts` (hook de Next.js 15+) + wrap `next.config.ts` con `withSentryConfig` para *source maps*.
+
+4. **Único proyecto Sentry compartido** (Free tier limita a 1 proyecto / 5k eventos por mes). Los 3 apps mandan al mismo DSN, se distinguen con tag `app: platform | driver | control-plane`. Total cuota: 5k eventos/mes entre las 3.
+
+5. **Migración inicial de 5 `console.error` críticos** a `logger.error`:
+   - `/api/routes/[id]/polyline/route.ts`
+   - `chat/actions.ts` (4 sites: mediator, escalation, autoReply, audit, push fanout)
+   - `route/actions.ts` (audit del reorder)
+   - `push-fanout.ts` (VAPID, subscriptions, sin destinatarios)
+   - Resto (~25 sites) queda como migración gradual por sprint.
+
+### Sample rates iniciales (conservadores por cuota Free)
+
+| Setting | Value | Razón |
+|---|---|---|
+| `tracesSampleRate` | 0.05 en prod, 1.0 en dev | 5% es suficiente para detectar endpoints lentos sin quemar cuota |
+| `replaysSessionSampleRate` | 0 | Session Replay consume mucho; deshabilitado hasta plan pago |
+| `replaysOnErrorSampleRate` | 1.0 en client | Sí grabamos sesiones cuando ocurre un error — bueno para debug, sin costo extra |
+| `enabled` | `env !== 'development'` | No enviamos eventos desde local dev a menos que `SENTRY_FORCE_LOCAL=1` |
+
+### Filtros de ruido (`ignoreErrors`)
+
+Pre-cargados en `sentry-init.ts` para no quemar cuota con errores conocidos no nuestros:
+- `NetworkError`, `Failed to fetch`, `Load failed` — errores de red mobile comunes.
+- `ResizeObserver loop limit exceeded` — falso positivo cross-browser.
+- `chrome-extension://`, `moz-extension://` — extensiones del usuario inyectando errores.
+
+### Source maps
+
+`withSentryConfig` en cada `next.config.ts` activa:
+- Generación de source maps en build.
+- Upload a Sentry vía CLI si `SENTRY_AUTH_TOKEN` está presente (CI/Vercel).
+- `hideSourceMaps: true` — los maps NO quedan accesibles públicamente (solo Sentry los usa).
+- `tunnelRoute: '/monitoring'` — eventos del cliente van por nuestro propio dominio antes de Sentry, evita ad-blockers.
+
+### Alternativas consideradas
+
+- **LogTail / Better Stack:** más barato pero solo logs, sin error tracking + performance + replays. Sentry es la solución completa.
+- **Vercel Runtime Logs nativos:** ya los tenemos, son efímeros (12-24h), sin filtros, sin alertas. No reemplaza Sentry.
+- **3 proyectos Sentry separados (uno por app):** descartado porque Free tier limita a 1 proyecto. Cuando crezca el presupuesto y queme cuota, evaluamos.
+- **Self-hosted Sentry (open-source):** descartado por costo de DevOps. Vale la pena en empresas con muchas apps/devs.
+- **Posthog:** producto excelente pero más amplio (analytics + replays + features flags). Sentry es más enfocado a errores. Eventual: Sentry para errores + Posthog para producto analytics (Sprint H5 cuando aplique).
+
+### Riesgos / Limitaciones
+
+- *Free tier 5k eventos/mes* — si producción crece, se quema rápido. Mitigación: monitorear los primeros 30 días, ajustar `tracesSampleRate` y `ignoreErrors`. Plan B: migrar a Team ($26/mes, 50k eventos).
+- *Sentry SDK 8.55 declara peer next ≤15* pero usamos Next 16. Funciona pero no es oficialmente soportado. Si en futuro hay incompatibilidad, considerar pin a `@sentry/nextjs@^9.x` cuando salga con Next 16 support.
+- *Un proyecto = todos los errores juntos.* Tag `app` es la única separación. Si una app falla en loop, quema la cuota de las otras. Aceptable porque "una app falla en loop" ya es bug crítico que debemos resolver de inmediato.
+- *El `logger.error` es async* porque carga `@sentry/nextjs` con dynamic import. En catch blocks que no eran async esto puede requerir reescribir el contexto. Aceptable trade-off vs forzar dependencia hard del SDK.
+- *Los `console.error` legacy* (~25 sitios) siguen ahí. No se mandan a Sentry hasta migrarlos. Riesgo: bugs reales no llegan al dashboard. Mitigación: cada PR que toca un archivo migra los suyos; meta operativa: 100% migrados en 4 sprints.
+- *Source maps requieren `SENTRY_AUTH_TOKEN`* que es secreto. Si se olvida configurar en Vercel, el build sigue funcionando pero los stack traces en Sentry apuntan al bundle minificado (ilegibles). Documentado en `OBSERVABILITY.md`.
+
+### Oportunidades de mejora
+
+- Issue #125: migración masiva de los 25 `console.error` restantes — gradual, 1 PR por archivo cuando se toque.
+- Issue #126: habilitar Performance tracing en endpoints clave (`/api/routes/*`, `/api/cron/*`) con alertas si P95 > 2s.
+- Issue #127: integración Slack para alertas de error nuevo crítico.
+- Issue #128: pantalla `/audit/sentry-summary` con KPIs propios (errores por app, por release, top issues).
+- Issue #129: cron `/api/cron/*` reportan latencia a Sentry para detectar timeouts.
+- Issue #130: evaluar Posthog para product analytics (eventos de UX) — separado de Sentry.

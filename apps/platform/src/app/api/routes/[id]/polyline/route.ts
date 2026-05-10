@@ -9,6 +9,7 @@
 // 3. Permite refrescar el mapa sin recargar todos los datos de la página.
 
 import 'server-only';
+import { logger } from '@verdfrut/observability';
 import { requireRole } from '@/lib/auth';
 import { getRoute } from '@/lib/queries/routes';
 import { listStopsForRoute } from '@/lib/queries/stops';
@@ -95,7 +96,7 @@ export async function GET(
       },
     });
   } catch (err) {
-    console.error('[polyline] error:', err);
+    await logger.error('polyline endpoint falló', { routeId: id, err });
     return Response.json({ geometry: null });
   }
 }
