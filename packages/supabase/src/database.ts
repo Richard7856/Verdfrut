@@ -861,6 +861,18 @@ export type Database = {
         }
         Returns: string[]
       }
+      tripdrive_rate_limit_check: {
+        Args: {
+          p_bucket_key: string
+          p_window_seconds: number
+          p_max_hits: number
+        }
+        Returns: boolean
+      }
+      tripdrive_rate_limit_cleanup: {
+        Args: Record<string, never>
+        Returns: number
+      }
       archive_old_breadcrumbs: {
         Args: { retention_days?: number }
         Returns: number

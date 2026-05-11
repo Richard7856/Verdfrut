@@ -58,6 +58,26 @@ export async function listUsers(opts?: { role?: UserRole; zoneId?: string }): Pr
   return (data ?? []).map(toProfile);
 }
 
+/**
+ * H4.1 / ADR-054: batch helper para evitar N+1 cuando renderizamos listas
+ * de rutas con sus choferes (live map, reportería). Una sola query con
+ * `.in('id', ids[])` en lugar de N llamadas a getUserProfile.
+ */
+export async function getUserProfilesByIds(
+  ids: string[],
+): Promise<Map<string, UserProfile>> {
+  const result = new Map<string, UserProfile>();
+  if (ids.length === 0) return result;
+  const supabase = await createServerClient();
+  const { data, error } = await supabase
+    .from('user_profiles')
+    .select(PROFILE_COLS)
+    .in('id', ids);
+  if (error) throw new Error(`[users.getByIds] ${error.message}`);
+  for (const row of data ?? []) result.set(row.id as string, toProfile(row));
+  return result;
+}
+
 export async function getUserProfile(id: string): Promise<UserProfile | null> {
   const supabase = await createServerClient();
   const { data, error } = await supabase

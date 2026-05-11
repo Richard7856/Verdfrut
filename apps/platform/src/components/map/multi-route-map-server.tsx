@@ -9,7 +9,7 @@
 
 import 'server-only';
 import type { Route } from '@verdfrut/types';
-import { listStopsForRoute } from '@/lib/queries/stops';
+import { listStopsForRoutes } from '@/lib/queries/stops';
 import { getStoresByIds } from '@/lib/queries/stores';
 import { getVehiclesByIds } from '@/lib/queries/vehicles';
 import { listDepots } from '@/lib/queries/depots';
@@ -23,13 +23,16 @@ interface Props {
 export async function MultiRouteMapServer({ routes, mapboxToken }: Props) {
   if (routes.length === 0) return null;
 
-  // Cargar todo en paralelo. Hacemos N+algunos queries — la versión bulk de
-  // listStops todavía no existe, lo dejamos para una mejora futura si crece.
-  const [vehicleArrays, depotsAll, stopsArrays] = await Promise.all([
+  // H4.1 / ADR-054: una sola query batch para todas las stops vía
+  // `listStopsForRoutes(ids[])` en vez del N+1 anterior `Promise.all(routes.map(listStopsForRoute))`.
+  // Mejora ~5× en tiros con 5+ rutas (cuello era RTT por ruta).
+  const routeIds = routes.map((r) => r.id);
+  const [vehicleArrays, depotsAll, stopsByRouteId] = await Promise.all([
     getVehiclesByIds(routes.map((r) => r.vehicleId)),
     listDepots(), // todos los depots — usualmente <10
-    Promise.all(routes.map((r) => listStopsForRoute(r.id))),
+    listStopsForRoutes(routeIds),
   ]);
+  const stopsArrays = routes.map((r) => stopsByRouteId.get(r.id) ?? []);
   const vehiclesById = new Map(vehicleArrays.map((v) => [v.id, v]));
   const depotsById = new Map(depotsAll.map((d) => [d.id, d]));
 

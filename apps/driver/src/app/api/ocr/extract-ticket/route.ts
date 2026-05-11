@@ -58,7 +58,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   if (!userData?.user) {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
-  if (!consume(userData.user.id, 'ocr', LIMITS.ocr)) {
+  if (!(await consume(userData.user.id, 'ocr', LIMITS.ocr))) {
     return NextResponse.json(
       { ok: false, error: 'Demasiados intentos. Espera un momento e intenta de nuevo.' },
       { status: 429 },

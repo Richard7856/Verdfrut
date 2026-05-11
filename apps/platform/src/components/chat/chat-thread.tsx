@@ -5,6 +5,7 @@
 // a un paquete `@verdfrut/chat-ui`.
 
 import { useEffect, useRef } from 'react';
+import Image from 'next/image';
 import type { ChatMessage } from '@verdfrut/types';
 
 interface Props {
@@ -98,12 +99,19 @@ function Bubble({
         } ${pending ? 'opacity-70' : ''}`}
       >
         {imageUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={imageUrl}
-            alt="Adjunto"
-            className="mb-1 max-h-64 w-full rounded-md object-cover"
-          />
+          // ADR-054 / H4.5 / issue #118: <Image> de Next.js resize automático
+          // + caché CDN + WebP/AVIF. unoptimized=false (default) requiere que
+          // el host esté en next.config.images.remotePatterns — ya configurado
+          // para *.supabase.co.
+          <div className="relative mb-1 h-64 w-full overflow-hidden rounded-md">
+            <Image
+              src={imageUrl}
+              alt="Adjunto"
+              fill
+              sizes="(max-width: 640px) 100vw, 400px"
+              className="object-cover"
+            />
+          </div>
         )}
         {text && <p className="whitespace-pre-wrap break-words">{text}</p>}
         <p className={`mt-1 text-[10px] ${isMine ? 'text-white/70' : 'text-[var(--color-text-muted)]'}`}>

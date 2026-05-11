@@ -33,6 +33,11 @@ Las 3 apps (`tripdrive-platform`, `tripdrive-driver`, `tripdrive-control-plane`)
 | `VAPID_PRIVATE_KEY` | idem | Sí |
 | `VAPID_SUBJECT` | `mailto:soporte@tripdrive.xyz` | Sí |
 | `NEXT_PUBLIC_TENANT_TIMEZONE` | `America/Mexico_City` | Sí (default funciona) |
+| `TENANT_REGION_NAME` | `México` (default) | No — solo si tenant no-MX |
+| `TENANT_BBOX_LAT_MIN` | `14.3` (default) | No — para validación coords no-MX |
+| `TENANT_BBOX_LAT_MAX` | `32.8` (default) | No |
+| `TENANT_BBOX_LNG_MIN` | `-118.7` (default) | No |
+| `TENANT_BBOX_LNG_MAX` | `-86.5` (default) | No |
 
 ### Driver (`tripdrive-driver`)
 
@@ -79,7 +84,15 @@ Los 3 endpoints existen en `apps/platform/src/app/api/cron/*` y requieren `x-cro
 - **Qué hace:** elimina filas en `auth.users` que no tienen `user_profile` (invites canceladas, etc.)
 - **Verificación:** `{ ok: true, deleted: N, orphans: [...] }`. `N=0` día normal.
 
-### 3. Archive Old Breadcrumbs — 1× por mes
+### 3. Rate Limit Buckets Cleanup — 1× por día (ADR-054)
+
+- **Endpoint:** `POST https://verdfrut-platform.vercel.app/api/cron/rate-limit-cleanup` *(endpoint pendiente — issue #142)*
+- **Header:** `x-cron-token: <CRON_SECRET>`
+- **Schedule:** `0 4 * * *` (4 AM)
+- **Qué hace:** RPC `tripdrive_rate_limit_cleanup()` borra rows expirados de `rate_limit_buckets`.
+- **Verificación:** `{ ok: true, deleted: N }`.
+
+### 4. Archive Old Breadcrumbs — 1× por mes
 
 - **Endpoint:** `POST https://verdfrut-platform.vercel.app/api/cron/archive-breadcrumbs?days=90`
 - **Header:** `x-cron-token: <CRON_SECRET>`

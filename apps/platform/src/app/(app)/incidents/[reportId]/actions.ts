@@ -39,7 +39,7 @@ export async function sendManagerMessage(
   const supabase = await createServerClient();
   const { data: userData, error: userErr } = await supabase.auth.getUser();
   if (userErr || !userData.user) return { ok: false, error: 'Sesión inválida' };
-  if (!consume(userData.user.id, 'chat', LIMITS.chatManagerMessage)) {
+  if (!(await consume(userData.user.id, 'chat', LIMITS.chatManagerMessage))) {
     return { ok: false, error: 'Demasiados mensajes seguidos. Espera un momento.' };
   }
 

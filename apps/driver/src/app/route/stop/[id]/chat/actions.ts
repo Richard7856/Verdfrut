@@ -55,7 +55,7 @@ export async function sendDriverMessage(
     return { ok: false, error: 'Sesión inválida' };
   }
   // Rate limit anti-spam (ADR-023 / #41).
-  if (!consume(userData.user.id, 'chat', LIMITS.chatDriverMessage)) {
+  if (!(await consume(userData.user.id, 'chat', LIMITS.chatDriverMessage))) {
     return { ok: false, error: 'Estás enviando mensajes muy rápido. Espera un momento.' };
   }
 

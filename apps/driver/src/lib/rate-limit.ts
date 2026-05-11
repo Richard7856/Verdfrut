@@ -1,41 +1,65 @@
-// Rate limiter en memoria — sliding window simple por usuario.
-// ADR-023 / #41 / #46.
+// Rate limiter (driver) — ADR-054 / H4.2.
 //
-// Aceptable para V1 con un solo proceso por app. En multi-proceso/multi-instance
-// migrar a Redis o tabla `rate_limits` en Postgres.
+// V2 (este archivo): consume vía RPC Postgres `tripdrive_rate_limit_check`.
+// Resuelve el problema multi-instancia (Vercel scaling) y persistencia tras
+// restart. Si la RPC falla (BD down, network error), caemos al bucket
+// in-memory como degradación elegante.
 //
-// Comportamiento: cada llamada apunta `consume(userId, key)`. Si el bucket
-// excede el límite, devuelve `false` — el caller responde 429 al cliente.
+// Espejo del archivo de `apps/platform/src/lib/rate-limit.ts` — packages
+// separados por simplicidad operativa (cada app tiene su deploy).
 
 import 'server-only';
+import { createServiceRoleClient } from '@verdfrut/supabase/server';
+import { logger } from '@verdfrut/observability';
 
 interface BucketConfig {
-  /** Ventana en milisegundos. */
   windowMs: number;
-  /** Máximo de hits por ventana. */
   max: number;
 }
 
-// Map de `${userId}:${key}` → array de timestamps dentro de la ventana.
-const buckets = new Map<string, number[]>();
+const fallbackBuckets = new Map<string, number[]>();
 
-export function consume(userId: string, key: string, cfg: BucketConfig): boolean {
-  const bucketKey = `${userId}:${key}`;
+function fallbackConsume(bucketKey: string, cfg: BucketConfig): boolean {
   const now = Date.now();
   const cutoff = now - cfg.windowMs;
-  const arr = buckets.get(bucketKey) ?? [];
-  // Drop stamps fuera de la ventana.
+  const arr = fallbackBuckets.get(bucketKey) ?? [];
   const recent = arr.filter((t) => t > cutoff);
   if (recent.length >= cfg.max) {
-    buckets.set(bucketKey, recent);
+    fallbackBuckets.set(bucketKey, recent);
     return false;
   }
   recent.push(now);
-  buckets.set(bucketKey, recent);
+  fallbackBuckets.set(bucketKey, recent);
   return true;
 }
 
-/** Configs nombrados para uso uniforme entre routes/actions. */
+/**
+ * Chequea si el bucket puede aceptar otro hit. Devuelve `true` si pasó (y
+ * registra el hit), `false` si excedió la cuota. ADR-054.
+ */
+export async function consume(
+  userId: string,
+  action: string,
+  cfg: BucketConfig,
+): Promise<boolean> {
+  const bucketKey = `${userId}:${action}`;
+  try {
+    const supabase = createServiceRoleClient();
+    const { data, error } = await supabase.rpc('tripdrive_rate_limit_check', {
+      p_bucket_key: bucketKey,
+      p_window_seconds: Math.ceil(cfg.windowMs / 1000),
+      p_max_hits: cfg.max,
+    });
+    if (error) throw error;
+    return data === true;
+  } catch (err) {
+    await logger.warn('rate-limit: RPC falló, usando fallback in-memory', {
+      bucketKey, err,
+    });
+    return fallbackConsume(bucketKey, cfg);
+  }
+}
+
 export const LIMITS = {
   ocr: { windowMs: 60_000, max: 6 } satisfies BucketConfig,
   chatDriverMessage: { windowMs: 60_000, max: 30 } satisfies BucketConfig,

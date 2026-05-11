@@ -74,25 +74,35 @@ export function requireUuid(field: string, value: unknown): string {
 }
 
 /**
- * Bounding box de México (territorio continental + Baja California + frontera sur).
- * Conservador: incluye un poco de margen oceánico para evitar falsos positivos
- * en tiendas costeras (Mazatlán, Cancún, Ensenada).
+ * Bounding box del tenant — ADR-054 / H4.4 / issue #121.
  *
- * Para tenants fuera de México, parametrizar via tenant.bbox en Fase 6.
+ * Antes hardcoded a México. Ahora se lee de env vars del tenant
+ * (`TENANT_BBOX_LAT_MIN`, etc.) con default a México para no romper
+ * tenants existentes. Cuando llegue el primer cliente fuera de México,
+ * el tenant.json va a setear estas vars en el deploy correspondiente.
+ *
+ * El bbox sirve para validar coordenadas al onboardear tiendas (catch
+ * errores típicos: copiar lat/lng invertidos, escribir 99 en vez de -99,
+ * etc.). NO es validación de seguridad — un atacante puede burlar el bbox.
  */
-const MX_BBOX = {
-  latMin: 14.3,
-  latMax: 32.8,
-  lngMin: -118.7,
-  lngMax: -86.5,
-};
+function getTenantBBox() {
+  return {
+    latMin: parseFloat(process.env.TENANT_BBOX_LAT_MIN ?? '14.3'),
+    latMax: parseFloat(process.env.TENANT_BBOX_LAT_MAX ?? '32.8'),
+    lngMin: parseFloat(process.env.TENANT_BBOX_LNG_MIN ?? '-118.7'),
+    lngMax: parseFloat(process.env.TENANT_BBOX_LNG_MAX ?? '-86.5'),
+  };
+}
+
+const TENANT_REGION_NAME = process.env.TENANT_REGION_NAME ?? 'México';
 
 export function requireLat(value: unknown): number {
   const num = requireNumber('latitud', value, { min: -90, max: 90 });
-  if (num < MX_BBOX.latMin || num > MX_BBOX.latMax) {
+  const bbox = getTenantBBox();
+  if (num < bbox.latMin || num > bbox.latMax) {
     throw new ValidationError(
       'latitud',
-      `Latitud ${num.toFixed(4)} está fuera del rango de México (${MX_BBOX.latMin}–${MX_BBOX.latMax}). Verifica las coordenadas.`,
+      `Latitud ${num.toFixed(4)} está fuera del rango de ${TENANT_REGION_NAME} (${bbox.latMin}–${bbox.latMax}). Verifica las coordenadas.`,
     );
   }
   return num;
@@ -100,10 +110,11 @@ export function requireLat(value: unknown): number {
 
 export function requireLng(value: unknown): number {
   const num = requireNumber('longitud', value, { min: -180, max: 180 });
-  if (num < MX_BBOX.lngMin || num > MX_BBOX.lngMax) {
+  const bbox = getTenantBBox();
+  if (num < bbox.lngMin || num > bbox.lngMax) {
     throw new ValidationError(
       'longitud',
-      `Longitud ${num.toFixed(4)} está fuera del rango de México (${MX_BBOX.lngMin}–${MX_BBOX.lngMax}). Verifica las coordenadas.`,
+      `Longitud ${num.toFixed(4)} está fuera del rango de ${TENANT_REGION_NAME} (${bbox.lngMin}–${bbox.lngMax}). Verifica las coordenadas.`,
     );
   }
   return num;

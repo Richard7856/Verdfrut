@@ -53,7 +53,7 @@ export default async function PublicDispatchViewPage({ params }: Props) {
     hdrs.get('x-forwarded-for')?.split(',')[0]?.trim() ||
     hdrs.get('x-real-ip') ||
     'anon';
-  if (!rateLimit(ip, 'share-dispatch', LIMITS.shareDispatch)) {
+  if (!(await rateLimit(ip, 'share-dispatch', LIMITS.shareDispatch))) {
     // 404 en vez de 429 para no filtrar que el token existe. El UX para el
     // usuario legítimo es: espera 1 min y refresca.
     notFound();

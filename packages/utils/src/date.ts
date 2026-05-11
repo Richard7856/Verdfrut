@@ -15,6 +15,18 @@ export function formatTimeInZone(iso: string, timezone: string): string {
 }
 
 /**
+ * ADR-054 / H4.3 / issue #120: helper centralizado para `new Date().toISOString()`.
+ * Antes de este sprint el patrón estaba duplicado en 8+ archivos, lo cual
+ * dificulta:
+ *   - Mockear el tiempo en tests (no podemos stub `new Date()` global).
+ *   - Cambiar el formato si algún día agregamos timezone-aware serialization.
+ * Uso: `update({ updated_at: nowUtcIso() })`.
+ */
+export function nowUtcIso(): string {
+  return new Date().toISOString();
+}
+
+/**
  * Devuelve la fecha YYYY-MM-DD en la zona horaria del tenant.
  * Útil para query "¿qué rutas hay HOY?" sin sufrir DST/timezone bugs.
  */

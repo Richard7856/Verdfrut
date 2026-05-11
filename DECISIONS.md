@@ -2375,3 +2375,92 @@ Adicional: la APK demo está en modo Custom Tab (barra Chrome visible) porque as
 - Issue #139: re-implementar #95 (drag cross-route) con DndContext compartido cuando haya capacidad.
 - Issue #140: banner persistente cross-tab via BroadcastChannel API.
 - Issue #141: auto-aplicar el override de depot si las nuevas camionetas comparten zona con las viejas (heurística "el dispatcher querría preservar este CEDIS por zona, no por vehículo").
+
+## [2026-05-11] ADR-054: Sprint H4 — Performance + escala (N+1 audit, rate limit Postgres, helpers, iOS LP)
+
+**Contexto:** Antes de empezar pruebas reales con cliente (Sprint H5+ de testing), invertir en performance + resiliencia. La auditoría del Sprint H1 (ADR-050) había identificado P1s diferidos: rate-limit in-memory, N+1 queries, MX_BBOX hardcoded, falta de helper `now()`, `<img>` sin optimizar. Sumamos auditoría adicional de N+1 esta sesión que encontró otro hot path en `/map` (live map del supervisor) que multiplica queries por cada ruta IN_PROGRESS.
+
+**Decisión:** Ejecutar las 6 mejoras en un sprint encadenado, con foco en lo que más impacta cuando el cliente carga rutas grandes.
+
+### Cambios
+
+#### H4.1 — Eliminación de N+1 queries
+
+1. **Nuevo helper `getUserProfilesByIds(ids[])`** en `lib/queries/users.ts`. Una sola query `.in('id', [...])` devuelve `Map<userId, UserProfile>`. Reemplaza N llamadas a `getUserProfile`.
+
+2. **Nuevo módulo `lib/queries/breadcrumbs.ts`** con `getLastBreadcrumbsByRouteIds(ids[])`. Una query batch con `.in('route_id', [...])` + filtro de últimos 60 min + agrupado en memoria. Devuelve `Map<routeId, LastBreadcrumb>`.
+
+3. **`/app/(app)/map/page.tsx` refactor.** Antes: 3×N queries (`Promise.all(routes.map(async r => { listStopsForRoute + breadcrumb + profile }))`). Después: 4 queries totales (5 incluyendo carga inicial). Mejora ~10× con 5+ rutas activas.
+
+4. **`components/map/multi-route-map-server.tsx`**: cambiado de `Promise.all(routes.map(listStopsForRoute))` a `listStopsForRoutes(routeIds)`.
+
+#### H4.2 — Rate limit distribuido (issue #124)
+
+1. **Migración 033 `rate_limit_buckets`:** tabla simple `(bucket_key, hit_at, expires_at)` + índice compuesto `(bucket_key, hit_at DESC)`.
+
+2. **RPC `tripdrive_rate_limit_check(p_bucket_key, p_window_seconds, p_max_hits)`:** chequeo atómico. Cuenta hits en ventana, retorna `false` si excede (sin insertar), retorna `true` si pasa (e inserta el hit). Atomicidad por transacción Postgres implícita.
+
+3. **RPC `tripdrive_rate_limit_cleanup()`:** borra rows con `expires_at < now()`. Llamar 1×/día via cron (endpoint TODO).
+
+4. **`apps/platform/src/lib/rate-limit.ts` y `apps/driver/src/lib/rate-limit.ts` reescritos:** `consume()` ahora es async, llama la RPC. Si la RPC falla (BD down, network error), fallback in-memory para no tumbar el endpoint. Loggea `logger.warn` cuando cae al fallback — el operador detecta BD down por la tasa de warnings en Sentry.
+
+5. **Call sites migrados:** 4 endpoints (`/share/dispatch/[token]`, `/incidents/[reportId]/actions`, `/route/stop/[id]/chat/actions`, `/api/ocr/extract-ticket`).
+
+#### H4.3 — Helper `nowUtcIso()` centralizado (issue #120)
+
+- Agregado a `packages/utils/src/date.ts` con doc explicando motivación (testeo + futuro timezone-aware).
+- Call sites legacy de `new Date().toISOString()` quedan para migración gradual (no urgente).
+
+#### H4.4 — Tenant bbox configurable (issue #121)
+
+- `apps/platform/src/lib/validation.ts` ya no hardcoded a México. Lee env vars:
+  - `TENANT_BBOX_LAT_MIN/MAX`, `TENANT_BBOX_LNG_MIN/MAX`
+  - `TENANT_REGION_NAME` (para el mensaje de error)
+- Defaults siguen siendo MX (no rompe deploy actual).
+
+#### H4.5 — `<img>` → `<Image>` en chat thread (issue #118)
+
+- `components/chat/chat-thread.tsx` usa `<Image fill sizes="...">` con wrapper relativo.
+- Lazy loading + WebP/AVIF + CDN automáticos.
+- `*.supabase.co` ya en `next.config.images.remotePatterns`.
+
+#### H4.6 — Compresión iOS Low Power defensiva (issue #20)
+
+- `packages/utils/src/image.ts` `compressImage()` ahora hace `Promise.race(compression, timeout(5s))`.
+- Si vence o lanza error → devuelve el File original. El upload toma más tiempo pero la PWA no se cuelga.
+- Default 5s configurable via `timeoutMs`.
+
+#### H4.7 — Documentación
+
+- **`PERFORMANCE.md` nuevo:** playbook con reglas operativas, helpers batch disponibles, antipatrones, reglas para nuevos endpoints, métricas a vigilar.
+- **`DEPLOY_CHECKLIST.md`** actualizado con cron `rate_limit_cleanup` y nuevas env vars opcionales (TENANT_BBOX_*).
+- **`ROADMAP.md`** actualizado: Sprint H4 completo, H5 (reportería/UX) marcado siguiente.
+
+### Alternativas consideradas
+
+- *Redis para rate limit:* descartado para V1 — agrega infraestructura (Upstash o managed Redis) que no tenemos. Postgres es suficiente con cardinalidad esperada (<10k buckets/min). Si crece, migración no-breaking porque la API `consume()` ya está abstraída.
+- *DISTINCT ON Postgres para `getLastBreadcrumbsByRouteIds`:* descartado — Supabase JS no expone bien `DISTINCT ON`. La estrategia "traer 60min + agrupar en memoria" cabe en <1k filas para 50 rutas activas, es rápida. Migrar a RPC si crece.
+- *Helper sync `consume()` paralelo al async:* mantuvimos `consumeSync()` deprecado para compat con call sites que no podían convertirse a async. En la migración terminamos sin usarlo (todos los call sites ya estaban en functions async), pero queda disponible.
+- *Postgres `pg_cron` para cleanup automático del rate limit:* descartado por consistencia operativa — ya usamos n8n para los otros crons, sumar `pg_cron` mete otra herramienta. Mejor un endpoint HTTP que n8n llama.
+- *Lighthouse audit del driver PWA en este sprint:* diferido — requiere setup del runner + correr en 3G simulado + analizar resultados. Es 2-3h por sí solo, mejor sprint H5 dedicado.
+
+### Riesgos / Limitaciones
+
+- *El rate limit fallback in-memory* sigue siendo per-instancia. Si la BD está caída por horas, multiple instancias Vercel divergen. Aceptable: BD down es ya emergencia.
+- *La RPC `tripdrive_rate_limit_check` hace 2 queries por hit* (COUNT + INSERT). En endpoints high-traffic puede ser bottleneck. Por ahora con tráfico actual está bien; si crece, opciones: (a) bumping a UPSERT con counter; (b) Redis.
+- *La tabla `rate_limit_buckets` crece sin tope hasta que corre el cron de cleanup.* Si el cron falla un día, el INSERT sigue. Mitigación: el índice cubre el lookup eficiente aunque haya millones de rows expirados.
+- *El partial index con `WHERE expires_at < now()` falló* porque Postgres exige IMMUTABLE en predicates. Solución: índice plano sobre `expires_at`. El cleanup hace seq scan ordenado — aceptable para low cardinality.
+- *`getLastBreadcrumbsByRouteIds` con lookback 60 min* puede perder breadcrumbs viejos si el chofer dejó de mandar GPS hace más. Hoy aceptable porque el live map solo importa rutas activas hoy. Si necesitamos "última posición conocida" para rutas paused, ampliar lookback.
+- *`<Image>` requiere `width/height` o `fill`.* En chat-thread usamos `fill` con altura fija 64. Para imágenes muy verticales (recibos en portrait) puede recortar. Aceptable porque el chofer puede expandir con click (no implementado, issue #143).
+- *El timeout de `compressImage` puede dispararse en redes lentas (no en iOS LP)* si `loadImage` del File tarda. En esos casos el fallback al original es correcto pero el log puede ser ruidoso. Issue #144 abierto para diferenciar.
+- *`TENANT_REGION_NAME` y `TENANT_BBOX_*` no están seteados todavía* en Vercel — defaults a México. Cuando llegue cliente fuera de México, hay que setearlos.
+
+### Oportunidades de mejora
+
+- Issue #142: endpoint cron `POST /api/cron/rate-limit-cleanup` + schedule n8n.
+- Issue #143: click en imagen de chat-thread para expandir a lightbox.
+- Issue #144: separar "timeout iOS LP" vs "timeout red lenta" en el log de compressImage.
+- Issue #145: Lighthouse audit del driver PWA (Sprint H5).
+- Issue #146: migrar los call sites legacy de `new Date().toISOString()` a `nowUtcIso()` — incremental.
+- Issue #147: profilling de Server Components con Sentry Performance + identificar P95 > 1s.
+- Issue #148: Tabla pivot `tenant_config` en BD en vez de env vars para bbox/region (más flexible que ENV).
