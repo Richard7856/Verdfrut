@@ -40,43 +40,52 @@
 
 ### 1. Comprar dominio (5 min)
 
-Recomendado: **Cloudflare Registrar** (`https://dash.cloudflare.com/?to=/:account/registrar`). $9/año `.xyz`, sin markup, transferible. Otra opción Porkbun ($7-10).
+**Usa el registrar que ya gestionas.** Cualquier registrar moderno sirve igual técnicamente. Comparativa de precios `.xyz`:
 
-**No es necesario activar Cloudflare como proxy hoy.** Solo usamos Cloudflare como registrar; los DNS pueden apuntar directamente a Vercel.
+| Registrar | Precio aprox 1er año | Renovación | Notas |
+|---|---|---|---|
+| **Hostinger** ⭐ (recomendado si ya lo usas) | ~$2 promo | ~$15/año | Un solo proveedor para todo |
+| Cloudflare Registrar | $9/año | $9/año (at-cost) | El más barato, requiere cuenta separada |
+| Porkbun | $7-10/año | $7-10/año | Buena UI, requiere cuenta separada |
+| Namecheap | ~$10/año | ~$15/año | Conocido, requiere cuenta separada |
 
-### 2. Cambiar nameservers a Vercel (opcional — recomendado)
+**Conclusión:** si ya tienes Hostinger, cómpralo ahí. La diferencia de $5-6 al año no justifica fragmentar la administración.
 
-Si compraste en Cloudflare, en el panel del dominio → **DNS** → cambiar nameservers a los de Vercel:
+### 2. Configurar DNS (15 min) — elige UNA de las 2 rutas
+
+#### Ruta A — Hostinger registrar + Vercel DNS ⭐ (más simple)
+
+En Hostinger → **Domains → tripdrive.xyz → DNS / Nameservers** → cambia a:
 
 ```
 ns1.vercel-dns.com
 ns2.vercel-dns.com
 ```
 
-Esto delega el DNS completo a Vercel — más simple. Si prefieres mantener Cloudflare como DNS, salta al paso 3 y usa registros tradicionales.
+A partir de ahí Vercel maneja todo el DNS. Cada `Add Domain` en Vercel crea sus propios records automáticamente. Saltas al paso 4.
 
-### 3. DNS records (15 min)
+Propagación: 10-30 min después de cambiar nameservers.
 
-Si Vercel maneja DNS (paso 2 hecho), los records se crean automáticamente al "Add domain" en cada proyecto.
+#### Ruta B — Hostinger registrar + Hostinger DNS + records manuales
 
-Si Cloudflare maneja DNS, agregar manualmente en el panel CF:
+Dejas los nameservers de Hostinger. En **Hostinger → Domains → tripdrive.xyz → DNS Zone Editor** agregas:
 
-```
-# Apex (tripdrive.xyz)
-Type: A          Name: @         Value: 76.76.21.21       Proxy: ❌ DNS only
+| Tipo | Nombre | Valor | TTL |
+|---|---|---|---|
+| A | @ | 76.76.21.21 | 14400 |
+| CNAME | www | cname.vercel-dns.com. | 14400 |
+| CNAME | app | cname.vercel-dns.com. | 14400 |
+| CNAME | driver | cname.vercel-dns.com. | 14400 |
+| CNAME | admin | cname.vercel-dns.com. | 14400 |
+| CNAME | verdfrut | cname.vercel-dns.com. | 14400 |
 
-# Subdominios
-Type: CNAME      Name: app       Value: cname.vercel-dns.com.    Proxy: ❌
-Type: CNAME      Name: driver    Value: cname.vercel-dns.com.    Proxy: ❌
-Type: CNAME      Name: admin     Value: cname.vercel-dns.com.    Proxy: ❌
-Type: CNAME      Name: verdfrut  Value: cname.vercel-dns.com.    Proxy: ❌
-Type: CNAME      Name: www       Value: cname.vercel-dns.com.    Proxy: ❌
-```
+Esta ruta es válida pero más manual: cada subdominio nuevo (cliente futuro) requiere agregar el CNAME a mano. Con Ruta A, Vercel se encarga.
 
-**Importante:** `Proxy: ❌ DNS only` para que Cloudflare NO se ponga al medio (orange cloud). Si activas el proxy:
-- Vercel no puede emitir cert TLS automático (challenge HTTP-01 falla).
-- Pierdes algunas features de Vercel (Edge Functions, Analytics).
-- Si en futuro quieres Cloudflare como WAF, activas el proxy DESPUÉS de que Vercel emita el cert; Vercel y CF coexisten con el handshake doble.
+**Importante (ambas rutas):** NO actives ningún proxy/CDN de Hostinger sobre estos records. Vercel ya da CDN edge global; doble CDN = caché imposible de invalidar.
+
+### 3. (Solo Ruta A) Vercel registra los DNS automáticamente
+
+Cuando "Add Domain" en cada proyecto Vercel, los CNAMEs se crean en la zona DNS que Vercel maneja por ti. No tocas Hostinger después del paso 2.
 
 ### 4. Agregar dominios en Vercel (15 min)
 
