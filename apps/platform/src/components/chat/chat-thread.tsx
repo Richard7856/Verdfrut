@@ -4,7 +4,7 @@
 // Mantener paridad manual hasta que un tercer consumidor justifique extraer
 // a un paquete `@verdfrut/chat-ui`.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import type { ChatMessage } from '@verdfrut/types';
 
@@ -23,10 +23,24 @@ export interface OptimisticMessage {
 
 export function ChatThread({ messages, viewerRole, optimisticMessages = [] }: Props) {
   const endRef = useRef<HTMLDivElement>(null);
+  // H5 / issue #143: lightbox global cuando se hace click en cualquier imagen
+  // del thread. Un solo state al top-level del componente — más simple que un
+  // portal y cierre limpio con ESC + click fuera.
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [messages.length, optimisticMessages.length]);
+
+  // ESC para cerrar lightbox.
+  useEffect(() => {
+    if (!lightboxUrl) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLightboxUrl(null);
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [lightboxUrl]);
 
   return (
     <div className="flex flex-1 flex-col gap-2 overflow-y-auto px-4 py-3">
@@ -43,6 +57,7 @@ export function ChatThread({ messages, viewerRole, optimisticMessages = [] }: Pr
           text={m.text}
           imageUrl={m.imageUrl}
           createdAt={m.createdAt}
+          onImageClick={setLightboxUrl}
         />
       ))}
       {optimisticMessages.map((m) => (
@@ -54,9 +69,42 @@ export function ChatThread({ messages, viewerRole, optimisticMessages = [] }: Pr
           imageUrl={m.imageUrl}
           createdAt={m.createdAt}
           pending
+          onImageClick={setLightboxUrl}
         />
       ))}
       <div ref={endRef} />
+      {lightboxUrl && (
+        <Lightbox url={lightboxUrl} onClose={() => setLightboxUrl(null)} />
+      )}
+    </div>
+  );
+}
+
+function Lightbox({ url, onClose }: { url: string; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+    >
+      <button
+        type="button"
+        onClick={onClose}
+        className="absolute top-4 right-4 rounded-full bg-white/10 px-3 py-1 text-sm text-white hover:bg-white/20"
+        aria-label="Cerrar"
+      >
+        Cerrar ✕
+      </button>
+      {/* Usamos <img> aquí porque queremos object-contain a tamaño full y
+          <Image fill> en un contenedor flex sin tamaño definido se rompe. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={url}
+        alt="Adjunto ampliado"
+        className="max-h-[90vh] max-w-[90vw] object-contain"
+        onClick={(e) => e.stopPropagation()}
+      />
     </div>
   );
 }
@@ -68,6 +116,7 @@ function Bubble({
   imageUrl,
   createdAt,
   pending = false,
+  onImageClick,
 }: {
   viewerRole: 'driver' | 'zone_manager';
   sender: ChatMessage['sender'];
@@ -75,6 +124,7 @@ function Bubble({
   imageUrl: string | null | undefined;
   createdAt: string;
   pending?: boolean;
+  onImageClick?: (url: string) => void;
 }) {
   const isMine = sender === viewerRole;
   const isSystem = sender === 'system';
@@ -99,11 +149,14 @@ function Bubble({
         } ${pending ? 'opacity-70' : ''}`}
       >
         {imageUrl && (
-          // ADR-054 / H4.5 / issue #118: <Image> de Next.js resize automático
-          // + caché CDN + WebP/AVIF. unoptimized=false (default) requiere que
-          // el host esté en next.config.images.remotePatterns — ya configurado
-          // para *.supabase.co.
-          <div className="relative mb-1 h-64 w-full overflow-hidden rounded-md">
+          // H4.5/H5 (#118, #143): <Image> de Next.js para CDN+WebP. Click
+          // expande a lightbox (issue #143) — el componente padre maneja el state.
+          <button
+            type="button"
+            onClick={() => onImageClick?.(imageUrl)}
+            className="relative mb-1 block h-64 w-full overflow-hidden rounded-md hover:opacity-90"
+            aria-label="Ampliar imagen"
+          >
             <Image
               src={imageUrl}
               alt="Adjunto"
@@ -111,7 +164,7 @@ function Bubble({
               sizes="(max-width: 640px) 100vw, 400px"
               className="object-cover"
             />
-          </div>
+          </button>
         )}
         {text && <p className="whitespace-pre-wrap break-words">{text}</p>}
         <p className={`mt-1 text-[10px] ${isMine ? 'text-white/70' : 'text-[var(--color-text-muted)]'}`}>

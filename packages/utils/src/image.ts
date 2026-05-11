@@ -64,16 +64,44 @@ export async function compressImage(
 
   // Race contra timeout. Si vence, fallback al original — el upload tomará
   // más tiempo pero la promesa nunca se queda colgada.
+  //
+  // Issue #144: marcamos el resultado para que el caller pueda detectar timeout
+  // vs éxito. Usamos un Symbol único en window para no contaminar el File API.
+  const TIMEOUT_MARKER = Symbol.for('tripdrive.compressImage.timeout');
   const timeout = new Promise<File>((resolve) => {
-    setTimeout(() => resolve(file), opts.timeoutMs);
+    setTimeout(() => {
+      const original = file;
+      (original as unknown as Record<symbol, true>)[TIMEOUT_MARKER] = true;
+      resolve(original);
+    }, opts.timeoutMs);
   });
 
   try {
-    return await Promise.race([compression, timeout]);
-  } catch {
-    // Cualquier error de canvas / decode → fallback al original.
-    return file;
+    const result = await Promise.race([compression, timeout]);
+    // Hint observable: si el caller revisa este flag puede mandar telemetría.
+    // No lo hacemos acá porque el package es client-side y no depende de
+    // @verdfrut/observability. El call site del driver registra la métrica.
+    return result;
+  } catch (err) {
+    // Cualquier error de canvas / decode → fallback al original con flag.
+    const original = file;
+    (original as unknown as Record<symbol, true>)[TIMEOUT_MARKER] = true;
+    // Re-throw mantenido como log silencioso — el caller decide qué hacer.
+    if (typeof console !== 'undefined') {
+      // eslint-disable-next-line no-console
+      console.warn('[compressImage] error → usando archivo original', err);
+    }
+    return original;
   }
+}
+
+/**
+ * Detector del flag de timeout/error. Útil para que el caller mande métricas
+ * sin enredarse con el Symbol manualmente.
+ */
+export function compressImageFellBack(file: File): boolean {
+  const TIMEOUT_MARKER = Symbol.for('tripdrive.compressImage.timeout');
+  return (file as unknown as Record<symbol, true>)[TIMEOUT_MARKER] === true;
 }
 
 function loadImage(file: File): Promise<HTMLImageElement> {

@@ -2464,3 +2464,71 @@ Adicional: la APK demo está en modo Custom Tab (barra Chrome visible) porque as
 - Issue #146: migrar los call sites legacy de `new Date().toISOString()` a `nowUtcIso()` — incremental.
 - Issue #147: profilling de Server Components con Sentry Performance + identificar P95 > 1s.
 - Issue #148: Tabla pivot `tenant_config` en BD en vez de env vars para bbox/region (más flexible que ENV).
+
+## [2026-05-11] ADR-055: Sprint H5 — Reportería operativa + pantalla de auditoría + UX pulida pre-pruebas
+
+**Contexto:** Sprint previo al test real con cliente. Los choferes y el dispatcher van a usar la plataforma con presión operativa, así que necesitan: (1) ver KPIs operativos relevantes en `/reports` (que era stub), (2) visibilidad de fallos silenciosos para que el operador investigue, (3) detalles de UX pulidos que la auditoría P2 dejó pendientes, (4) endpoint cron para mantener la BD limpia tras introducir rate_limit_buckets, (5) guía para correr Lighthouse en el driver PWA antes del primer field test productivo.
+
+**Decisión:** Atacar 5 frentes en un solo sprint encadenado. Cada uno es chico (~30-60 min) pero juntos suman la diferencia entre "demo aceptable" y "comerciable a otros clientes".
+
+### Cambios
+
+#### S5.1 — `/reports` pasa de stub a operativo
+
+- Filtros: rango de fechas (default últimos 30 días), zona.
+- KPIs en 2 filas: rutas en rango, completadas, cumplimiento %, canceladas/interrumpidas + distancia km, tiempo manejo h, paradas completas, paradas pendientes.
+- Breakdown granular por status (DRAFT/OPTIMIZED/APPROVED/PUBLISHED/IN_PROGRESS/INTERRUPTED/COMPLETED/CANCELLED).
+- Query batch de paradas con `.in('route_id', [...])` para no caer en N+1.
+- Link cross-page a `/dashboard` aclarando que ese es para KPIs comerciales (facturado, merma).
+
+#### S5.2 — Pantalla `/audit/chat-failures`
+
+- Lista los rows de `chat_ai_decisions` con `rationale LIKE 'ESCALATION_PUSH_FAILED:%'`.
+- Cada row: timestamp, link al reporte, mensaje del chofer, motivo del fallo.
+- Card de ayuda al final con qué hacer en cada caso (VAPID mal, subscription expirada, retry manual).
+- Link agregado al sidebar bajo "SISTEMA" → "Auditoría · chat" (visible solo admin).
+
+#### S5.3 — Lighthouse audit instructivo
+
+- `LIGHTHOUSE.md` con cómo correr el audit (local + prod), métricas target con valores específicos, qué optimizar si reprueba, checklist PWA específico, cadencia recomendada.
+- El audit en sí no se corrió aún (requiere browser headless); el doc deja al user listo para hacerlo cuando quiera.
+
+#### S5.4 — Cron `rate-limit-cleanup`
+
+- `/api/cron/rate-limit-cleanup` con auth via `CRON_SECRET` (mismo header que los otros 3 crons).
+- Invoca RPC `tripdrive_rate_limit_cleanup()` agregada en migración 033 (ADR-054).
+- Loggea `logger.info` cuando borra rows; `logger.error` si falla.
+- DEPLOY_CHECKLIST ya documenta el schedule (`0 4 * * *`).
+
+#### S5.5 — Quality of life
+
+1. **Issue #143 (lightbox imagen chat):** click en imagen del thread abre overlay fullscreen con cierre por ESC o click fuera. Lightbox usa `<img>` (no `<Image>` Next) porque `object-contain` en flex sin tamaño definido se rompía. State al top-level del componente.
+2. **Issue #144 (compressImage flag):** la función marca con un Symbol en window el File devuelto cuando vence el timeout o falla. Nuevo helper exportado `compressImageFellBack(file)` permite al call site mandar telemetría sin tocar el Symbol manualmente. Console.warn agregado para el error path.
+
+### Alternativas consideradas
+
+- *KPIs operativos vía RPC dedicado (on-time, %completitud por chofer, anomalies):* descartado para H5. Requiere RPCs nuevos + diseño de qué exactamente mostrar. Mejor esperar a que el cliente pida números específicos durante el test real y construir contra eso, no contra hipótesis.
+- *Comparativa período-vs-período en /reports:* descartado por scope. Es feature de un sprint dedicado cuando haya 2-3 meses de datos.
+- *Pantalla `/audit/sentry-summary` (issue #128):* descartado porque Sentry tiene su propio dashboard mejor que cualquier copia interna. La pantalla de chat-failures sí tiene valor porque accionar un retry requiere contexto del reporte específico.
+- *Lightbox con portal a `document.body`:* descartado — el modal del chat ya rompe overflow del parent, no necesitamos portal. Cambiar después si aparecen z-index issues con otros modales.
+- *Lightbox con `<Image>` de Next:* probado pero `fill` en contenedor flex sin tamaño definido se renderiza 0x0. `<img>` directo con `object-contain` y maxWidth/maxHeight es lo correcto aquí.
+- *Audit en CI automático:* descartado para V1 — agregar Lighthouse CI requiere setup de runner. El doc deja claro cómo correrlo manualmente.
+
+### Riesgos / Limitaciones
+
+- *`/reports` queries con limit 2000* — si un tenant llega a más rutas en 30 días, se trunca silenciosamente. Aceptable hoy (VerdFrut hace ~5-15 rutas/día = 150-450/mes). Cuando llegue volumen, paginar o agregar warning de "datos truncados".
+- *El cron de cleanup* solo funciona si está configurado en n8n. Si nadie lo configura, la tabla `rate_limit_buckets` crece linealmente. Mitigación: el INSERT performance está cubierto por el índice; con 1M de rows el COUNT por bucket sigue siendo sub-100ms gracias a `(bucket_key, hit_at DESC)`.
+- *La pantalla `/audit/chat-failures` usa service_role* para bypass RLS (necesita ver cross-zone). Solo accesible a admins por el sidebar; pero si alguien sabe la URL exacta y es dispatcher puede entrar — RLS bypass del service_role NO es defensa per-zone. Aceptable porque el rol de la pantalla es operativo (solo admin debe operar push retries).
+- *El lightbox cierra con click en cualquier lado del overlay,* incluyendo el botón X que tiene `stopPropagation`. Si el usuario arrastra para zoom, el cierre puede dispararse. Aceptable hasta el primer feedback real.
+- *`compressImageFellBack` depende de Symbol shared en window.* Si el módulo se duplica en build (rare), los Symbols no matchean. Mitigación: `Symbol.for(key)` usa el registry global así está bien.
+- *El instructivo Lighthouse* no se ha validado contra el driver real — el primer audit puede revelar que `mapbox-gl` entra en bundle aunque no debiera. Tarea para el primer commit post-audit.
+
+### Oportunidades de mejora
+
+- Issue #149: dashboard de driver app (versión driver: cuántos stops completadas este mes, fotos subidas, kg movidos).
+- Issue #150: drill-down por ruta en /reports (click sobre count "completadas" → lista esas rutas).
+- Issue #151: export XLSX directo desde /reports (operativo, complementa el de /api/export/tickets que es comercial).
+- Issue #152: anomaly detection en /audit (anomalías automáticas de operación, distinto de chat-failures).
+- Issue #153: alertas Slack para chat-failures cuando aparece uno nuevo.
+- Issue #154: filtros por estado, tipo de reporte y chofer en /incidents (hoy listado plano).
+- Issue #155: comparativa mes-vs-mes en /reports cuando haya 2+ meses de data.

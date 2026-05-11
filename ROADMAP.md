@@ -23,13 +23,49 @@
 ✅ Sprint H2 — ETAs reales + crons + APK TWA + banner ETA demo (ADR-052)
 ✅ Sprint H3 — Robustez del split/merge (ADR-053)
 ✅ Sprint H4 — Performance + escala (ADR-054)
+✅ Sprint H5 — Reportería + audit chat + UX pulida (ADR-055)
 ```
 
-**54 ADRs documentados. 33 migraciones tenant + 1 control plane.**
+**55 ADRs documentados. 33 migraciones tenant + 1 control plane.**
 
 ---
 
-## 🚧 Sprint H5 — Reportería + UX dispatcher pulida *(siguiente, ~1 sem)*
+## 🚧 Sprint H6 — Custom domains + rebrand fase 2 *(siguiente, ~2-3 días)*
+
+### Lo que viene ahora:
+- Custom domains `app.tripdrive.xyz`, `driver.tripdrive.xyz`, `admin.tripdrive.xyz`, `verdfrut.tripdrive.xyz`
+- Rename packages `@verdfrut/*` → `@tripdrive/*`
+- Aliasar CSS vars `--vf-*` → `--td-*`
+- Migrar cookie `vf-theme` → `td-theme`
+
+---
+
+## 📦 Sprint H5 (CERRADO) — qué se entregó
+
+### S5.1 — `/reports` operativo (ya no stub)
+- Filtros: rango de fechas + zona
+- KPIs: rutas, completadas, cumplimiento %, canceladas, distancia, manejo, paradas completas/pendientes
+- Breakdown por status
+
+### S5.2 — Pantalla `/audit/chat-failures` (#122)
+- Lista fallos de escalación push del chat
+- Link en sidebar (admin only)
+- Card de troubleshooting
+
+### S5.3 — Lighthouse audit instructivo (#145)
+- `LIGHTHOUSE.md` con cómo correr + métricas target + qué optimizar
+
+### S5.4 — Cron `rate-limit-cleanup` (#142)
+- Endpoint `/api/cron/rate-limit-cleanup`
+- Schedule documentado en `DEPLOY_CHECKLIST.md`
+
+### S5.5 — Quality of life
+- #143: lightbox al click en imagen de chat
+- #144: `compressImageFellBack(file)` helper para telemetría de fallback
+
+---
+
+## ⏳ Sprint H5 — Reportería + UX dispatcher pulida (CERRADO arriba)
 
 > El cliente espera ver KPIs específicos durante las pruebas. Foco en visibilidad operativa.
 
@@ -55,19 +91,6 @@
 - Issue #146: migrar call sites legacy a `nowUtcIso()`
 - Issue #143: click imagen chat → lightbox
 - Issue #144: diferenciar timeout iOS LP vs red lenta
-
----
-
-## ⏳ Sprint H6 — Custom domains + rebrand fase 2 *(~2-3 días)*
-
-- Custom domains:
-  - `app.tripdrive.xyz` (platform)
-  - `driver.tripdrive.xyz` (driver)
-  - `admin.tripdrive.xyz` (control-plane)
-  - `verdfrut.tripdrive.xyz` (tenant VerdFrut)
-- Rename packages `@verdfrut/*` → `@tripdrive/*`
-- Aliasar CSS vars `--vf-*` → `--td-*`
-- Migrar cookie `vf-theme` → `td-theme`
 
 ---
 

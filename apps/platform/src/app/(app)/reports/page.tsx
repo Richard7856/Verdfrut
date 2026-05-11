@@ -1,46 +1,267 @@
-// Reportes operativos — KPIs filtrables por zona, chofer, tienda, fecha.
-// Versión completa se construye en Fase 5 (Dashboard).
+// Reportes operativos — Sprint H5 / ADR-055.
+// Vista enfocada en métricas de operación día a día (vs /dashboard que es
+// comercial). Filtros por rango de fechas + zona; KPIs: rutas por status,
+// cumplimiento, distancia, paradas pendientes vs completadas.
+//
+// Cuando llegue el cliente a pedir números específicos, este page se extiende
+// con drill-downs y más filtros. La meta H5 es ya no ser stub.
 
+import Link from 'next/link';
 import { Card, EmptyState, PageHeader } from '@verdfrut/ui';
 import { requireRole } from '@/lib/auth';
-import { listRoutes } from '@/lib/queries/routes';
+import { listZones } from '@/lib/queries/zones';
+import { createServerClient } from '@verdfrut/supabase/server';
+import { todayInZone } from '@verdfrut/utils';
+import type { RouteStatus } from '@verdfrut/types';
 
 export const metadata = { title: 'Reportes' };
+export const dynamic = 'force-dynamic';
 
-export default async function ReportsPage() {
+const TZ = process.env.NEXT_PUBLIC_TENANT_TIMEZONE ?? 'America/Mexico_City';
+
+interface SearchParams {
+  from?: string;  // YYYY-MM-DD
+  to?: string;
+  zone?: string;
+}
+
+interface PageProps {
+  searchParams: Promise<SearchParams>;
+}
+
+function defaultRange(): { from: string; to: string } {
+  const today = todayInZone(TZ);
+  const d = new Date(today + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() - 30);
+  const from = d.toISOString().slice(0, 10);
+  return { from, to: today };
+}
+
+export default async function ReportsPage({ searchParams }: PageProps) {
   await requireRole('admin', 'dispatcher', 'zone_manager');
+  const params = await searchParams;
+  const defaults = defaultRange();
+  const from = params.from ?? defaults.from;
+  const to = params.to ?? defaults.to;
+  const zoneFilter = params.zone ?? '';
 
-  // Métricas básicas que sí podemos calcular hoy (sin esperar Fase 5).
-  // Pedimos limit alto porque el endpoint paginado nos da el total exacto via .count.
-  const { rows: allRoutes, total: totalRoutes } = await listRoutes({ limit: 1000 });
-  const completedRoutes = allRoutes.filter((r) => r.status === 'COMPLETED').length;
-  const inProgressRoutes = allRoutes.filter((r) => r.status === 'IN_PROGRESS').length;
-  const cancelledRoutes = allRoutes.filter((r) => r.status === 'CANCELLED').length;
+  const zones = await listZones();
+  const supabase = await createServerClient();
+
+  // Rutas en el rango. Query manual porque listRoutes() acepta UNA fecha; acá
+  // queremos un rango con gte/lte. Limit 2000 — para tenants con más, paginar.
+  let q = supabase
+    .from('routes')
+    .select(
+      'id, date, status, total_distance_meters, total_duration_seconds, zone_id',
+      { count: 'exact' },
+    )
+    .gte('date', from)
+    .lte('date', to)
+    .order('date', { ascending: false })
+    .limit(2000);
+  if (zoneFilter) q = q.eq('zone_id', zoneFilter);
+
+  const { data: routesRows, error: routesErr } = await q;
+  if (routesErr) {
+    return (
+      <>
+        <PageHeader title="Reportes" />
+        <Card className="border-[var(--color-danger-border)] bg-[var(--color-danger-bg)]">
+          <p className="text-sm" style={{ color: 'var(--color-danger-fg)' }}>
+            Error cargando rutas: {routesErr.message}
+          </p>
+        </Card>
+      </>
+    );
+  }
+
+  const routes = (routesRows ?? []) as Array<{
+    id: string;
+    date: string;
+    status: RouteStatus;
+    total_distance_meters: number | null;
+    total_duration_seconds: number | null;
+    zone_id: string;
+  }>;
+
+  // Buckets por status.
+  const counts: Record<RouteStatus, number> = {
+    DRAFT: 0,
+    OPTIMIZED: 0,
+    APPROVED: 0,
+    PUBLISHED: 0,
+    IN_PROGRESS: 0,
+    INTERRUPTED: 0,
+    COMPLETED: 0,
+    CANCELLED: 0,
+  };
+  for (const r of routes) counts[r.status]++;
+
+  // Cumplimiento: COMPLETED vs ejecutadas (cualquier post-publicación).
+  const executed =
+    counts.COMPLETED + counts.IN_PROGRESS + counts.INTERRUPTED + counts.CANCELLED;
+  const completionRate = executed > 0 ? Math.round((counts.COMPLETED / executed) * 100) : null;
+
+  // Distancia y duración acumuladas.
+  const totalDistanceKm = routes.reduce(
+    (s, r) => s + (r.total_distance_meters ?? 0) / 1000,
+    0,
+  );
+  const totalDriveHours = routes.reduce(
+    (s, r) => s + (r.total_duration_seconds ?? 0) / 3600,
+    0,
+  );
+
+  // Paradas agregadas — 1 query batch via .in('route_id', [...]).
+  const routeIds = routes.map((r) => r.id);
+  let pendingStops = 0;
+  let completedStops = 0;
+  let skippedStops = 0;
+  if (routeIds.length > 0) {
+    const { data: stopsRows } = await supabase
+      .from('stops')
+      .select('status')
+      .in('route_id', routeIds);
+    for (const s of stopsRows ?? []) {
+      if (s.status === 'completed') completedStops++;
+      else if (s.status === 'pending') pendingStops++;
+      else if (s.status === 'skipped') skippedStops++;
+    }
+  }
 
   return (
     <>
       <PageHeader
         title="Reportes"
-        description="Métricas operativas. Versión avanzada con filtros y gráficas en Fase 5."
+        description={`Operación entre ${from} y ${to}${zoneFilter ? ' · zona seleccionada' : ' · todas las zonas'}.`}
       />
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Kpi label="Rutas totales" value={totalRoutes} />
-        <Kpi label="Completadas" value={completedRoutes} />
-        <Kpi label="En curso" value={inProgressRoutes} />
-        <Kpi label="Canceladas" value={cancelledRoutes} />
-      </div>
 
-      <div className="mt-6">
-        <EmptyState
-          title="Reportes detallados — Fase 5"
-          description="Gráficas, filtros por zona/chofer/tienda, export CSV/PDF y comparativas por periodo se habilitan cuando haya volumen de datos operativos."
+      {/* Filtros */}
+      <Card className="mb-4">
+        <form method="get" className="flex flex-wrap items-end gap-3 text-sm">
+          <Field label="Desde">
+            <input
+              type="date"
+              name="from"
+              defaultValue={from}
+              max={to}
+              className="rounded-md border border-[var(--color-border)] bg-[var(--vf-surface-2)] px-2 py-1"
+            />
+          </Field>
+          <Field label="Hasta">
+            <input
+              type="date"
+              name="to"
+              defaultValue={to}
+              min={from}
+              max={defaults.to}
+              className="rounded-md border border-[var(--color-border)] bg-[var(--vf-surface-2)] px-2 py-1"
+            />
+          </Field>
+          <Field label="Zona">
+            <select
+              name="zone"
+              defaultValue={zoneFilter}
+              className="rounded-md border border-[var(--color-border)] bg-[var(--vf-surface-2)] px-2 py-1"
+            >
+              <option value="">Todas</option>
+              {zones.map((z) => (
+                <option key={z.id} value={z.id}>{z.name}</option>
+              ))}
+            </select>
+          </Field>
+          <button
+            type="submit"
+            className="rounded-md bg-[var(--vf-green-600,#15803d)] px-4 py-1.5 text-white"
+          >
+            Aplicar
+          </button>
+          {(params.from || params.to || params.zone) && (
+            <Link
+              href="/reports"
+              className="text-xs text-[var(--color-text-muted)] underline-offset-2 hover:underline"
+            >
+              Limpiar
+            </Link>
+          )}
+        </form>
+      </Card>
+
+      {/* KPIs principales */}
+      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Kpi label="Rutas en rango" value={routes.length} />
+        <Kpi label="Completadas" value={counts.COMPLETED} hint="Ejecutadas con éxito" />
+        <Kpi
+          label="Cumplimiento"
+          value={completionRate === null ? '—' : `${completionRate}%`}
+          hint={
+            completionRate === null
+              ? 'sin rutas ejecutadas'
+              : `${counts.COMPLETED} de ${executed} ejecutadas`
+          }
+        />
+        <Kpi
+          label="Canceladas/Interr."
+          value={counts.CANCELLED + counts.INTERRUPTED}
+          hint={`${counts.CANCELLED} canc · ${counts.INTERRUPTED} interr`}
         />
       </div>
+
+      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Kpi label="Distancia" value={`${totalDistanceKm.toFixed(0)} km`} hint="Sumado optimizer" />
+        <Kpi label="Tiempo manejo" value={`${totalDriveHours.toFixed(0)} h`} hint="Optimizer estimado" />
+        <Kpi label="Paradas completas" value={completedStops} hint={`${completedStops + pendingStops + skippedStops} total`} />
+        <Kpi label="Paradas pendientes" value={pendingStops} hint={`${skippedStops} omitidas`} />
+      </div>
+
+      {/* Breakdown por status */}
+      <Card className="mb-4">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+          Estado de rutas
+        </p>
+        <div className="grid grid-cols-2 gap-3 text-sm lg:grid-cols-4">
+          <StatusRow label="Borrador" count={counts.DRAFT} />
+          <StatusRow label="Optimizadas" count={counts.OPTIMIZED} />
+          <StatusRow label="Aprobadas" count={counts.APPROVED} />
+          <StatusRow label="Publicadas" count={counts.PUBLISHED} />
+          <StatusRow label="En curso" count={counts.IN_PROGRESS} />
+          <StatusRow label="Interrumpidas" count={counts.INTERRUPTED} />
+          <StatusRow label="Completadas" count={counts.COMPLETED} />
+          <StatusRow label="Canceladas" count={counts.CANCELLED} />
+        </div>
+      </Card>
+
+      {routes.length === 0 && (
+        <EmptyState
+          title="Sin rutas en el rango"
+          description="Ajusta el filtro de fechas o la zona. Las rutas DRAFT se crean al armar tiros."
+        />
+      )}
+
+      <Card className="border-[var(--color-border)] bg-[var(--vf-surface-2)]">
+        <p className="text-xs text-[var(--color-text-muted)]">
+          ¿Buscas reportes comerciales (facturado, tickets, merma)? Ve a{' '}
+          <Link href="/dashboard" className="text-[var(--vf-green-600)] underline-offset-2 hover:underline">
+            Overview
+          </Link>{' '}
+          que tiene los KPIs del negocio.
+        </p>
+      </Card>
     </>
   );
 }
 
-function Kpi({ label, value }: { label: string; value: number }) {
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-[10px] uppercase tracking-wide text-[var(--color-text-muted)]">{label}</span>
+      {children}
+    </div>
+  );
+}
+
+function Kpi({ label, value, hint }: { label: string; value: number | string; hint?: string }) {
   return (
     <Card>
       <p className="text-[10px] uppercase tracking-[0.04em]" style={{ color: 'var(--vf-text-mute)' }}>
@@ -52,6 +273,20 @@ function Kpi({ label, value }: { label: string; value: number }) {
       >
         {value}
       </p>
+      {hint && (
+        <p className="mt-1 text-[10px]" style={{ color: 'var(--vf-text-mute)' }}>
+          {hint}
+        </p>
+      )}
     </Card>
+  );
+}
+
+function StatusRow({ label, count }: { label: string; count: number }) {
+  return (
+    <div className="flex items-center justify-between rounded border border-[var(--color-border)] bg-[var(--vf-surface-2)] px-3 py-2">
+      <span className="text-[11px] text-[var(--color-text-muted)]">{label}</span>
+      <span className="font-mono text-sm tabular-nums text-[var(--color-text)]">{count}</span>
+    </div>
   );
 }

@@ -45,6 +45,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/inventory', label: 'Inventario', roles: ['admin', 'dispatcher'], group: 'CATÁLOGO' },
 
   { href: '/reports', label: 'Reportes', roles: ['admin', 'dispatcher'], group: 'SISTEMA' },
+  { href: '/audit/chat-failures', label: 'Auditoría · chat', roles: ['admin'], group: 'SISTEMA' },
   { href: '/settings/zones', label: 'Zonas', roles: ['admin'], group: 'SISTEMA' },
   { href: '/settings/users', label: 'Usuarios', roles: ['admin'], group: 'SISTEMA' },
 ];
