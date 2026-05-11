@@ -1,8 +1,8 @@
 {
   "packageId": "com.verdfrut.driver",
   "host": "verdfrut-driver.vercel.app",
-  "name": "VerdFrut Conductor",
-  "launcherName": "VerdFrut",
+  "name": "TripDrive Conductor",
+  "launcherName": "TripDrive",
   "display": "standalone",
   "themeColor": "#16a34a",
   "themeColorDark": "#0a0a0a",

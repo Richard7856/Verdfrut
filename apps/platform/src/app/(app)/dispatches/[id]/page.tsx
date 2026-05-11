@@ -15,6 +15,7 @@ import { listUsers } from '@/lib/queries/users';
 import { listStores } from '@/lib/queries/stores';
 import { listDepots } from '@/lib/queries/depots';
 import { MultiRouteMapServer } from '@/components/map/multi-route-map-server';
+import { EtaModeBanner, isEtaModeDemo } from '@/components/shell/eta-mode-banner';
 import { AssignRouteForm } from './assign-route-form';
 import { DispatchActions } from './dispatch-actions';
 import { RouteStopsCard } from './route-stops-card';
@@ -142,6 +143,8 @@ export default async function DispatchDetailPage({ params }: Props) {
           </div>
         }
       />
+
+      <EtaModeBanner show={isEtaModeDemo()} />
 
       {dispatch.notes && (
         <Card className="mb-4 border-[var(--color-border)] bg-[var(--vf-surface-2)]">

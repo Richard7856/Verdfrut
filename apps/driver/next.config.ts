@@ -54,6 +54,18 @@ const nextConfig: NextConfig = {
           { key: 'Service-Worker-Allowed', value: '/' },
         ],
       },
+      {
+        // ADR-052 / issue #77: assetlinks.json debe servirse con Content-Type
+        // application/json sin redirects para que Android verifique el TWA y
+        // abra la PWA en modo standalone (sin barra Chrome). Sin este header
+        // el APK queda en modo Custom Tab (barra Chrome visible). Cache
+        // generoso porque el archivo cambia solo al rotar keystore.
+        source: '/.well-known/assetlinks.json',
+        headers: [
+          { key: 'Content-Type', value: 'application/json' },
+          { key: 'Cache-Control', value: 'public, max-age=3600' },
+        ],
+      },
     ];
   },
 };

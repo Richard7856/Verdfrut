@@ -23,6 +23,7 @@ import { DepotAssignment } from './depot-assignment';
 import { TransferRouteButton } from './transfer-route-button';
 import { RouteMapLoader } from '@/components/map/route-map-loader';
 import { LiveRouteMapLoader } from '@/components/map/live-route-map-loader';
+import { EtaModeBanner, isEtaModeDemo } from '@/components/shell/eta-mode-banner';
 import type { RouteMapStop, RouteMapDepot } from '@/components/map/route-map';
 
 const STATUS_LABELS: Record<RouteStatus, string> = {
@@ -248,6 +249,8 @@ export default async function RouteDetailPage({ params }: PageProps) {
         }
         action={<RouteActions route={route} />}
       />
+
+      <EtaModeBanner show={isEtaModeDemo()} />
 
       {/* S18.7: Transfer paradas pendientes a otro chofer cuando hay avería del camión.
           Solo aparece para PUBLISHED/IN_PROGRESS con stops pending. */}

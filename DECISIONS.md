@@ -2207,3 +2207,76 @@ Pre-cargados en `sentry-init.ts` para no quemar cuota con errores conocidos no n
 - Issue #128: pantalla `/audit/sentry-summary` con KPIs propios (errores por app, por release, top issues).
 - Issue #129: cron `/api/cron/*` reportan latencia a Sentry para detectar timeouts.
 - Issue #130: evaluar Posthog para product analytics (eventos de UX) — separado de Sentry.
+
+## [2026-05-10] ADR-052: Sprint H2 — ETAs reales, crons instrumentados, APK full TWA, banner ETA demo
+
+**Contexto:** Después de Sprint H1 (Sentry instalado, observability lista), el siguiente bottleneck para "production-grade" eran tres piezas que sí dependen de env vars en Vercel y que NO se podían cerrar sin participación del operador (acceso a Vercel, n8n cloud):
+
+1. **MAPBOX_DIRECTIONS_TOKEN** — sin esto, todos los km/ETAs son haversine ×1.4 + 25 km/h. Off por 20-40% en zonas urbanas. El dispatcher veía esos números sin saber que eran aproximados.
+2. **ANTHROPIC_API_KEY** en el driver — sin esto, el AI mediator del chat (ADR-027) no clasifica triviales y todo escala al zone_manager. Ruido alto en prod.
+3. **3 schedules n8n** (timeout-chats / orphans / breadcrumbs) — los endpoints existían desde Sprint 18 pero nunca se configuraron schedules. Chats sin respuesta quedan colgados, usuarios orphan acumulan, breadcrumbs crecen sin tope.
+
+Adicional: la APK demo está en modo Custom Tab (barra Chrome visible) porque assetlinks.json no se está sirviendo con `Content-Type: application/json` desde Vercel.
+
+**Decisión:** Cerrar las 4 cosas en una pasada — código listo + documentación operativa, dejando solo el "setear env var" para el operador.
+
+### Cambios
+
+1. **Optimizer + observability del fallback (`apps/platform/src/lib/optimizer.ts`):**
+   - Sin token → `logger.info` (estado esperado, no Sentry).
+   - >25 coords → `logger.warn` (degradación, va a Sentry).
+   - Mapbox falla con token presente → `logger.error` (algo está mal, va a Sentry con tag).
+   - El dispatcher ve los números en su UI; el operador ve el modo de cálculo en Sentry.
+
+2. **Banner UI de transparencia (`components/shell/eta-mode-banner.tsx`):**
+   - Server component que lee `process.env.MAPBOX_DIRECTIONS_TOKEN`.
+   - Si NO está set, renderiza banner amarillo: "ETAs aproximados — los números pueden errar 20-40%".
+   - Aparece en `/dispatches/[id]` y `/routes/[id]` arriba del header.
+   - Cuando el operador setea el token y redeploys, el banner desaparece automáticamente. No requiere migración ni feature flag.
+
+3. **Crons instrumentados con logger:**
+   - Los 3 endpoints (`mark-timed-out-chats`, `reconcile-orphan-users`, `archive-breadcrumbs`) ahora usan `logger.error/warn/info` para que aparezcan en Sentry cuando fallen.
+   - `console.error` legacy eliminado.
+   - Token inválido NO va a Sentry (los scanners de internet pegan a estos URLs todo el tiempo) — solo runtime log.
+   - Cualquier RPC fallido SÍ va a Sentry como error.
+
+4. **assetlinks.json — headers correctos (`apps/driver/next.config.ts`):**
+   - Nueva config `headers()` con `source: '/.well-known/assetlinks.json'`:
+     - `Content-Type: application/json`
+     - `Cache-Control: public, max-age=3600`
+   - Android valida el archivo con request HEAD/GET y verifica content-type. Sin este header Vercel servía `text/html` → APK queda en Custom Tab.
+
+5. **TWA manifest actualizado a TripDrive** (`mobile/driver-apk/twa-manifest.json`):
+   - `name: "TripDrive Conductor"`, `launcherName: "TripDrive"`.
+   - **Package ID NO cambia** (`com.verdfrut.driver`) — eso requeriría rotar keystore y la APK ya instalada en celulares de prueba dejaría de funcionar. El cambio interno es invisible al usuario; el display name sí es el nuevo.
+
+6. **`DEPLOY_CHECKLIST.md` nuevo** — guía operativa completa:
+   - Lista de TODAS las env vars por app, con valor/origen y si bloquea.
+   - Schedules n8n con cron expressions específicas, body, header.
+   - Cómo verificar assetlinks.json funcional via curl.
+   - Cómo regenerar APK si hace falta.
+   - Smoke tests post-deploy.
+   - Estado actual del deploy (qué falta).
+
+### Alternativas consideradas
+
+- *Hard-fail si `MAPBOX_DIRECTIONS_TOKEN` no está set:* descartado. Romper la app cuando un env var no está es mala UX — el cliente puede haber querido "modo demo" intencionalmente. Banner explícito es mejor.
+- *Banner como toast:* descartado, se descarta rápido. El banner persistente es el patrón correcto para "estado de la sesión".
+- *Rotar package ID del APK a `xyz.tripdrive.driver`:* descartado — rompe APKs instaladas. Cuando llegue Play Store con app NUEVA, ahí sí cambio.
+- *Vercel Cron Jobs* (su feature nativa) en vez de n8n: descartado porque n8n cloud ya está en el stack del operador para otros automation, mantener una sola herramienta.
+
+### Riesgos / Limitaciones
+
+- *Banner ETA demo* aparece para TODOS los usuarios (incluido el cliente). Si el cliente NETO ve el banner amarillo puede preguntar — está bien, es transparencia honesta. Mitigación: setear el token cuanto antes.
+- *Crons sin token configurado en n8n* siguen sin correr. Endpoints listos pero schedules pendientes. Documentado en DEPLOY_CHECKLIST.
+- *Mapbox Free tier* = 100k requests/mes Directions Matrix. Si quemamos eso (improbable con 1 cliente, 30 stops, 3 vehículos), banner amarillo aparecería intermitentemente cuando caen al fallback. Sentry lo capturaría como error.
+- *La verificación assetlinks por Android tarda hasta 24h* en propagarse. Aunque el deploy aplique los headers ya, los APKs instalados pueden seguir en Custom Tab por 24h. Re-instalar fuerza re-verificación.
+- *El próximo `console.error` migrado a logger se descubre durante operación* — quedan ~22 sites de los originales 50 (criterios ADR-051). No es bloqueante pero deja zonas ciegas.
+
+### Oportunidades de mejora
+
+- Issue #131: alerta en Sentry "Mapbox fallback haversine" para que llegue email/Slack si pasa más de N veces/hora.
+- Issue #132: contador en `/audit/observability` con "queries Mapbox usadas en últimas 24h" — anticipación al límite Free tier.
+- Issue #133: A/B comparativo "el mismo tiro con haversine vs Mapbox" — surfacing del delta en UI cuando se re-optimiza con token activo. Tiene sinergia con #111.
+- Issue #134: feature flag por tenant para "modo demo" intencional (algunos contextos comerciales se prefieren con números aproximados).
+- Issue #135: cron HTTP health check externo (UptimeRobot / Better Stack) para que el operador sepa si Vercel está down — no depende solo de Sentry.

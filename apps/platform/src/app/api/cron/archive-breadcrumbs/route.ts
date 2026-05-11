@@ -9,17 +9,22 @@
 
 import { NextResponse } from 'next/server';
 import { createServiceRoleClient } from '@verdfrut/supabase/server';
+import { logger } from '@verdfrut/observability';
 
 export async function POST(req: Request): Promise<NextResponse> {
   const token = req.headers.get('x-cron-token');
   const expected = process.env.CRON_SECRET;
   if (!expected) {
+    await logger.error('cron.archive-breadcrumbs: CRON_SECRET no configurado en server');
     return NextResponse.json(
       { ok: false, error: 'CRON_SECRET no configurado en el server' },
       { status: 500 },
     );
   }
   if (token !== expected) {
+    // No log a Sentry: cualquier scanner del internet puede pegar a este endpoint.
+    // Solo runtime log para detectar patrones de abuso si fuera el caso.
+    logger.info('cron.archive-breadcrumbs: token inválido');
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }
 
@@ -32,7 +37,11 @@ export async function POST(req: Request): Promise<NextResponse> {
     retention_days: retentionDays,
   });
   if (error) {
+    await logger.error('cron.archive-breadcrumbs: RPC falló', {
+      retentionDays, err: error,
+    });
     return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
+  logger.info('cron.archive-breadcrumbs: ok', { deleted: data ?? 0, retentionDays });
   return NextResponse.json({ ok: true, deleted: data ?? 0, retentionDays });
 }

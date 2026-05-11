@@ -11,6 +11,7 @@
 
 import { NextResponse } from 'next/server';
 import { createServiceRoleClient } from '@verdfrut/supabase/server';
+import { logger } from '@verdfrut/observability';
 
 interface OrphanRow {
   user_id: string;
@@ -22,6 +23,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   const token = req.headers.get('x-cron-token');
   const expected = process.env.CRON_SECRET;
   if (!expected) {
+    await logger.error('cron.reconcile-orphan-users: CRON_SECRET no configurado');
     return NextResponse.json(
       { ok: false, error: 'CRON_SECRET no configurado en el server' },
       { status: 500 },
@@ -35,6 +37,7 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   const { data: orphans, error: queryErr } = await supabase.rpc('get_orphan_auth_users');
   if (queryErr) {
+    await logger.error('cron.reconcile-orphan-users: RPC falló', { err: queryErr });
     return NextResponse.json({ ok: false, error: queryErr.message }, { status: 500 });
   }
 
@@ -56,7 +59,13 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   if (failed.length > 0) {
-    console.error('[cron/reconcile-orphan-users] Fallos al eliminar:', failed);
+    await logger.error('cron.reconcile-orphan-users: fallos al eliminar', {
+      failed: failed.map((f) => f.id),
+      details: failed,
+    });
+  }
+  if (deleted.length > 0) {
+    logger.info('cron.reconcile-orphan-users: ok', { deleted: deleted.length });
   }
 
   return NextResponse.json({

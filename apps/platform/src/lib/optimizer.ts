@@ -3,6 +3,7 @@
 
 import 'server-only';
 import { localTimeToUnix } from '@verdfrut/utils';
+import { logger } from '@verdfrut/observability';
 import { getMapboxMatrix } from './mapbox';
 import type {
   Depot,
@@ -260,6 +261,13 @@ async function buildOptimizerMatrix(
   const useMapbox = Boolean(process.env.MAPBOX_DIRECTIONS_TOKEN);
 
   if (!useMapbox) {
+    // ADR-052: no enviamos esto a Sentry porque es un estado esperado (modo
+    // demo sin Mapbox key). Solo log estructurado para que aparezca en runtime
+    // logs de Vercel. El banner UI (BannerEtaDemo) advierte al dispatcher.
+    logger.info('optimizer: MAPBOX_DIRECTIONS_TOKEN ausente — usando haversine', {
+      vehicles: vehicles.length,
+      stores: stores.length,
+    });
     return buildHaversineMatrix(vehicles, stores, ctx);
   }
 
@@ -268,9 +276,9 @@ async function buildOptimizerMatrix(
 
   // Mapbox limita 25 coords por request (free tier). Si supera, fallback.
   if (coords.length > 25) {
-    console.warn(
-      `[optimizer] ${coords.length} coords > 25 (límite Mapbox free). ` +
-      `Fallback a haversine. Implementar chunking si esto se vuelve común.`,
+    await logger.warn(
+      'optimizer: >25 coords excede Mapbox free tier — fallback haversine',
+      { coordsCount: coords.length, vehicles: vehicles.length, stores: stores.length },
     );
     return buildHaversineMatrix(vehicles, stores, ctx);
   }
@@ -278,7 +286,14 @@ async function buildOptimizerMatrix(
   try {
     return await getMapboxMatrix(coords);
   } catch (err) {
-    console.error('[optimizer] Mapbox Matrix falló — fallback haversine:', err);
+    // Esto SÍ va a Sentry: el token está set pero la llamada falló. Cualquier
+    // ocurrencia debería alertar al operador para revisar el rate limit o el
+    // token. El cliente igualmente recibe ETAs (haversine), pero degradados.
+    await logger.error('optimizer: Mapbox Matrix falló — fallback haversine', {
+      vehicles: vehicles.length,
+      stores: stores.length,
+      err,
+    });
     return buildHaversineMatrix(vehicles, stores, ctx);
   }
 }
