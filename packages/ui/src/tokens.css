@@ -120,7 +120,7 @@
 
 /* ============================================================================
  * Aliases semánticos para Tailwind theme — exponen los tokens vf-* como tokens
- * Tailwind genéricos. Los componentes de @verdfrut/ui usan estos aliases.
+ * Tailwind genéricos. Los componentes de @tripdrive/ui usan estos aliases.
  * ============================================================================ */
 @theme {
   /* Primary mapped a green-700 (el "primary" de la marca) */
