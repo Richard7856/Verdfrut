@@ -5,8 +5,8 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button } from '@verdfrut/ui';
-import type { Route, Vehicle } from '@verdfrut/types';
+import { Button } from '@tripdrive/ui';
+import type { Route, Vehicle } from '@tripdrive/types';
 import { assignRouteToDispatchAction } from '../actions';
 
 interface Props {

@@ -1,5 +1,5 @@
 {
-  "name": "@verdfrut/observability",
+  "name": "@tripdrive/observability",
   "version": "0.1.0",
   "private": true,
   "description": "Wrappers de logging estructurado y Sentry — usados por las 3 apps con el mismo DSN. ADR-051.",

@@ -19,7 +19,7 @@
 
 import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card } from '@verdfrut/ui';
+import { Card } from '@tripdrive/ui';
 import type {
   DeliveryReport,
   EntregaStep,
@@ -29,13 +29,13 @@ import type {
   Stop,
   Store,
   ResolutionType,
-} from '@verdfrut/types';
+} from '@tripdrive/types';
 import {
   nextEntregaStep,
   nextTiendaCerradaStep,
   nextBasculaStep,
   type FlowContext,
-} from '@verdfrut/flow-engine';
+} from '@tripdrive/flow-engine';
 // patchReport sigue importándose para tipado del payload — nunca se llama directo.
 import type { patchReport } from '@/app/route/stop/[id]/actions';
 // Mutaciones del flow ahora pasan por el outbox (ADR-019). El cliente no espera

@@ -2,7 +2,7 @@
 
 // Componente compartido del thread del chat — usado por driver y platform.
 // (Por ahora vive en driver y se duplicará tal cual en platform — ADR-021
-// decisión consciente para no inflar @verdfrut/ui).
+// decisión consciente para no inflar @tripdrive/ui).
 //
 // Responsabilidades:
 //  - Renderizar burbujas de mensajes con estilo según sender.
@@ -11,7 +11,7 @@
 //  - Indicar mensajes "pendientes" (encolados pero no aplicados aún) en el viewer driver.
 
 import { useEffect, useRef } from 'react';
-import type { ChatMessage } from '@verdfrut/types';
+import type { ChatMessage } from '@tripdrive/types';
 
 interface Props {
   messages: ChatMessage[];

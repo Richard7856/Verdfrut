@@ -2,7 +2,7 @@
 // STUB de scaffold — el mapa con choferes en vivo y chats activos llega en Fase 3.
 
 import { requireDriverProfile } from '@/lib/auth';
-import { Card } from '@verdfrut/ui';
+import { Card } from '@tripdrive/ui';
 import { logoutAction } from '@/app/(auth)/login/actions';
 
 export const metadata = { title: 'Supervisión' };

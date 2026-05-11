@@ -311,13 +311,13 @@ cd /Users/richardfigueroa/Downloads/VerdFrut
 OPTIMIZER_API_KEY=dev-secret-change-in-prod docker compose up -d optimizer
 
 # Terminal 2 — Platform (port 3000)
-pnpm --filter @verdfrut/platform dev
+pnpm --filter @tripdrive/platform dev
 
 # Terminal 3 — Driver (port 3001)
-pnpm --filter @verdfrut/driver dev
+pnpm --filter @tripdrive/driver dev
 
 # Terminal 4 — Control plane (port 3002)
-pnpm --filter @verdfrut/control-plane dev
+pnpm --filter @tripdrive/control-plane dev
 ```
 
 O todo en uno: `pnpm dev` (turbo, intercala logs).

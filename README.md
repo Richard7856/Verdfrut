@@ -10,7 +10,7 @@ TripDrive (operador) provee el servicio a empresas distribuidoras. El primer cli
 📖 **[DECISIONS.md](./DECISIONS.md)** — ADRs detallados con alternativas y riesgos (49 al cierre).
 📖 **[BRAND.md](./BRAND.md)** — guidelines de marca: nombre, dominio, paleta, tono.
 
-> ⚠ **Nota de naming interno:** los packages del monorepo todavía se llaman `@verdfrut/*` (legacy del primer nombre). El rebranding a `@tripdrive/*` está documentado en ADR-049 y se ejecuta en una fase 2 atómica para no romper imports en medio del field test. Public-facing (UI, dominio, marca) ya dice TripDrive.
+> ⚠ **Nota de naming interno:** los packages del monorepo todavía se llaman `@tripdrive/*` (legacy del primer nombre). El rebranding a `@tripdrive/*` está documentado en ADR-049 y se ejecuta en una fase 2 atómica para no romper imports en medio del field test. Public-facing (UI, dominio, marca) ya dice TripDrive.
 
 ---
 
@@ -128,7 +128,7 @@ Cada cliente tiene su propio proyecto Supabase. La resolución del tenant ocurre
 - `driver.tripdrive.xyz` → app de chofer (tenant resuelto en login)
 - `admin.tripdrive.xyz` → control plane TripDrive
 
-El **registro de tenants** vive en `/etc/tripdrive/tenants.json` en el VPS (NUNCA en el repo). El package `@verdfrut/supabase/tenant-registry` lo lee con cache de 60s (renombre del package pendiente, ADR-049 fase 2).
+El **registro de tenants** vive en `/etc/tripdrive/tenants.json` en el VPS (NUNCA en el repo). El package `@tripdrive/supabase/tenant-registry` lo lee con cache de 60s (renombre del package pendiente, ADR-049 fase 2).
 
 Para provisionar un nuevo tenant:
 

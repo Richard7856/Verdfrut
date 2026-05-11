@@ -2,11 +2,11 @@
 
 // Componente del chat thread — duplicado deliberado del de driver (ADR-021).
 // Mantener paridad manual hasta que un tercer consumidor justifique extraer
-// a un paquete `@verdfrut/chat-ui`.
+// a un paquete `@tripdrive/chat-ui`.
 
 import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
-import type { ChatMessage } from '@verdfrut/types';
+import type { ChatMessage } from '@tripdrive/types';
 
 interface Props {
   messages: ChatMessage[];

@@ -11,7 +11,7 @@
 //   - chat_open_long → "Abrir chat" (responder al chofer)
 
 import Link from 'next/link';
-import { PageHeader, Card, Badge } from '@verdfrut/ui';
+import { PageHeader, Card, Badge } from '@tripdrive/ui';
 import { requireRole } from '@/lib/auth';
 import { listActiveAnomalies, type Anomaly, type AnomalyKind } from '@/lib/queries/anomalies';
 

@@ -5,9 +5,9 @@
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { createServerClient } from '@verdfrut/supabase/server';
+import { createServerClient } from '@tripdrive/supabase/server';
 import { homeForDriverRole } from '@/lib/auth';
-import type { UserRole } from '@verdfrut/types';
+import type { UserRole } from '@tripdrive/types';
 
 const ALLOWED_ROLES: UserRole[] = ['driver', 'zone_manager'];
 

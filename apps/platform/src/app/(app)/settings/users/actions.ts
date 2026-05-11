@@ -14,7 +14,7 @@ import {
   runAction,
   type ActionResult,
 } from '@/lib/validation';
-import type { UserRole } from '@verdfrut/types';
+import type { UserRole } from '@tripdrive/types';
 
 const VALID_ROLES: UserRole[] = ['admin', 'dispatcher', 'zone_manager', 'driver'];
 

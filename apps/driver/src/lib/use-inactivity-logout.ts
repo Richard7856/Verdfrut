@@ -7,7 +7,7 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { createBrowserClient } from '@verdfrut/supabase/browser';
+import { createBrowserClient } from '@tripdrive/supabase/browser';
 
 const STORAGE_KEY = 'vf-last-active';
 // 8h = jornada completa. Si el chofer deja el teléfono toda la noche, al día

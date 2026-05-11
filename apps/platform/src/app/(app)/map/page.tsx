@@ -18,7 +18,7 @@ import { listStopsForRoutes } from '@/lib/queries/stops';
 import { listZones } from '@/lib/queries/zones';
 import { getUserProfilesByIds } from '@/lib/queries/users';
 import { getLastBreadcrumbsByRouteIds } from '@/lib/queries/breadcrumbs';
-import { todayInZone } from '@verdfrut/utils';
+import { todayInZone } from '@tripdrive/utils';
 import { LiveMapClient } from './live-map-client';
 import type { LiveDriver } from './live-map-client';
 

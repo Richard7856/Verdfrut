@@ -2,8 +2,8 @@
 // Server-only — RLS aplica con la sesión del chofer.
 
 import 'server-only';
-import { createServerClient } from '@verdfrut/supabase/server';
-import type { Stop, Store, Route, DeliveryReport } from '@verdfrut/types';
+import { createServerClient } from '@tripdrive/supabase/server';
+import type { Stop, Store, Route, DeliveryReport } from '@tripdrive/types';
 import { mapDeliveryReport } from './report';
 
 export interface StopContext {

@@ -4,9 +4,9 @@
 // El service role bypass RLS — usar SOLO desde Server Actions con requireRole('admin').
 
 import 'server-only';
-import { createServerClient, createServiceRoleClient } from '@verdfrut/supabase/server';
-import type { TableUpdate } from '@verdfrut/supabase';
-import type { UserProfile, UserRole } from '@verdfrut/types';
+import { createServerClient, createServiceRoleClient } from '@tripdrive/supabase/server';
+import type { TableUpdate } from '@tripdrive/supabase';
+import type { UserProfile, UserRole } from '@tripdrive/types';
 import { createDriver } from './drivers';
 
 interface ProfileRow {

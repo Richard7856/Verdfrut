@@ -2,10 +2,10 @@
 // Sprint 11. RLS filtra por zona automáticamente para zone_managers.
 
 import Link from 'next/link';
-import { EmptyState, PageHeader, Card, Badge } from '@verdfrut/ui';
+import { EmptyState, PageHeader, Card, Badge } from '@tripdrive/ui';
 import { requireRole } from '@/lib/auth';
 import { listOpenIncidents } from '@/lib/queries/incidents';
-import type { ChatStatus } from '@verdfrut/types';
+import type { ChatStatus } from '@tripdrive/types';
 
 export const metadata = { title: 'Incidencias' };
 export const dynamic = 'force-dynamic';

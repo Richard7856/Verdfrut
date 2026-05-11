@@ -7,8 +7,8 @@
 // y evitar que el click en "llamar tienda" navegue al detalle de la parada.
 
 import Link from 'next/link';
-import { Badge, type BadgeTone } from '@verdfrut/ui';
-import { formatTimeInZone } from '@verdfrut/utils';
+import { Badge, type BadgeTone } from '@tripdrive/ui';
+import { formatTimeInZone } from '@tripdrive/utils';
 import type { StopWithStore } from '@/lib/queries/route';
 
 interface Props {

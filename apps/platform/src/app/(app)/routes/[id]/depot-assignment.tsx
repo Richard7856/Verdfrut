@@ -6,8 +6,8 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, Select, toast } from '@verdfrut/ui';
-import type { Depot, Route } from '@verdfrut/types';
+import { Button, Select, toast } from '@tripdrive/ui';
+import type { Depot, Route } from '@tripdrive/types';
 import { assignDepotToRouteAction } from '../actions';
 
 interface Props {

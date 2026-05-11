@@ -1,10 +1,10 @@
 // Banner superior de la pantalla de ruta del chofer.
 // Muestra: nombre, fecha, status, ETA estimada, distancia total, contador de paradas completadas.
 
-import type { Route } from '@verdfrut/types';
-import { formatDateTimeInZone, formatDuration } from '@verdfrut/utils';
-import { Badge } from '@verdfrut/ui';
-import type { BadgeTone } from '@verdfrut/ui';
+import type { Route } from '@tripdrive/types';
+import { formatDateTimeInZone, formatDuration } from '@tripdrive/utils';
+import { Badge } from '@tripdrive/ui';
+import type { BadgeTone } from '@tripdrive/ui';
 
 interface Props {
   route: Route;

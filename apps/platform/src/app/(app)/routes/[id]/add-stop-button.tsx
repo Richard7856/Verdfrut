@@ -9,7 +9,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, toast } from '@verdfrut/ui';
+import { Button, toast } from '@tripdrive/ui';
 import { addStopToRouteAction } from '../actions';
 
 interface AvailableStore {

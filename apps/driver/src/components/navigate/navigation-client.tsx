@@ -11,7 +11,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { haversineMeters } from '@verdfrut/utils';
+import { haversineMeters } from '@tripdrive/utils';
 import { useDriverPosition } from '@/lib/use-driver-position';
 import { useTurnByTurn } from '@/lib/use-turn-by-turn';
 import { useSpeech } from '@/lib/use-speech';

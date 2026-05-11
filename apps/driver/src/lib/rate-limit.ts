@@ -9,8 +9,8 @@
 // separados por simplicidad operativa (cada app tiene su deploy).
 
 import 'server-only';
-import { createServiceRoleClient } from '@verdfrut/supabase/server';
-import { logger } from '@verdfrut/observability';
+import { createServiceRoleClient } from '@tripdrive/supabase/server';
+import { logger } from '@tripdrive/observability';
 
 interface BucketConfig {
   windowMs: number;

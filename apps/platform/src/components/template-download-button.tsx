@@ -3,7 +3,7 @@
 // Botón "Descargar plantilla CSV" para cada entidad bulk-importable.
 // Apunta a /api/templates/[entity] que devuelve un CSV con headers y ejemplos.
 
-import { Button } from '@verdfrut/ui';
+import { Button } from '@tripdrive/ui';
 
 type Entity = 'stores' | 'vehicles' | 'users' | 'depots';
 

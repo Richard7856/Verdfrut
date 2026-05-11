@@ -14,7 +14,7 @@
 //      tags + extras en Sentry — buscable después.
 //
 // Cómo se usa:
-//   import { logger } from '@verdfrut/observability';
+//   import { logger } from '@tripdrive/observability';
 //   logger.error('chat.push falló', { reportId, zoneId, err });
 //   logger.warn('rate limit excedido', { ip });
 //   logger.info('ruta optimizada', { routeId, vehicles: n });

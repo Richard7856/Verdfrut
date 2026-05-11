@@ -1,8 +1,8 @@
 // Lista de choferes registrados (vista simplificada de drivers + user_profiles).
 // La gestión completa (alta/baja/edición) vive en /settings/users con role='driver'.
 
-import { Badge, DataTable, EmptyState, PageHeader, type Column } from '@verdfrut/ui';
-import type { Driver } from '@verdfrut/types';
+import { Badge, DataTable, EmptyState, PageHeader, type Column } from '@tripdrive/ui';
+import type { Driver } from '@tripdrive/types';
 import { requireRole } from '@/lib/auth';
 import { listDrivers } from '@/lib/queries/drivers';
 import { listZones } from '@/lib/queries/zones';

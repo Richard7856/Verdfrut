@@ -2,8 +2,8 @@
 // Server-only — no exponer OPTIMIZER_API_KEY al cliente.
 
 import 'server-only';
-import { localTimeToUnix } from '@verdfrut/utils';
-import { logger } from '@verdfrut/observability';
+import { localTimeToUnix } from '@tripdrive/utils';
+import { logger } from '@tripdrive/observability';
 import { getMapboxMatrix } from './mapbox';
 import type {
   Depot,
@@ -13,7 +13,7 @@ import type {
   OptimizerJob,
   Store,
   Vehicle,
-} from '@verdfrut/types';
+} from '@tripdrive/types';
 
 const OPTIMIZER_TIMEOUT_MS = 30_000;
 

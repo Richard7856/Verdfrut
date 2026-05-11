@@ -8,8 +8,8 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import type { UserRole } from '@verdfrut/types';
-import { cn } from '@verdfrut/ui';
+import type { UserRole } from '@tripdrive/types';
+import { cn } from '@tripdrive/ui';
 import { useOpenIncidentsCount } from '@/lib/use-incident-notifications';
 
 interface NavItem {

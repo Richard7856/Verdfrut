@@ -4,7 +4,7 @@
 // La acción crítica es createAndOptimizeRoute: orquesta queries + optimizer en una transacción lógica.
 
 import { revalidatePath } from 'next/cache';
-import { localTimeToUnix } from '@verdfrut/utils';
+import { localTimeToUnix } from '@tripdrive/utils';
 import { requireRole } from '@/lib/auth';
 import {
   createDraftRoute,
@@ -141,7 +141,7 @@ export async function createAndOptimizeRoute(
     // Toda ruta DEBE tener dispatch_id (constraint NOT NULL en DB desde migr 028).
     let resolvedDispatchId: string;
     {
-      const supabase = await (await import('@verdfrut/supabase/server')).createServerClient();
+      const supabase = await (await import('@tripdrive/supabase/server')).createServerClient();
       if (input.dispatchId) {
         const { data: existing, error: dErr } = await supabase
           .from('dispatches')
@@ -664,7 +664,7 @@ export async function addStopToRouteAction(
     // entregas el mismo día desde el mismo tiro — para mover entre rutas
     // existe el flow "Mover a →" (moveStopToAnotherRouteAction).
     if (route.dispatchId) {
-      const supabaseGuard = await (await import('@verdfrut/supabase/server')).createServerClient();
+      const supabaseGuard = await (await import('@tripdrive/supabase/server')).createServerClient();
       // 1. Listar IDs de rutas vivas del tiro (excluyendo la actual).
       const { data: siblingRoutes, error: rErr } = await supabaseGuard
         .from('routes')

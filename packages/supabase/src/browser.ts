@@ -3,7 +3,7 @@
 //
 // USO:
 //   'use client'
-//   import { createBrowserClient } from '@verdfrut/supabase/browser';
+//   import { createBrowserClient } from '@tripdrive/supabase/browser';
 //   const supabase = createBrowserClient();
 
 import { createBrowserClient as createSSRBrowserClient } from '@supabase/ssr';

@@ -5,9 +5,9 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button } from '@verdfrut/ui';
-import { todayInZone } from '@verdfrut/utils';
-import type { Zone } from '@verdfrut/types';
+import { Button } from '@tripdrive/ui';
+import { todayInZone } from '@tripdrive/utils';
+import type { Zone } from '@tripdrive/types';
 import { createDispatchAction } from './actions';
 
 interface Props {

@@ -213,14 +213,14 @@ Implementado en `users.ts:buildServerCallbackLink()`. Aplica a `inviteUser` y `g
 
 ---
 
-## [2026-05-01] ADR-010: Flujo entrega — máquina de pasos centralizada en `@verdfrut/flow-engine`, persistencia en `delivery_reports.current_step`
+## [2026-05-01] ADR-010: Flujo entrega — máquina de pasos centralizada en `@tripdrive/flow-engine`, persistencia en `delivery_reports.current_step`
 
 **Contexto:** El flujo de entrega del chofer tiene 14 pasos lineales con bifurcaciones (incident_check → cart o product_arranged; waste_check → waste_ticket o receipt_check; etc.). La lógica de "¿cuál es el siguiente paso?" puede vivir en (a) la UI cliente, (b) el server, o (c) un package compartido. Tomar la decisión incorrecta lleva a duplicación o a inconsistencias entre quién manda al chofer al siguiente paso vs quién persiste el estado.
 
 Además, el chofer puede cerrar la app a la mitad (sin red, batería muerta, llamada). Al volver debe resumir donde estaba.
 
 **Decisión:**
-- **Lógica de transiciones** vive en el package puro `@verdfrut/flow-engine` (`nextEntregaStep(currentStep, ctx)`). Funciones determinísticas, testeables sin DB ni browser.
+- **Lógica de transiciones** vive en el package puro `@tripdrive/flow-engine` (`nextEntregaStep(currentStep, ctx)`). Funciones determinísticas, testeables sin DB ni browser.
 - **Estado actual del flujo** se persiste en `delivery_reports.current_step` (string, validado en runtime contra los enums TS). Al volver al detalle, el server lee este campo y la UI renderiza el step correspondiente.
 - **Contexto del flujo** (`hasIncidents`, `hasMerma`, etc.) vive en memoria del cliente para calcular el next, y SOLO los flags que el encargado debe ver (ej. `has_merma`) se persisten en columnas dedicadas. Los demás se infieren del estado del JSON `evidence` y `incident_details`.
 - Cada step es un componente cliente independiente que recibe `report`, `route`, `store`, helpers para mutar (`onSaveEvidence`, `onPatch`, `onSubmit`), y `advanceTo(next)`. Aislados — agregar un nuevo step solo requiere tocar el package + un nuevo componente.
@@ -565,7 +565,7 @@ Por otro lado, onboardear un cliente nuevo requería crear manualmente decenas o
 - Telemetría: enviar a un endpoint las operaciones que terminan en `failed` después de 10 intentos para detectar patrones (ej: "siempre se atora en `set_evidence` para X tienda").
 - Unificar idempotency keys en el server (columna `client_op_id` en `delivery_reports` para no re-aplicar advance que el chofer ya superó).
 - Compactar la cola: si hay 3 `advance_step` consecutivos para el mismo report, solo el último importa — droppear los anteriores.
-- Migrar a paquete `@verdfrut/outbox` cuando platform/control-plane lo necesiten.
+- Migrar a paquete `@tripdrive/outbox` cuando platform/control-plane lo necesiten.
 
 ---
 
@@ -640,7 +640,7 @@ V1 NO tiene catálogo de productos digital — los pedidos vienen pre-empacados 
 
 7. **UI del chat: mismo componente `<ChatThread>` para driver y platform.** Diferencias por prop `viewerRole='driver'|'zone_manager'`. Reduce duplicación. El componente vive en `apps/driver/.../chat-thread.tsx` y se importa también desde el platform via path relativo (los apps comparten root pero NO compartimos `apps/driver/src/` desde platform — necesitaré moverlo a un paquete o duplicarlo).
 
-   **Sub-decisión:** Para evitar inflar `@verdfrut/ui` con lógica de chat (no es UI primitiva), copio el componente a ambas apps con el mismo nombre y mantengo paridad manual. Si en una tercera fase aparece más reuso, se extrae a un paquete `@verdfrut/chat-ui`. YAGNI por ahora.
+   **Sub-decisión:** Para evitar inflar `@tripdrive/ui` con lógica de chat (no es UI primitiva), copio el componente a ambas apps con el mismo nombre y mantengo paridad manual. Si en una tercera fase aparece más reuso, se extrae a un paquete `@tripdrive/chat-ui`. YAGNI por ahora.
 
 8. **Mensaje inicial auto-generado** desde `incident_details` (cierra issue #18). Cuando el chofer abre el chat por primera vez en flujo entrega y hay incident_details no vacío, el cliente envía como primer mensaje un summary tabular ("• 2 kg de Manzana — Rechazo", etc.). Esto va al outbox como `send_chat_message` normal.
 
@@ -654,7 +654,7 @@ V1 NO tiene catálogo de productos digital — los pedidos vienen pre-empacados 
 - *Broadcast nativo de Supabase Realtime:* fire-and-forget, sin persistencia automática. Requiere INSERT manual paralelo si queremos auditoría. Doble fuente de verdad.
 - *WebSocket/SSE custom:* infraestructura adicional, no aprovecha Supabase Realtime que ya tenemos.
 - *Pulling cada N segundos:* más simple pero peor UX y carga al server.
-- *Compartir `<ChatThread>` via `@verdfrut/ui`:* el paquete UI es tokens + primitivas, no features completas con state management. Inflarlo aquí debilita la frontera.
+- *Compartir `<ChatThread>` via `@tripdrive/ui`:* el paquete UI es tokens + primitivas, no features completas con state management. Inflarlo aquí debilita la frontera.
 - *Reset del timer con cada mensaje:* el timer se volvería un "watchdog" de actividad en lugar de un SLA. El comercial podría dejar el caso colgando indefinidamente con un mensaje cada 19 min.
 
 **Riesgos / Limitaciones:**
@@ -679,7 +679,7 @@ V1 NO tiene catálogo de productos digital — los pedidos vienen pre-empacados 
 
 ## [2026-05-02] ADR-022: OCR de tickets con Claude Vision — extracción server-side, edición + confirmación cliente
 
-**Contexto:** Los steps `waste_ticket_review` y `receipt_review` eran placeholders ("foto cargada, continuar") sin extracción de datos. El paquete `@verdfrut/ai` ya tenía `extractTicketFromImageUrl` cableado a Claude Sonnet 4.6 con system prompt en español, pero ningún caller. Issue #19 documentaba la deuda. Para Fase 5 (dashboard del cliente con KPIs por tienda y export XLSX para ERP externo) los datos extraídos son entrada crítica — sin ellos, las paradas reportan distancia/duración pero no monto facturado/devoluciones.
+**Contexto:** Los steps `waste_ticket_review` y `receipt_review` eran placeholders ("foto cargada, continuar") sin extracción de datos. El paquete `@tripdrive/ai` ya tenía `extractTicketFromImageUrl` cableado a Claude Sonnet 4.6 con system prompt en español, pero ningún caller. Issue #19 documentaba la deuda. Para Fase 5 (dashboard del cliente con KPIs por tienda y export XLSX para ERP externo) los datos extraídos son entrada crítica — sin ellos, las paradas reportan distancia/duración pero no monto facturado/devoluciones.
 
 **Decisión:**
 
@@ -1176,8 +1176,8 @@ Migración trivial: `pg_dump --schema=control_plane $CURRENT | psql $NEW_CP_PROJ
 
 *App nueva `apps/control-plane` (Next 16, port 3002):*
 
-- Reusa packages `@verdfrut/ui`, `@verdfrut/types`, `@verdfrut/utils`, `@verdfrut/supabase`.
-- No usa `@verdfrut/maps` ni `@verdfrut/flow-engine` ni `@verdfrut/ai` — el CP no los necesita.
+- Reusa packages `@tripdrive/ui`, `@tripdrive/types`, `@tripdrive/utils`, `@tripdrive/supabase`.
+- No usa `@tripdrive/maps` ni `@tripdrive/flow-engine` ni `@tripdrive/ai` — el CP no los necesita.
 - Sidebar siempre dark (consistente con identidad VerdFrut) + badge "CTRL" para distinguir visualmente.
 - Theme dark forzado en root layout — el CP no tiene toggle, distinto a platform.
 
@@ -1327,7 +1327,7 @@ Layout grid 2 columnas (lg ≥ 1024px): mapa LIVE izquierda + chat derecha. Mobi
 3. **Sonido al recibir** — Web Audio API genera beep de 2 tonos (880Hz → 1320Hz, 200ms). Sin asset binario. Toggle 🔊/🔇 en topbar persistido en localStorage.
 4. **Push notification del browser** — Service Worker minimal `/sw-push.js` (sin Serwist, solo handler push), `apps/platform/src/lib/push-subscription.ts` (paralelo al driver), endpoint `/api/push/subscribe` (POST/DELETE). Banner `<PushOptIn>` en /dashboard que se auto-oculta tras suscribir. Push fanout extendido (driver `push-fanout.ts`) para incluir admin/dispatcher en addition al zone_manager.
 
-Toast extendido en `@verdfrut/ui` con `ToastOptions { action?: { label, onClick } }` backwards-compatible.
+Toast extendido en `@tripdrive/ui` con `ToastOptions { action?: { label, onClick } }` backwards-compatible.
 
 *S18.4 — GPS gap detection / Waze handling (commit `a9e6727`, migración 023):*
 Cuando chofer abre Waze/Maps, la PWA pasa a background y `watchPosition` muere (especialmente iOS). Antes: el admin veía al chofer "congelado". Ahora: el cliente reporta `gap_start` (visibilitychange→hidden) con last_known_lat/lng, y `gap_end` (visibilitychange→visible) con duración. Persiste en `route_gap_events`. RLS: driver inserta/update suyos, admin/dispatcher leen todos, zone_manager lee de SU zona.
@@ -1357,7 +1357,7 @@ ALTER TYPE route_status ADD VALUE 'INTERRUPTED'. Tabla `route_transfers` para au
 
 UI cliente `TransferRouteButton` + Modal con select vehículo (req) + chofer (opt) + razón preset + detalle. Banner amarillo "¿El camión no puede continuar?" en /routes/[id] solo cuando aplica.
 
-Tipos cascada: `RouteStatus` en `@verdfrut/types` + `route_status` enum en database.ts + 4 Records<RouteStatus, ...> en platform/driver para evitar exhaustiveness errors.
+Tipos cascada: `RouteStatus` en `@tripdrive/types` + `route_status` enum en database.ts + 4 Records<RouteStatus, ...> en platform/driver para evitar exhaustiveness errors.
 
 *S18.8 — Chat AI mediator con Claude Haiku (commit `1dbcf7a`, migración 027):*
 `packages/ai/src/classify-driver-message.ts` — `classifyDriverMessage(text)` clasifica en 'trivial' | 'real_problem' | 'unknown'. System prompt define las 3 categorías + 2 few-shot examples (tráfico → trivial, llanta ponchada → real_problem). Si trivial, devuelve `autoReply` empático en español MX (max 200 chars, sin mencionar "AI"). Failsafe: API key missing o request falla → 'unknown' (sesgo a la seguridad).
@@ -2043,10 +2043,10 @@ La migración se ejecuta en **dos fases** para no romper deploy en medio del fie
 - `README.md`, `BRAND.md`, `ROADMAP.md` reescritos.
 - Strings user-facing en las 3 apps (titles, metadata, h1, manifest PWA, exports, plantillas CSV, comentarios de header).
 - Type-check 10/10 garantizado.
-- Sin cambios en packages internos (`@verdfrut/*`), CSS vars (`--vf-*`), ni cookies (`vf-theme`) — esos son tokens estables que rompen builds o invalidan estado del usuario.
+- Sin cambios en packages internos (`@tripdrive/*`), CSS vars (`--vf-*`), ni cookies (`vf-theme`) — esos son tokens estables que rompen builds o invalidan estado del usuario.
 
 **Fase 2 (Sprint 24, post field-test):**
-- Rename `@verdfrut/*` → `@tripdrive/*` en `packages/*` y todos los imports (operación atómica).
+- Rename `@tripdrive/*` → `@tripdrive/*` en `packages/*` y todos los imports (operación atómica).
 - Aliasar `--vf-*` → `--td-*` (mantener legacy 1 sprint para no romper componentes externos).
 - Renombrar cookie `vf-theme` → `td-theme` con fallback de lectura.
 - Rename repo GitHub `Verdfrut` → `TripDrive`.
@@ -2066,7 +2066,7 @@ La migración se ejecuta en **dos fases** para no romper deploy en medio del fie
 5. Trademark probablemente limpio en MX clase 42 (software) y 39 (transporte) — validar antes de invertir en logos definitivos.
 
 **Riesgos / Limitaciones:**
-- *El package legacy `@verdfrut/*` queda en código hasta Sprint 24.* Cualquier desarrollador nuevo va a preguntar "¿por qué los packages no se llaman como la plataforma?". Mitigación: el README lo aclara, el ADR está vinculado.
+- *El package legacy `@tripdrive/*` queda en código hasta Sprint 24.* Cualquier desarrollador nuevo va a preguntar "¿por qué los packages no se llaman como la plataforma?". Mitigación: el README lo aclara, el ADR está vinculado.
 - *Cookies `vf-theme` legacy* — preferencias guardadas siguen funcionando, pero la cookie name "huele" a la marca vieja. Cambio diferido a Sprint 24.
 - *El cliente VerdFrut puede percibir la separación como pérdida de identidad.* Mitigación: se les comunica que TripDrive es **su** plataforma white-label internamente — pueden seguir mostrando su marca cobrandeada cuando corresponda.
 - *`.xyz` tiene menos credibilidad que `.com` para algunas industrias.* Aceptable para B2B SaaS moderno (ej. cosmos.network, brave.com→search.brave.xyz). Si el cliente NETO o futuros piden `.com`, validar y comprar.
@@ -2087,7 +2087,7 @@ La migración se ejecuta en **dos fases** para no romper deploy en medio del fie
 
 ### Fixes aplicados
 
-1. **P0-1 · Timezone bug en `CreateDispatchButton`:** el cálculo manual `new Date(now.getTime() - tz * 60_000)` invertía el offset y producía la fecha equivocada cuando el navegador del dispatcher estaba en otra TZ que el tenant. Ahora la fecha "hoy" viene del server vía `todayInZone(TENANT_TZ)` (helper que ya existía en `@verdfrut/utils`). El cliente conserva fallback con el mismo helper si el server no pasa la prop.
+1. **P0-1 · Timezone bug en `CreateDispatchButton`:** el cálculo manual `new Date(now.getTime() - tz * 60_000)` invertía el offset y producía la fecha equivocada cuando el navegador del dispatcher estaba en otra TZ que el tenant. Ahora la fecha "hoy" viene del server vía `todayInZone(TENANT_TZ)` (helper que ya existía en `@tripdrive/utils`). El cliente conserva fallback con el mismo helper si el server no pasa la prop.
 
 2. **P0-2 · Promise chain confusa en outbox handler `send_chat_message`:** el wrap `.then(r => r.ok ? {ok:true} : r)` era redundante (`runAndClassify` solo lee `ok/error`) y oscurecía el tipo. Removido — la llamada ahora es directa.
 
@@ -2107,7 +2107,7 @@ La migración se ejecuta en **dos fases** para no romper deploy en medio del fie
 - **P2 · Logging estructurado:** 50+ `console.log/error` distribuidos. Setup pino + niveles + transporte a Sentry/LogTail va junto con S22.3.
 - **P2 · `<img>` en chat-thread.tsx:** migrar a `<Image>` de Next.js — issue #118.
 - **P2 · `any` casts en server actions:** zod validation gradual — issue #119.
-- **P2 · Duplicación de `new Date().toISOString()`:** crear helper `now()` en `@verdfrut/utils` — issue #120.
+- **P2 · Duplicación de `new Date().toISOString()`:** crear helper `now()` en `@tripdrive/utils` — issue #120.
 - **P2 · `MX_BBOX` hardcoded:** mover a config del tenant para preparación multi-país — issue #121.
 
 ### Alternativas consideradas
@@ -2126,7 +2126,7 @@ La migración se ejecuta en **dos fases** para no romper deploy en medio del fie
 
 - Issue #118: `<img>` → `<Image>` en chat thread (~30 min, P2).
 - Issue #119: zod schemas para server actions (~2 días, P2).
-- Issue #120: helper `now()` en `@verdfrut/utils` (~15 min, P2).
+- Issue #120: helper `now()` en `@tripdrive/utils` (~15 min, P2).
 - Issue #121: `tenant.boundingBox` cargado en context (~1 día, P2).
 - Issue #122: pantalla `/audit/chat-failures` que filtre `rationale LIKE 'ESCALATION_PUSH_FAILED%'`.
 - Issue #123: ampliar enum `chat_ai_decisions.category` con `escalation_push_failed` cuando se justifique.
@@ -2140,7 +2140,7 @@ La migración se ejecuta en **dos fases** para no romper deploy en medio del fie
 
 ### Stack final
 
-1. **Package nuevo `@verdfrut/observability`** que centraliza:
+1. **Package nuevo `@tripdrive/observability`** que centraliza:
    - `logger` con métodos `error/warn/info/debug` — API que reemplaza `console.*`.
    - `initSentry(Sentry, opts)` — factory de configuración con sample rates, ignoreErrors, tags por app.
    - `configureLogger({ app })` — setea el tag global de cada app.
@@ -2532,3 +2532,79 @@ Adicional: la APK demo está en modo Custom Tab (barra Chrome visible) porque as
 - Issue #153: alertas Slack para chat-failures cuando aparece uno nuevo.
 - Issue #154: filtros por estado, tipo de reporte y chofer en /incidents (hoy listado plano).
 - Issue #155: comparativa mes-vs-mes en /reports cuando haya 2+ meses de data.
+
+## [2026-05-11] ADR-056: Sprint H6 — Custom domains + rebrand interno fase 2
+
+**Contexto:** Pieza final del rebrand a TripDrive (ADR-049 había hecho la fase 1 de strings user-facing). El sprint cubre 4 frentes que llevan la plataforma a estado "comercial real":
+
+1. **Custom domains** `tripdrive.xyz` con subdominios por app.
+2. **Rename packages** `@verdfrut/*` → `@tripdrive/*` (193 archivos TS/TSX + 8 package.json + workspace config).
+3. **Aliases CSS vars** `--vf-*` → `--td-*` para uso futuro sin tocar 100+ call sites.
+4. **Cookie migration** `vf-theme` → `td-theme` con fallback.
+
+**Decisión:** Ejecutar las 4 piezas. Las que no requieren acceso del operador (rebrand interno) se hacen en código; las que sí (DNS/domain) quedan documentadas en `DOMAINS.md`.
+
+### Cambios
+
+#### Domains (operador): `DOMAINS.md`
+
+- Arquitectura de subdominios documentada (4 apps + 1 tenant subdomain).
+- Recomendación: **Cloudflare Registrar + Vercel DNS** (sin proxy CF al inicio).
+- 5 pasos paso-a-paso con DNS records exactos, CNAMEs, dig + curl validation.
+- Sección de **multi-tenant via subdomain** explicando cómo agregar 2º cliente.
+- Sección de **email transaccional** con Cloudflare Email Routing para forwarding cero-costo.
+- Triggers documentados para activar Cloudflare proxy WAF en futuro (cuando llegue bot abuse, 2º tenant, auditoría seguridad).
+
+#### Rebrand 2.1 — packages
+
+- `sed` masivo `@verdfrut/` → `@tripdrive/` en todos los TS/TSX/JSON/MD/MJS (215 archivos):
+  ```bash
+  find . -type f \( -name "*.ts" -o -name "*.tsx" -o -name "*.json" -o -name "*.md" -o -name "*.mjs" \) \
+    -not -path "*/node_modules/*" -not -path "*/.next/*" -not -path "*/.turbo/*" \
+    -exec sed -i '' 's|@tripdrive/|@tripdrive/|g' {} +
+  ```
+- 8 `packages/*/package.json` con `name: @tripdrive/*`.
+- 3 `apps/*/package.json` con dependencies actualizadas.
+- 3 `next.config.ts` con `transpilePackages` actualizado.
+- `pnpm install` re-resuelve workspace; type-check 10/10 garantizado.
+
+#### Rebrand 2.2 — CSS vars (estrategia: aliases, no rename)
+
+- **Decisión arquitectónica:** los `--vf-*` siguen siendo los "dueños" del valor. Los `--td-*` se agregan como **aliases** (`--td-green-700: var(--vf-green-700)`).
+- 28 aliases nuevos en `:root` al final de `tokens.css`.
+- Razón: rename masivo de 100+ call sites en código es alto riesgo, bajo valor. La identidad visual NO cambia. Solo agregamos opciones para código nuevo.
+- Comentario header de `tokens.css` documenta la convención.
+
+#### Rebrand 2.3 — cookie
+
+- `theme.ts` server-side ahora lee `td-theme` PRIMERO, fallback a `vf-theme` legacy.
+- `theme-toggle.tsx` client-side escribe `td-theme` y borra la legacy (`max-age=0`).
+- Estrategia: preserva preferencia del usuario (no flash si ya tenía cookie vieja); migra al patrón nuevo cuando el usuario alterna el toggle por primera vez.
+- En 30+ días productivos podemos eliminar el código de lectura legacy (issue #156).
+
+### Alternativas consideradas
+
+- *Cloudflare proxy desde día 1:* descartado para no comprometer features Vercel (Analytics, Speed Insights) y no complicar caché desde el inicio. Más fácil agregarlo después si llega abuso.
+- *Vercel Registrar:* descartado por markup vs Cloudflare/Porkbun. Mismo resultado.
+- *Rename completo de CSS vars (`--vf-*` → `--td-*`) con sed masivo:* descartado. 100+ call sites en JSX styles `style={{ color: 'var(--vf-text)' }}`. Cualquier typo o regex equivocado introduce regresiones visuales sutiles. Aliases es defensa en profundidad.
+- *Subdominio dedicado por cliente desde el inicio (`{tenant}.tripdrive.xyz`):* sí está incluido (`verdfrut.tripdrive.xyz`), pero NO obligatorio. Los clientes pueden vivir bien en `app.tripdrive.xyz` con login segregando tenant. Subdominio branded es comodidad comercial, no requisito técnico.
+- *Renombrar carpeta local `/Downloads/VerdFrut/` → `/Downloads/TripDrive/`:* descartado en este commit — el rename físico de la carpeta rompería el path en mi memoria local y muchos scripts hardcoded. El user puede hacerlo cuando guste; el código no asume la ruta.
+
+### Riesgos / Limitaciones
+
+- *Cookie legacy `vf-theme`* queda en navegadores de usuarios existentes. Si los borramos pronto, ven flash de tema. Mitigación: leer ambas durante un sprint.
+- *La cookie nueva `td-theme` no se setea hasta que el usuario alterna el toggle.* Si nunca alterna, sigue usando la legacy. Aceptable porque el SSR ya muestra el tema correcto leyendo cualquiera de las dos.
+- *Aliases CSS son indirección de 1 hop* — performance trivial pero existe. Browser resuelve `var(--td-green-700)` → `var(--vf-green-700)` → `oklch(...)`. Sin impacto medible.
+- *No cambiamos cookies `sb-*` de Supabase* — esas las maneja el SDK y son ortogonales al rebrand.
+- *Rename del repo GitHub `Verdfrut` → `TripDrive`* queda pendiente (acción del user). GH redirige automático, los webhooks/CI se actualizan solos. Vercel detecta el rename y actualiza el repo source.
+- *Las pruebas con cliente real comienzan post-deploy de domains.* No podemos validar `app.tripdrive.xyz` hasta que el DNS propague (típicamente <10 min).
+- *Los packages publicados a npm (si llegara el día)* no se ven afectados — todos son `private: true` en workspace.
+
+### Oportunidades de mejora
+
+- Issue #156: eliminar lectura de cookie `vf-theme` legacy tras 30 días productivos.
+- Issue #157: migrar gradualmente call sites de `--vf-*` → `--td-*` cuando se toque cada componente.
+- Issue #158: invertir dirección de los aliases (`--vf-*: var(--td-*)`) cuando la mayoría migre.
+- Issue #159: rename de `tenants.json` path `/etc/verdfrut/` → `/etc/tripdrive/` cuando se haga deploy a VPS dedicado (Vercel actual no usa file system).
+- Issue #160: configurar redirect 308 `tripdrive.com` → `tripdrive.xyz` si llegamos a comprar `.com`.
+- Issue #161: validar que GitHub repo rename no rompe links externos en docs/issues/PRs ya creados.

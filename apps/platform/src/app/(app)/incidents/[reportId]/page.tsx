@@ -13,7 +13,7 @@
 // todo lo que necesitamos para el mapa en vivo.
 
 import { notFound } from 'next/navigation';
-import { Card, Badge, PageHeader } from '@verdfrut/ui';
+import { Card, Badge, PageHeader } from '@tripdrive/ui';
 import { requireRole } from '@/lib/auth';
 import { getIncident, listIncidentMessages } from '@/lib/queries/incidents';
 import { getRoute } from '@/lib/queries/routes';
@@ -25,7 +25,7 @@ import { getDriversByIds } from '@/lib/queries/drivers';
 import { LiveRouteMapLoader } from '@/components/map/live-route-map-loader';
 import type { RouteMapStop, RouteMapDepot } from '@/components/map/route-map';
 import { IncidentChatClient } from './incident-chat-client';
-import type { ChatStatus, IncidentDetail } from '@verdfrut/types';
+import type { ChatStatus, IncidentDetail } from '@tripdrive/types';
 
 export const dynamic = 'force-dynamic';
 

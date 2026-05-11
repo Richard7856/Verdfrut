@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { Button, Field, Input } from '@verdfrut/ui';
+import { Button, Field, Input } from '@tripdrive/ui';
 import { loginAction } from './actions';
 
 export function LoginForm({ next, initialError }: { next?: string; initialError?: string }) {

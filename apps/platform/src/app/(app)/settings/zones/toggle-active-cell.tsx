@@ -1,8 +1,8 @@
 'use client';
 
 import { useTransition } from 'react';
-import { Button, toast } from '@verdfrut/ui';
-import type { Zone } from '@verdfrut/types';
+import { Button, toast } from '@tripdrive/ui';
+import type { Zone } from '@tripdrive/types';
 import { toggleZoneActiveAction } from './actions';
 
 export function ToggleActiveCell({ zone }: { zone: Zone }) {

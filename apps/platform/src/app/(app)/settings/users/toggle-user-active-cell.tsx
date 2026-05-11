@@ -1,8 +1,8 @@
 'use client';
 
 import { useTransition } from 'react';
-import { Button, toast } from '@verdfrut/ui';
-import type { UserProfile } from '@verdfrut/types';
+import { Button, toast } from '@tripdrive/ui';
+import type { UserProfile } from '@tripdrive/types';
 import { toggleUserActiveAction } from './actions';
 
 export function ToggleUserActiveCell({ user }: { user: UserProfile }) {

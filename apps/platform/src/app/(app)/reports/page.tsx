@@ -7,12 +7,12 @@
 // con drill-downs y más filtros. La meta H5 es ya no ser stub.
 
 import Link from 'next/link';
-import { Card, EmptyState, PageHeader } from '@verdfrut/ui';
+import { Card, EmptyState, PageHeader } from '@tripdrive/ui';
 import { requireRole } from '@/lib/auth';
 import { listZones } from '@/lib/queries/zones';
-import { createServerClient } from '@verdfrut/supabase/server';
-import { todayInZone } from '@verdfrut/utils';
-import type { RouteStatus } from '@verdfrut/types';
+import { createServerClient } from '@tripdrive/supabase/server';
+import { todayInZone } from '@tripdrive/utils';
+import type { RouteStatus } from '@tripdrive/types';
 
 export const metadata = { title: 'Reportes' };
 export const dynamic = 'force-dynamic';

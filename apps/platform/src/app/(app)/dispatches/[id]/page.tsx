@@ -3,7 +3,7 @@
 
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { Badge, Card, PageHeader, Button } from '@verdfrut/ui';
+import { Badge, Card, PageHeader, Button } from '@tripdrive/ui';
 import { requireRole } from '@/lib/auth';
 import { getDispatch, listRoutesByDispatch } from '@/lib/queries/dispatches';
 import { listRoutes, countStopsForRoutes } from '@/lib/queries/routes';
@@ -22,7 +22,7 @@ import { RouteStopsCard } from './route-stops-card';
 import { ShareDispatchButton } from './share-dispatch-button';
 import { AddVehicleButton } from './add-vehicle-button';
 import { RestructureSnapshotBanner } from './restructure-snapshot-banner';
-import type { ChatStatus, DispatchStatus, Store } from '@verdfrut/types';
+import type { ChatStatus, DispatchStatus, Store } from '@tripdrive/types';
 
 export const dynamic = 'force-dynamic';
 

@@ -15,11 +15,11 @@
 // - 'real_problem' / 'unknown' → push fanout normal (admin + dispatcher + zone_manager).
 // Cada decisión queda en chat_ai_decisions para auditar y calibrar.
 
-import { createServerClient, createServiceRoleClient } from '@verdfrut/supabase/server';
-import { logger } from '@verdfrut/observability';
+import { createServerClient, createServiceRoleClient } from '@tripdrive/supabase/server';
+import { logger } from '@tripdrive/observability';
 import { sendChatPushToZoneManagers } from '@/lib/push-fanout';
 import { consume, LIMITS } from '@/lib/rate-limit';
-import { classifyDriverMessage } from '@verdfrut/ai';
+import { classifyDriverMessage } from '@tripdrive/ai';
 
 const MAX_CHAT_TEXT = 2_000; // Mismo cap que el composer — defensa server-side.
 
@@ -152,7 +152,7 @@ async function persistEscalationFailure(
     reportId, messageId: triggeringMessageId, err,
   });
   try {
-    const { createServiceRoleClient } = await import('@verdfrut/supabase/server');
+    const { createServiceRoleClient } = await import('@tripdrive/supabase/server');
     const admin = createServiceRoleClient();
     // El enum `category` actual es trivial|real_problem|unknown. Marcamos como
     // unknown con prefix claro en `rationale` para que la pantalla de audit

@@ -80,7 +80,7 @@ export async function compressImage(
     const result = await Promise.race([compression, timeout]);
     // Hint observable: si el caller revisa este flag puede mandar telemetría.
     // No lo hacemos acá porque el package es client-side y no depende de
-    // @verdfrut/observability. El call site del driver registra la métrica.
+    // @tripdrive/observability. El call site del driver registra la métrica.
     return result;
   } catch (err) {
     // Cualquier error de canvas / decode → fallback al original con flag.

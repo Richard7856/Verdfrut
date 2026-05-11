@@ -1,5 +1,5 @@
 {
-  "name": "@verdfrut/ai",
+  "name": "@tripdrive/ai",
   "version": "0.1.0",
   "private": true,
   "main": "./src/index.ts",
@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.0",
-    "@verdfrut/types": "workspace:*"
+    "@tripdrive/types": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.6.2"

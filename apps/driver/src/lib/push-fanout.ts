@@ -4,13 +4,13 @@
 //
 // Por qué no compartimos `apps/platform/src/lib/push.ts`:
 // el archivo es server-only y los apps no comparten src/. Mover a paquete
-// `@verdfrut/notifications` valdrá cuando aparezca el tercer consumidor.
+// `@tripdrive/notifications` valdrá cuando aparezca el tercer consumidor.
 // Por ahora copiamos la pieza mínima que driver necesita.
 
 import 'server-only';
 import webpush from 'web-push';
-import { createServiceRoleClient } from '@verdfrut/supabase/server';
-import { logger } from '@verdfrut/observability';
+import { createServiceRoleClient } from '@tripdrive/supabase/server';
+import { logger } from '@tripdrive/observability';
 
 let vapidConfigured = false;
 function ensureVapidConfigured(): boolean {

@@ -8,7 +8,7 @@
 // en cada query.
 
 import 'server-only';
-import { createServiceRoleClient } from '@verdfrut/supabase/server';
+import { createServiceRoleClient } from '@tripdrive/supabase/server';
 
 export function cpClient() {
   return createServiceRoleClient().schema('control_plane');

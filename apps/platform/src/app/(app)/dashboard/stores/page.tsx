@@ -3,8 +3,8 @@
 // quedan fuera (HAVING COUNT > 0); para auditarlas: settings/stores.
 
 import Link from 'next/link';
-import { PageHeader, Card, DataTable, type Column } from '@verdfrut/ui';
-import { todayInZone } from '@verdfrut/utils';
+import { PageHeader, Card, DataTable, type Column } from '@tripdrive/ui';
+import { todayInZone } from '@tripdrive/utils';
 import { requireRole } from '@/lib/auth';
 import { listZones } from '@/lib/queries/zones';
 import { getDashboardTopStores, type TopStoreRow } from '@/lib/queries/dashboard';

@@ -1,8 +1,8 @@
 'use client';
 
 import { useTransition } from 'react';
-import { Button, toast } from '@verdfrut/ui';
-import type { Depot } from '@verdfrut/types';
+import { Button, toast } from '@tripdrive/ui';
+import type { Depot } from '@tripdrive/types';
 import { toggleDepotActiveAction } from './actions';
 
 export function ToggleDepotActiveCell({ depot }: { depot: Depot }) {

@@ -2,7 +2,7 @@
 
 // Helpers cliente para suscripción a Web Push del platform.
 // Patrón idéntico al driver — duplicado deliberado (los apps no comparten src/).
-// Cuando aparezca un 3er consumidor, mover a `@verdfrut/notifications`.
+// Cuando aparezca un 3er consumidor, mover a `@tripdrive/notifications`.
 
 const PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? '';
 

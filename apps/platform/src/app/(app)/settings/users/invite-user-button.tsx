@@ -1,8 +1,8 @@
 'use client';
 
 import { useRef, useState, useTransition } from 'react';
-import { Button, Field, Input, Modal, Select, toast } from '@verdfrut/ui';
-import type { UserRole, Zone } from '@verdfrut/types';
+import { Button, Field, Input, Modal, Select, toast } from '@tripdrive/ui';
+import type { UserRole, Zone } from '@tripdrive/types';
 import { inviteUserAction } from './actions';
 
 const ROLE_OPTIONS: { value: UserRole; label: string }[] = [

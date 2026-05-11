@@ -5,19 +5,19 @@
 // Aplican RLS — el chofer solo puede tocar sus propios datos.
 
 import { revalidatePath } from 'next/cache';
-import { createServerClient } from '@verdfrut/supabase/server';
-import { haversineMeters } from '@verdfrut/utils';
-import type { TableUpdate } from '@verdfrut/supabase';
+import { createServerClient } from '@tripdrive/supabase/server';
+import { haversineMeters } from '@tripdrive/utils';
+import type { TableUpdate } from '@tripdrive/supabase';
 import { getStopContext } from '@/lib/queries/stop';
 import { mapDeliveryReport } from '@/lib/queries/report';
-import { getInitialStep } from '@verdfrut/flow-engine';
+import { getInitialStep } from '@tripdrive/flow-engine';
 import type {
   DeliveryReport,
   IncidentDetail,
   ReportType,
   ResolutionType,
   TicketData,
-} from '@verdfrut/types';
+} from '@tripdrive/types';
 
 /**
  * Umbrales de cercanía a la tienda según tipo de visita.
@@ -164,7 +164,7 @@ export async function arriveAtStop(
 
 /**
  * Avanza el flujo a un nuevo step. La lógica de "cuál es el next" la calculó el cliente
- * usando @verdfrut/flow-engine; el server confía y persiste.
+ * usando @tripdrive/flow-engine; el server confía y persiste.
  */
 export async function advanceStep(reportId: string, nextStep: string): Promise<Result> {
   const supabase = await createServerClient();

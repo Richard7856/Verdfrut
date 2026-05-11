@@ -7,8 +7,8 @@
 // confiamos en RLS y filtramos por la fecha.
 
 import 'server-only';
-import { createServerClient } from '@verdfrut/supabase/server';
-import type { Route, Stop, Store, RouteStatus, StopStatus } from '@verdfrut/types';
+import { createServerClient } from '@tripdrive/supabase/server';
+import type { Route, Stop, Store, RouteStatus, StopStatus } from '@tripdrive/types';
 
 interface RouteRow {
   id: string;

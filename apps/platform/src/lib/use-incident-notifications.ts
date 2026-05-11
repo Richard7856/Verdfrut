@@ -16,8 +16,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createBrowserClient } from '@verdfrut/supabase/browser';
-import { toast } from '@verdfrut/ui';
+import { createBrowserClient } from '@tripdrive/supabase/browser';
+import { toast } from '@tripdrive/ui';
 
 const SOUND_TOGGLE_KEY = 'vf-incident-sound-enabled';
 

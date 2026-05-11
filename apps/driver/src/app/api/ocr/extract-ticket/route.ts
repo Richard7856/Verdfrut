@@ -20,9 +20,9 @@
 //   502 — Anthropic devolvió garbage o timeout (cliente puede reintentar)
 
 import { NextResponse } from 'next/server';
-import { createServerClient } from '@verdfrut/supabase/server';
-import { extractTicketFromImageUrl } from '@verdfrut/ai';
-import type { TicketData } from '@verdfrut/types';
+import { createServerClient } from '@tripdrive/supabase/server';
+import { extractTicketFromImageUrl } from '@tripdrive/ai';
+import type { TicketData } from '@tripdrive/types';
 import { consume, LIMITS } from '@/lib/rate-limit';
 
 interface RequestBody {

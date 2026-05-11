@@ -2,12 +2,12 @@
 // Agrupados por fecha (hoy / mañana / siguiente / pasados).
 
 import Link from 'next/link';
-import { Badge, Card, EmptyState, PageHeader, Button } from '@verdfrut/ui';
+import { Badge, Card, EmptyState, PageHeader, Button } from '@tripdrive/ui';
 import { requireRole } from '@/lib/auth';
-import { todayInZone } from '@verdfrut/utils';
+import { todayInZone } from '@tripdrive/utils';
 import { listDispatchSummaries, type DispatchSummary } from '@/lib/queries/dispatches';
 import { listZones } from '@/lib/queries/zones';
-import type { DispatchStatus } from '@verdfrut/types';
+import type { DispatchStatus } from '@tripdrive/types';
 import { CreateDispatchButton } from './create-dispatch-button';
 
 export const metadata = { title: 'Tiros' };

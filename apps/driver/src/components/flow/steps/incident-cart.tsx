@@ -14,8 +14,8 @@
 //    en bloque al final con Continuar).
 
 import { useState } from 'react';
-import { Button, Card } from '@verdfrut/ui';
-import type { IncidentDetail, IncidentType } from '@verdfrut/types';
+import { Button, Card } from '@tripdrive/ui';
+import type { IncidentDetail, IncidentType } from '@tripdrive/types';
 import { StepShell } from '../step-shell';
 import type { StepProps } from '../stop-detail-client';
 

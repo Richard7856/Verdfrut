@@ -4,8 +4,8 @@
 // Operaciones: crear, renombrar, eliminar, asignar/desasignar rutas, mover paradas.
 
 import { revalidatePath } from 'next/cache';
-import { createServerClient, createServiceRoleClient } from '@verdfrut/supabase/server';
-import { logger } from '@verdfrut/observability';
+import { createServerClient, createServiceRoleClient } from '@tripdrive/supabase/server';
+import { logger } from '@tripdrive/observability';
 import { requireRole } from '@/lib/auth';
 import { moveStopToAnotherRoute, deleteStopsForRoute } from '@/lib/queries/stops';
 import { cancelRoute } from '@/lib/queries/routes';

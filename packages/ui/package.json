@@ -1,5 +1,5 @@
 {
-  "name": "@verdfrut/ui",
+  "name": "@tripdrive/ui",
   "version": "0.1.0",
   "private": true,
   "main": "./src/index.ts",

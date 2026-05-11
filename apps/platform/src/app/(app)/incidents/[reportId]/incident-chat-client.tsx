@@ -8,8 +8,8 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button } from '@verdfrut/ui';
-import type { ChatMessage, ChatStatus } from '@verdfrut/types';
+import { Button } from '@tripdrive/ui';
+import type { ChatMessage, ChatStatus } from '@tripdrive/types';
 import { ChatThread, type OptimisticMessage } from '@/components/chat/chat-thread';
 import { ChatComposerManager } from '@/components/chat/chat-composer-manager';
 import { useChatRealtime } from '@/lib/use-chat-realtime';

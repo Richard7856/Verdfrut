@@ -1,9 +1,16 @@
-/* VerdFrut Design Tokens — identidad oficial extraída del HTML standalone.
+/* TripDrive Design Tokens — identidad oficial.
  *
  * Este archivo es el ÚNICO punto donde se define la identidad visual.
  * Cambias aquí, se propaga a todas las apps.
  *
- * Convención `vf-*` heredada del HTML de identidad.
+ * Convención de naming (ADR-056 / H6):
+ *   - `--vf-*` son los nombres "propietarios" (dueños del valor) — legacy
+ *     del primer nombre de la plataforma. Cientos de call sites en código
+ *     existente los referencian directamente.
+ *   - `--td-*` son aliases nuevos que apuntan a sus equivalentes `--vf-*`.
+ *     Convención preferida para código nuevo (TripDrive). Permite migración
+ *     gradual sin un sed masivo de alto riesgo.
+ *
  * Espacio de color: oklch (perceptualmente uniforme — dark mode "se siente igual" que light).
  * Fuente: Geist (Vercel) + Geist Mono.
  * Tema: el sidebar SIEMPRE es oscuro (incluso en light mode); el resto cambia con [data-theme].
@@ -178,4 +185,44 @@
   border-radius: 8px;
   border: 2px solid transparent;
   background-clip: content-box;
+}
+
+/* ============================================================================
+ * Aliases `--td-*` para código nuevo (ADR-056 / H6).
+ *
+ * Cada `--td-*` apunta directamente a su `--vf-*` equivalente. Cambiar el valor
+ * del lado `--vf-*` se propaga automáticamente. Código nuevo debe usar `--td-*`;
+ * cuando todos los call sites migren (Sprint futuro), invertimos la dirección:
+ * `--vf-*: var(--td-*)` y eventualmente eliminamos `--vf-*`.
+ * ============================================================================ */
+:root {
+  /* Brand */
+  --td-green-900: var(--vf-green-900);
+  --td-green-800: var(--vf-green-800);
+  --td-green-700: var(--vf-green-700);
+  --td-green-600: var(--vf-green-600);
+  --td-green-500: var(--vf-green-500);
+  --td-green-100: var(--vf-green-100);
+  --td-green-50:  var(--vf-green-50);
+  --td-accent:      var(--vf-accent);
+  --td-accent-soft: var(--vf-accent-soft);
+  /* Estado */
+  --td-ok:   var(--vf-ok);
+  --td-warn: var(--vf-warn);
+  --td-crit: var(--vf-crit);
+  --td-info: var(--vf-info);
+  /* Surfaces / neutros */
+  --td-bg:        var(--vf-bg);
+  --td-bg-elev:   var(--vf-bg-elev);
+  --td-bg-sub:    var(--vf-bg-sub);
+  --td-bg-side:   var(--vf-bg-side);
+  --td-bg-side-elev: var(--vf-bg-side-elev);
+  --td-line:      var(--vf-line);
+  --td-line-soft: var(--vf-line-soft);
+  --td-line-strong: var(--vf-line-strong);
+  --td-text:      var(--vf-text);
+  --td-text-mute: var(--vf-text-mute);
+  --td-text-faint: var(--vf-text-faint);
+  --td-text-on-dark: var(--vf-text-on-dark);
+  --td-text-on-dark-mute: var(--vf-text-on-dark-mute);
 }

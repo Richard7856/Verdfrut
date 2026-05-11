@@ -3,8 +3,8 @@
 
 import 'server-only';
 import { redirect } from 'next/navigation';
-import { createServerClient } from '@verdfrut/supabase/server';
-import type { UserProfile, UserRole } from '@verdfrut/types';
+import { createServerClient } from '@tripdrive/supabase/server';
+import type { UserProfile, UserRole } from '@tripdrive/types';
 
 const ALLOWED_ROLES: UserRole[] = ['driver', 'zone_manager'];
 

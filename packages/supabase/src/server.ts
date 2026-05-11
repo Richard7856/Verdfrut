@@ -2,7 +2,7 @@
 // NO se cachea: cada request crea uno nuevo (los cookies son per-request).
 //
 // USO:
-//   import { createServerClient } from '@verdfrut/supabase/server';
+//   import { createServerClient } from '@tripdrive/supabase/server';
 //   const supabase = await createServerClient();
 
 import { createServerClient as createSSRServerClient } from '@supabase/ssr';

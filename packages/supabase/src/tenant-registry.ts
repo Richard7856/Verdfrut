@@ -6,7 +6,7 @@
 // El archivo NUNCA se committea — vive en el VPS en /etc/verdfrut/tenants.json
 // con permisos restrictivos (chmod 600, root:root).
 
-import type { TenantRegistryEntry } from '@verdfrut/types';
+import type { TenantRegistryEntry } from '@tripdrive/types';
 
 interface TenantRegistry {
   tenants: TenantRegistryEntry[];

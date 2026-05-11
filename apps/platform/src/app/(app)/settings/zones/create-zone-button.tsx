@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { Button, Field, Input, Modal, toast } from '@verdfrut/ui';
+import { Button, Field, Input, Modal, toast } from '@tripdrive/ui';
 import { createZoneAction } from './actions';
 
 export function CreateZoneButton() {

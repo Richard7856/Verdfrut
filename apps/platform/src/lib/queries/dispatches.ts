@@ -1,8 +1,8 @@
 // Queries de dispatches (tiros). ADR-024.
 
 import 'server-only';
-import { createServerClient } from '@verdfrut/supabase/server';
-import type { Dispatch, DispatchStatus, Route } from '@verdfrut/types';
+import { createServerClient } from '@tripdrive/supabase/server';
+import type { Dispatch, DispatchStatus, Route } from '@tripdrive/types';
 import { listRoutes } from './routes';
 
 interface DispatchRow {
@@ -141,7 +141,7 @@ export async function getDispatchByPublicToken(token: string): Promise<Dispatch 
     return null;
   }
   // service_role bypass RLS — necesario para vista pública (sin sesión).
-  const { createServiceRoleClient } = await import('@verdfrut/supabase/server');
+  const { createServiceRoleClient } = await import('@tripdrive/supabase/server');
   const admin = createServiceRoleClient();
   const { data, error } = await admin
     .from('dispatches')

@@ -3,7 +3,7 @@
 
 import type { Metadata, Viewport } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
-import { Toaster } from '@verdfrut/ui';
+import { Toaster } from '@tripdrive/ui';
 import './globals.css';
 
 // Geist es la fuente oficial de la identidad TripDrive. next/font la auto-hostea

@@ -12,7 +12,7 @@
 // Los archivos se comprimen a ~1MB con canvas antes de subir, lo que reduce
 // el tráfico de datos del chofer y el tiempo de upload (típico móvil 4G/3G).
 
-import { createBrowserClient } from '@verdfrut/supabase/browser';
+import { createBrowserClient } from '@tripdrive/supabase/browser';
 
 const MAX_DIMENSION = 1600; // px del lado largo
 const JPEG_QUALITY = 0.78;

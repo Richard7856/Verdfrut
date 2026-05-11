@@ -2,8 +2,8 @@
 // Una stop pertenece a una route. El sequence lo asigna el optimizer.
 
 import 'server-only';
-import { createServerClient } from '@verdfrut/supabase/server';
-import type { Stop, StopStatus } from '@verdfrut/types';
+import { createServerClient } from '@tripdrive/supabase/server';
+import type { Stop, StopStatus } from '@tripdrive/types';
 import { recalculateRouteMetrics } from './routes';
 
 interface StopRow {

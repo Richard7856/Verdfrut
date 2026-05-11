@@ -5,7 +5,7 @@
 
 import { useTransition } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Field, Input, Spinner } from '@verdfrut/ui';
+import { Field, Input, Spinner } from '@tripdrive/ui';
 
 interface ZoneOption {
   id: string;

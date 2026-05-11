@@ -4,8 +4,8 @@
 
 import { requireDriverProfile } from '@/lib/auth';
 import { getDriverRouteForDate, getRouteStopsWithStores } from '@/lib/queries/route';
-import { createServerClient } from '@verdfrut/supabase/server';
-import { todayInZone } from '@verdfrut/utils';
+import { createServerClient } from '@tripdrive/supabase/server';
+import { todayInZone } from '@tripdrive/utils';
 import { logoutAction } from '@/app/(auth)/login/actions';
 import { RouteHeader } from '@/components/route/route-header';
 import { ReorderableStopsList } from '@/components/route/reorderable-stops-list';
@@ -14,7 +14,7 @@ import { GpsBroadcastController } from '@/components/route/gps-broadcast-control
 import { PushOptIn } from '@/components/route/push-opt-in';
 import { OutboxBadge } from '@/components/outbox-badge';
 import Link from 'next/link';
-import { Button } from '@verdfrut/ui';
+import { Button } from '@tripdrive/ui';
 
 export const metadata = { title: 'Mi ruta' };
 // Esta página no debe cachearse — los stops cambian conforme el chofer avanza.

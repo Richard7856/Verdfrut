@@ -2,9 +2,9 @@
 // El optimizador necesita: lat, lng, time windows, service time.
 
 import 'server-only';
-import { createServerClient } from '@verdfrut/supabase/server';
-import type { TableUpdate } from '@verdfrut/supabase';
-import type { Store } from '@verdfrut/types';
+import { createServerClient } from '@tripdrive/supabase/server';
+import type { TableUpdate } from '@tripdrive/supabase';
+import type { Store } from '@tripdrive/types';
 
 interface StoreRow {
   id: string;

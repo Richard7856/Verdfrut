@@ -6,7 +6,7 @@
 // La red del comercial es típicamente estable (oficina/laptop), no necesita cola.
 
 import { useRef, useState, useTransition } from 'react';
-import { Button } from '@verdfrut/ui';
+import { Button } from '@tripdrive/ui';
 import {
   sendManagerMessage,
   uploadManagerChatPhotoAction,

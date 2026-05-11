@@ -8,7 +8,7 @@
 // El registro de tenants y resolución por subdomain se activa en Fase 6 (control plane).
 
 import { NextResponse, type NextRequest } from 'next/server';
-import { createMiddlewareClient } from '@verdfrut/supabase/middleware';
+import { createMiddlewareClient } from '@tripdrive/supabase/middleware';
 
 const PUBLIC_PATHS = ['/login', '/_next', '/favicon.ico', '/api/health'];
 
@@ -28,7 +28,7 @@ export async function proxy(req: NextRequest) {
 
   const response = NextResponse.next({ request: req });
 
-  // Adaptamos las cookies de Next a la interface esperada por @verdfrut/supabase.
+  // Adaptamos las cookies de Next a la interface esperada por @tripdrive/supabase.
   // El package no depende de tipos de Next para evitar conflictos de versiones.
   const supabase = createMiddlewareClient(
     {

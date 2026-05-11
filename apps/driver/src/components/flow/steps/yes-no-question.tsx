@@ -3,7 +3,7 @@
 // Componente reutilizable para steps que son una pregunta sí/no.
 // Cada step concreto le pasa título, descripción, y qué hacer en cada respuesta.
 
-import { Button } from '@verdfrut/ui';
+import { Button } from '@tripdrive/ui';
 
 interface Props {
   title: string;

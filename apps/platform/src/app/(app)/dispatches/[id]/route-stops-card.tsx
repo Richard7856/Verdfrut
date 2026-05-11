@@ -26,9 +26,9 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Badge, Card, Select, toast } from '@verdfrut/ui';
-import { formatDuration } from '@verdfrut/utils';
-import type { Route, RouteStatus, Stop, Store, Vehicle } from '@verdfrut/types';
+import { Badge, Card, Select, toast } from '@tripdrive/ui';
+import { formatDuration } from '@tripdrive/utils';
+import type { Route, RouteStatus, Stop, Store, Vehicle } from '@tripdrive/types';
 import { moveStopToAnotherRouteAction } from '../actions';
 import { reorderStopsAction, assignDepotToRouteAction, deleteStopFromRouteAction } from '../../routes/actions';
 import { AddStopButton } from '../../routes/[id]/add-stop-button';

@@ -1,5 +1,5 @@
 {
-  "name": "@verdfrut/maps",
+  "name": "@tripdrive/maps",
   "version": "0.1.0",
   "private": true,
   "main": "./src/index.ts",
@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "mapbox-gl": "^3.7.0",
-    "@verdfrut/types": "workspace:*"
+    "@tripdrive/types": "workspace:*"
   },
   "devDependencies": {
     "@types/mapbox-gl": "^3.4.0",

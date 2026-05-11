@@ -12,8 +12,8 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, Card } from '@verdfrut/ui';
-import type { ReportType } from '@verdfrut/types';
+import { Button, Card } from '@tripdrive/ui';
+import type { ReportType } from '@tripdrive/types';
 import { getCurrentDriverCoords, isCoordsError } from '@/lib/geo';
 import { arriveAtStop } from '@/app/route/stop/[id]/actions';
 

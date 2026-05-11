@@ -1,12 +1,17 @@
 'use client';
 
-// Toggle dark/light. Persiste en cookie `vf-theme` y muta data-theme en runtime.
-// Sin server action — el ssr siguiente leerá la cookie y aplicará el tema correcto.
+// Toggle dark/light. Persiste en cookie `td-theme` y muta data-theme en runtime.
+// Sin server action — el SSR siguiente leerá la cookie y aplicará el tema correcto.
+//
+// ADR-056 / H6: la cookie cambió de `vf-theme` → `td-theme`. Al escribir la
+// nueva, BORRAMOS la legacy (max-age=0) para no dejar dos cookies divergentes
+// si el usuario alterna el tema. El server (theme.ts) lee ambas por compat.
 
 import { useEffect, useState } from 'react';
 
 type Theme = 'light' | 'dark';
-const COOKIE = 'vf-theme';
+const COOKIE = 'td-theme';
+const COOKIE_LEGACY = 'vf-theme';
 
 function readCurrentTheme(): Theme {
   if (typeof document === 'undefined') return 'light';
@@ -17,6 +22,8 @@ function readCurrentTheme(): Theme {
 function writeThemeCookie(theme: Theme) {
   // 1 año de persistencia. Path=/ para que aplique global.
   document.cookie = `${COOKIE}=${theme}; path=/; max-age=${60 * 60 * 24 * 365}; SameSite=Lax`;
+  // Limpiar la cookie legacy si existe — evita divergencia.
+  document.cookie = `${COOKIE_LEGACY}=; path=/; max-age=0; SameSite=Lax`;
 }
 
 export function ThemeToggle() {

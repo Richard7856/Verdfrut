@@ -13,8 +13,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Button } from '@verdfrut/ui';
-import type { ChatMessage, DeliveryReport } from '@verdfrut/types';
+import { Button } from '@tripdrive/ui';
+import type { ChatMessage, DeliveryReport } from '@tripdrive/types';
 import { ChatThread, type OptimisticMessage } from '@/components/chat/chat-thread';
 import { ChatComposerDriver } from '@/components/chat/chat-composer-driver';
 import { useChatRealtime } from '@/lib/use-chat-realtime';

@@ -1,7 +1,7 @@
 'use client';
 
 import { useTransition } from 'react';
-import { Button } from '@verdfrut/ui';
+import { Button } from '@tripdrive/ui';
 import { logoutAction } from '@/app/(auth)/login/actions';
 
 export function LogoutButton() {

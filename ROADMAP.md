@@ -24,19 +24,45 @@
 ✅ Sprint H3 — Robustez del split/merge (ADR-053)
 ✅ Sprint H4 — Performance + escala (ADR-054)
 ✅ Sprint H5 — Reportería + audit chat + UX pulida (ADR-055)
+✅ Sprint H6 — Custom domains doc + rebrand interno fase 2 (ADR-056)
 ```
 
-**55 ADRs documentados. 33 migraciones tenant + 1 control plane.**
+**56 ADRs documentados. 33 migraciones tenant + 1 control plane.**
 
 ---
 
-## 🚧 Sprint H6 — Custom domains + rebrand fase 2 *(siguiente, ~2-3 días)*
+## 🚧 Sprint H7 — Pruebas con cliente real *(siguiente, variable)*
 
-### Lo que viene ahora:
-- Custom domains `app.tripdrive.xyz`, `driver.tripdrive.xyz`, `admin.tripdrive.xyz`, `verdfrut.tripdrive.xyz`
-- Rename packages `@verdfrut/*` → `@tripdrive/*`
-- Aliasar CSS vars `--vf-*` → `--td-*`
-- Migrar cookie `vf-theme` → `td-theme`
+### Pre-condición operativa (depende del user):
+- [ ] Comprar dominio `tripdrive.xyz` (Cloudflare Registrar recomendado, ver `DOMAINS.md`)
+- [ ] Configurar DNS: 4 CNAMEs a Vercel
+- [ ] Agregar custom domains en los 3 proyectos Vercel
+- [ ] Setear env vars Sentry/Mapbox/Anthropic en Vercel
+- [ ] Configurar 4 schedules n8n (timeout-chats, orphans, breadcrumbs, rate-limit-cleanup)
+
+### Pruebas (Sprint en sí):
+- Test piloto con NETO — operación real
+- Observar Sentry dashboard durante operación
+- Bug hunt según lo reportado
+- Validación banner ETA (Mapbox activado) + KPIs reales
+- Documentar lecciones aprendidas
+
+---
+
+## 📦 Sprint H6 (CERRADO) — entregables
+
+### Rebrand interno fase 2
+- 215 archivos: `@verdfrut/*` → `@tripdrive/*` (sed masivo + type-check 10/10)
+- 8 packages renombrados (`@tripdrive/types`, `@tripdrive/ui`, etc.)
+- 28 aliases CSS `--td-*` → `--vf-*` (estrategia no-rename, doc en tokens.css)
+- Cookie `td-theme` canónica + `vf-theme` legacy con fallback server-side
+
+### `DOMAINS.md` (NUEVO)
+- Arquitectura 4+ subdominios documentada
+- 5 pasos paso-a-paso DNS + Vercel custom domains
+- Patrón multi-tenant subdomain
+- Email transaccional con Cloudflare Email Routing
+- Triggers para activar Cloudflare WAF en futuro
 
 ---
 

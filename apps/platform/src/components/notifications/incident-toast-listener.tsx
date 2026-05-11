@@ -7,7 +7,7 @@
 // El componente sabe el rol del viewer y se desactiva (no-op) para zone_manager
 // y driver — esos roles no son destinatarios de las notificaciones de admin.
 
-import type { UserRole } from '@verdfrut/types';
+import type { UserRole } from '@tripdrive/types';
 import { useIncidentNotifications } from '@/lib/use-incident-notifications';
 
 interface Props {

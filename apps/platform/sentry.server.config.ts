@@ -6,7 +6,7 @@
 // no breadcrumbs de DOM, etc).
 
 import * as Sentry from '@sentry/nextjs';
-import { initSentry, configureLogger } from '@verdfrut/observability';
+import { initSentry, configureLogger } from '@tripdrive/observability';
 
 configureLogger({ app: 'platform' });
 initSentry(Sentry, { app: 'platform', context: 'server' });

@@ -1,7 +1,7 @@
 // Pantalla de creación de ruta. Filtra tiendas/camiones/choferes por zona seleccionada.
 // Llama a createAndOptimizeRoute via Server Action.
 
-import { PageHeader } from '@verdfrut/ui';
+import { PageHeader } from '@tripdrive/ui';
 import { requireRole } from '@/lib/auth';
 import { listZones } from '@/lib/queries/zones';
 import { listStores } from '@/lib/queries/stores';

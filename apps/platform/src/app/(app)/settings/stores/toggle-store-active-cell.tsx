@@ -1,8 +1,8 @@
 'use client';
 
 import { useTransition } from 'react';
-import { Button, toast } from '@verdfrut/ui';
-import type { Store } from '@verdfrut/types';
+import { Button, toast } from '@tripdrive/ui';
+import type { Store } from '@tripdrive/types';
 import { toggleStoreActiveAction } from './actions';
 
 export function ToggleStoreActiveCell({ store }: { store: Store }) {

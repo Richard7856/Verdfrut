@@ -10,7 +10,7 @@
 //      varios updates, marca offRoute=true para que el caller pida recálculo.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { haversineMeters } from '@verdfrut/utils';
+import { haversineMeters } from '@tripdrive/utils';
 import type { NavStep } from './mapbox';
 import type { DriverPosition } from './use-driver-position';
 

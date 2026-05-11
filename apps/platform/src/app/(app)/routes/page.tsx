@@ -2,8 +2,8 @@
 // Filtros via query params para que sean bookmarkables y SSR-friendly.
 
 import Link from 'next/link';
-import { Badge, Button, DataTable, PageHeader, Select, type Column, type BadgeTone } from '@verdfrut/ui';
-import type { Route, RouteStatus, Zone } from '@verdfrut/types';
+import { Badge, Button, DataTable, PageHeader, Select, type Column, type BadgeTone } from '@tripdrive/ui';
+import type { Route, RouteStatus, Zone } from '@tripdrive/types';
 import { requireRole } from '@/lib/auth';
 import { listRoutes, countStopsForRoutes } from '@/lib/queries/routes';
 import { listZones } from '@/lib/queries/zones';

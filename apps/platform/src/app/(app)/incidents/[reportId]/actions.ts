@@ -5,7 +5,7 @@
 // (ver migración 018).
 
 import { revalidatePath } from 'next/cache';
-import { createServerClient } from '@verdfrut/supabase/server';
+import { createServerClient } from '@tripdrive/supabase/server';
 import { uploadBlobToStorage } from '@/lib/storage-upload';
 import { consume, LIMITS } from '@/lib/rate-limit';
 

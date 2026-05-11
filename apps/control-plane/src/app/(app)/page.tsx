@@ -2,7 +2,7 @@
 // Sprint 18 agregará agregaciones reales de KPIs cross-tenant. Hoy mostramos
 // solo el conteo y resumen de tenants registrados.
 
-import { PageHeader, Card } from '@verdfrut/ui';
+import { PageHeader, Card } from '@tripdrive/ui';
 import { getTenantsAggregate } from '@/lib/queries/tenants';
 
 export const metadata = { title: 'Overview' };

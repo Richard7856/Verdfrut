@@ -5,7 +5,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { cn } from '@verdfrut/ui';
+import { cn } from '@tripdrive/ui';
 
 interface NavItem {
   href: string;

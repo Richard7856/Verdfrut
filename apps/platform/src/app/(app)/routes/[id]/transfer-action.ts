@@ -15,7 +15,7 @@
 //   para que VROOM/UI no se confundan con sequence original.
 
 import { revalidatePath } from 'next/cache';
-import { createServerClient } from '@verdfrut/supabase/server';
+import { createServerClient } from '@tripdrive/supabase/server';
 import { requireAdminOrDispatcher } from '@/lib/auth';
 
 export interface TransferResult {

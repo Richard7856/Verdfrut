@@ -2,7 +2,7 @@
 // Sprint 14 + Sprint 15 (links de drill-down a páginas de detalle).
 
 import Link from 'next/link';
-import { Card, DataTable, type Column } from '@verdfrut/ui';
+import { Card, DataTable, type Column } from '@tripdrive/ui';
 import type { TopStoreRow, TopDriverRow } from '@/lib/queries/dashboard';
 
 interface Props {

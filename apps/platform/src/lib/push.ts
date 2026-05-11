@@ -12,7 +12,7 @@
 
 import 'server-only';
 import webpush from 'web-push';
-import { createServiceRoleClient } from '@verdfrut/supabase/server';
+import { createServiceRoleClient } from '@tripdrive/supabase/server';
 
 interface PushPayload {
   title: string;

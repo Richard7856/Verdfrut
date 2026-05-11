@@ -6,8 +6,8 @@
 //   3. Panel detalle del chofer seleccionado.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { mapboxgl } from '@verdfrut/maps';
-import type { RouteStatus } from '@verdfrut/types';
+import { mapboxgl } from '@tripdrive/maps';
+import type { RouteStatus } from '@tripdrive/types';
 
 export interface LiveDriver {
   routeId: string;

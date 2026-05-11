@@ -1,6 +1,6 @@
 // Estado vacío cuando el chofer no tiene ruta asignada hoy.
 
-import { Card } from '@verdfrut/ui';
+import { Card } from '@tripdrive/ui';
 
 interface Props {
   driverName: string;

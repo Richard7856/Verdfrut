@@ -8,11 +8,11 @@ const nextConfig: NextConfig = {
     root: path.resolve(process.cwd(), '../..'),
   },
   transpilePackages: [
-    '@verdfrut/observability',
-    '@verdfrut/supabase',
-    '@verdfrut/types',
-    '@verdfrut/ui',
-    '@verdfrut/utils',
+    '@tripdrive/observability',
+    '@tripdrive/supabase',
+    '@tripdrive/types',
+    '@tripdrive/ui',
+    '@tripdrive/utils',
   ],
   // Headers de seguridad. El control plane es interno-solo, agregamos noindex
   // por si alguien lo expone públicamente por accidente — los crawlers lo ignoran.

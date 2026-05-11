@@ -4,7 +4,7 @@
 // realtime del sidebar.
 
 import { requireProfile } from '@/lib/auth';
-import { createServerClient } from '@verdfrut/supabase/server';
+import { createServerClient } from '@tripdrive/supabase/server';
 import { Sidebar } from '@/components/shell/sidebar';
 import { Topbar } from '@/components/shell/topbar';
 import { IncidentToastListener } from '@/components/notifications/incident-toast-listener';

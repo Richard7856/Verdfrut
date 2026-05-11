@@ -11,7 +11,7 @@
 // como una página de error en la nueva pestaña, sin código adicional.
 
 import { useSearchParams } from 'next/navigation';
-import { Button } from '@verdfrut/ui';
+import { Button } from '@tripdrive/ui';
 
 interface Props {
   defaultFrom: string;

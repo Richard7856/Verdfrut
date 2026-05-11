@@ -1,9 +1,9 @@
 // Queries de depots (CEDIS / Hubs). Server-only.
 
 import 'server-only';
-import { createServerClient } from '@verdfrut/supabase/server';
-import type { TableUpdate } from '@verdfrut/supabase';
-import type { Depot } from '@verdfrut/types';
+import { createServerClient } from '@tripdrive/supabase/server';
+import type { TableUpdate } from '@tripdrive/supabase';
+import type { Depot } from '@tripdrive/types';
 
 interface DepotRow {
   id: string;

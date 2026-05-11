@@ -5,7 +5,7 @@
 // correcto. Sin esto, un chofer puede reportar "tienda cerrada" desde su casa
 // y cobrar la jornada sin haber salido.
 
-import { haversineMeters } from '@verdfrut/utils';
+import { haversineMeters } from '@tripdrive/utils';
 
 /** Coords del chofer obtenidas del browser. */
 export interface DriverCoords {

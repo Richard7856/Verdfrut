@@ -11,10 +11,10 @@
 // detectar patrones (VAPID mal seteada).
 
 import Link from 'next/link';
-import { Badge, Card, EmptyState, PageHeader } from '@verdfrut/ui';
+import { Badge, Card, EmptyState, PageHeader } from '@tripdrive/ui';
 import { requireRole } from '@/lib/auth';
-import { createServiceRoleClient } from '@verdfrut/supabase/server';
-import { formatDateTimeInZone } from '@verdfrut/utils';
+import { createServiceRoleClient } from '@tripdrive/supabase/server';
+import { formatDateTimeInZone } from '@tripdrive/utils';
 
 export const metadata = { title: 'Auditoría · Fallos de escalación' };
 export const dynamic = 'force-dynamic';

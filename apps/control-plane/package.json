@@ -1,5 +1,5 @@
 {
-  "name": "@verdfrut/control-plane",
+  "name": "@tripdrive/control-plane",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -12,11 +12,11 @@
   },
   "dependencies": {
     "@sentry/nextjs": "^8.55.2",
-    "@verdfrut/observability": "workspace:*",
-    "@verdfrut/supabase": "workspace:*",
-    "@verdfrut/types": "workspace:*",
-    "@verdfrut/ui": "workspace:*",
-    "@verdfrut/utils": "workspace:*",
+    "@tripdrive/observability": "workspace:*",
+    "@tripdrive/supabase": "workspace:*",
+    "@tripdrive/types": "workspace:*",
+    "@tripdrive/ui": "workspace:*",
+    "@tripdrive/utils": "workspace:*",
     "next": "16.2.4",
     "react": "19.2.0",
     "react-dom": "19.2.0",

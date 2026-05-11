@@ -14,7 +14,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, toast } from '@verdfrut/ui';
+import { Button, toast } from '@tripdrive/ui';
 import type { StopWithStore } from '@/lib/queries/route';
 import { StopCard } from './stop-card';
 import { reorderStopsByDriverAction } from '@/app/route/actions';

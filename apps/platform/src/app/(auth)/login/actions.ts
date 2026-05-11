@@ -4,7 +4,7 @@
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
-import { createServerClient } from '@verdfrut/supabase/server';
+import { createServerClient } from '@tripdrive/supabase/server';
 import { homeForRole } from '@/lib/auth';
 
 export async function loginAction(formData: FormData): Promise<{ error?: string }> {

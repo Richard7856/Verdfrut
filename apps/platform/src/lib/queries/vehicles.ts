@@ -2,9 +2,9 @@
 // Capacidad multidimensional: [peso_kg, volumen_m3, cajas].
 
 import 'server-only';
-import { createServerClient } from '@verdfrut/supabase/server';
-import type { TableUpdate } from '@verdfrut/supabase';
-import type { Vehicle, VehicleStatus } from '@verdfrut/types';
+import { createServerClient } from '@tripdrive/supabase/server';
+import type { TableUpdate } from '@tripdrive/supabase';
+import type { Vehicle, VehicleStatus } from '@tripdrive/types';
 
 interface VehicleRow {
   id: string;

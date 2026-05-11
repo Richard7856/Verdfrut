@@ -4,7 +4,7 @@
 // del tiro. URL copiable a portapapeles.
 
 import { useState, useTransition } from 'react';
-import { Button, toast } from '@verdfrut/ui';
+import { Button, toast } from '@tripdrive/ui';
 import {
   enableDispatchSharingAction,
   disableDispatchSharingAction,

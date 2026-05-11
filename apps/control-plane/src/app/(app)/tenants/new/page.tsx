@@ -1,6 +1,6 @@
 // Stub del onboarding wizard — Sprint 19 lo implementa.
 
-import { PageHeader, Card } from '@verdfrut/ui';
+import { PageHeader, Card } from '@tripdrive/ui';
 
 export const metadata = { title: 'Onboardear cliente' };
 

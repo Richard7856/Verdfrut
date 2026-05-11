@@ -8,7 +8,7 @@
 // como router automático.
 
 import { redirect } from 'next/navigation';
-import { Card, PageHeader } from '@verdfrut/ui';
+import { Card, PageHeader } from '@tripdrive/ui';
 import { requireRole } from '@/lib/auth';
 import { listOpenIncidents } from '@/lib/queries/incidents';
 

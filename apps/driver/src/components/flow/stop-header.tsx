@@ -18,7 +18,7 @@
 // manager. La tienda nunca recibe llamada del chofer.
 
 import Link from 'next/link';
-import type { Stop, Store } from '@verdfrut/types';
+import type { Stop, Store } from '@tripdrive/types';
 
 interface Props {
   stop: Stop;

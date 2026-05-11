@@ -5,7 +5,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, Modal, toast } from '@verdfrut/ui';
+import { Button, Modal, toast } from '@tripdrive/ui';
 import { removeVehicleFromDispatchAction } from '../actions';
 import { persistRestructureSnapshot } from './restructure-snapshot-banner';
 

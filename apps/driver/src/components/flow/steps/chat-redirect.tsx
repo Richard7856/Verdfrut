@@ -14,7 +14,7 @@
 // que él toque "Continuar" / "Resolver desde el chat".
 
 import Link from 'next/link';
-import { Button, Card } from '@verdfrut/ui';
+import { Button, Card } from '@tripdrive/ui';
 import { StepShell } from '../step-shell';
 import type { StepProps } from '../stop-detail-client';
 

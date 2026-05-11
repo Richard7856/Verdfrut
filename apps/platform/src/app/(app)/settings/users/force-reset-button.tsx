@@ -5,8 +5,8 @@
 // El admin obtiene un recovery link copiable que puede mandar por WhatsApp si el email no llega.
 
 import { useRef, useState, useTransition } from 'react';
-import { Button, Input, Modal, toast } from '@verdfrut/ui';
-import type { UserProfile } from '@verdfrut/types';
+import { Button, Input, Modal, toast } from '@tripdrive/ui';
+import type { UserProfile } from '@tripdrive/types';
 import { forcePasswordResetAction } from './actions';
 
 export function ForceResetButton({ user }: { user: UserProfile }) {

@@ -9,7 +9,7 @@
 // procesa, vía el callback onPushOptimistic.
 
 import { useRef, useState } from 'react';
-import { Button } from '@verdfrut/ui';
+import { Button } from '@tripdrive/ui';
 import { compressImage } from '@/lib/storage';
 import { enqueue } from '@/lib/outbox';
 import type { OptimisticMessage } from './chat-thread';

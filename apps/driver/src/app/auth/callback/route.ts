@@ -17,9 +17,9 @@
 //   - else → home según rol
 
 import { NextResponse, type NextRequest } from 'next/server';
-import { createServerClient } from '@verdfrut/supabase/server';
+import { createServerClient } from '@tripdrive/supabase/server';
 import { homeForDriverRole } from '@/lib/auth';
-import type { UserRole } from '@verdfrut/types';
+import type { UserRole } from '@tripdrive/types';
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);

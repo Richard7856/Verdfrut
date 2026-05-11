@@ -2,9 +2,9 @@
 // Convención: una función por intención de negocio, NO un wrapper genérico de la tabla.
 
 import 'server-only';
-import { createServerClient } from '@verdfrut/supabase/server';
-import type { TableUpdate } from '@verdfrut/supabase';
-import type { Zone } from '@verdfrut/types';
+import { createServerClient } from '@tripdrive/supabase/server';
+import type { TableUpdate } from '@tripdrive/supabase';
+import type { Zone } from '@tripdrive/types';
 
 interface ZoneRow {
   id: string;

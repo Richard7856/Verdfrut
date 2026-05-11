@@ -14,7 +14,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
-import { Button, Spinner } from '@verdfrut/ui';
+import { Button, Spinner } from '@tripdrive/ui';
 import { compressImage, type EvidenceBucket } from '@/lib/storage';
 import { enqueue } from '@/lib/outbox';
 import type { UploadPhotoPayload } from '@/lib/outbox';

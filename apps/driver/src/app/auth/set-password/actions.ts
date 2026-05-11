@@ -4,9 +4,9 @@
 // must_reset_password. Después redirige al home según rol.
 
 import { redirect } from 'next/navigation';
-import { createServerClient } from '@verdfrut/supabase/server';
+import { createServerClient } from '@tripdrive/supabase/server';
 import { homeForDriverRole } from '@/lib/auth';
-import type { UserRole } from '@verdfrut/types';
+import type { UserRole } from '@tripdrive/types';
 
 const MIN_LENGTH = 8;
 

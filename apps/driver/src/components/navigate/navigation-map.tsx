@@ -15,7 +15,7 @@
 // usa GPS del teléfono (no requiere red).
 
 import { useEffect, useRef, useState } from 'react';
-import { mapboxgl, setMapboxToken } from '@verdfrut/maps';
+import { mapboxgl, setMapboxToken } from '@tripdrive/maps';
 import type { DriverPosition } from '@/lib/use-driver-position';
 
 export interface NavigationStop {

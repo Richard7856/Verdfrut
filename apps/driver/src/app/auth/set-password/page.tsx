@@ -6,8 +6,8 @@
 // Si llegan sin sesión, redirige a /login (es la única ruta protegida del flujo).
 
 import { redirect } from 'next/navigation';
-import { Card } from '@verdfrut/ui';
-import { createServerClient } from '@verdfrut/supabase/server';
+import { Card } from '@tripdrive/ui';
+import { createServerClient } from '@tripdrive/supabase/server';
 import { SetPasswordForm } from './set-password-form';
 
 export const metadata = { title: 'Establecer contraseña' };

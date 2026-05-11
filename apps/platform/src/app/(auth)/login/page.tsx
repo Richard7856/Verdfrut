@@ -1,6 +1,6 @@
 // Página de login. UI minimalista — re-skin completo cuando llegue identidad visual.
 
-import { Card } from '@verdfrut/ui';
+import { Card } from '@tripdrive/ui';
 import { LoginForm } from './login-form';
 
 export const metadata = { title: 'Iniciar sesión' };

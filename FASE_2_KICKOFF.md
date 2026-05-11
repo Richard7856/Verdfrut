@@ -51,7 +51,7 @@ Construir UN solo flujo (entrega) end-to-end con TODO lo necesario:
 - Mapbox GL JS para mapa de navegación (ya en `packages/maps`)
 - IndexedDB (vía `idb`) para cola offline
 - VAPID web push (real, web-push npm package)
-- Claude Vision via `@verdfrut/ai` (ya implementado)
+- Claude Vision via `@tripdrive/ai` (ya implementado)
 
 ### Estructura propuesta
 
@@ -74,7 +74,7 @@ apps/driver/
 │   │   └── (supervisor)/ — vista del encargado de zona
 │   ├── lib/
 │   │   ├── auth-driver.ts — auth flow
-│   │   ├── flow-engine — usa @verdfrut/flow-engine
+│   │   ├── flow-engine — usa @tripdrive/flow-engine
 │   │   ├── offline-queue.ts — IndexedDB outbox
 │   │   ├── gps.ts — Geolocation API + Broadcast
 │   │   └── push.ts — registro VAPID
@@ -113,7 +113,7 @@ npx web-push generate-vapid-keys
 # Guardar las claves en .env.local del platform Y de la driver app
 
 # Levantar driver en dev (cuando esté listo)
-pnpm --filter @verdfrut/driver dev --port 3001
+pnpm --filter @tripdrive/driver dev --port 3001
 ```
 
 ## Práctica de cierre

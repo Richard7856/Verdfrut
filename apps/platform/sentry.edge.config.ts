@@ -6,7 +6,7 @@
 // porque @sentry/nextjs lo espera y sin él la integración falla silente.
 
 import * as Sentry from '@sentry/nextjs';
-import { initSentry, configureLogger } from '@verdfrut/observability';
+import { initSentry, configureLogger } from '@tripdrive/observability';
 
 configureLogger({ app: 'platform' });
 initSentry(Sentry, { app: 'platform', context: 'edge' });

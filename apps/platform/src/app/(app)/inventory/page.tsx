@@ -1,7 +1,7 @@
 // Inventario — fuera del scope V1 (es un módulo aparte que tracking de productos por SKU).
 // Lo dejamos visible en el sidebar pero como placeholder.
 
-import { EmptyState, PageHeader } from '@verdfrut/ui';
+import { EmptyState, PageHeader } from '@tripdrive/ui';
 import { requireRole } from '@/lib/auth';
 
 export const metadata = { title: 'Inventario' };

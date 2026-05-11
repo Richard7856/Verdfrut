@@ -3,7 +3,7 @@
 // Sprint 19 agregará el botón "Onboardear cliente" con wizard funcional.
 
 import Link from 'next/link';
-import { PageHeader, Card, Badge, DataTable, type Column } from '@verdfrut/ui';
+import { PageHeader, Card, Badge, DataTable, type Column } from '@tripdrive/ui';
 import { listTenants, type Tenant, type TenantStatus } from '@/lib/queries/tenants';
 
 export const metadata = { title: 'Tenants' };

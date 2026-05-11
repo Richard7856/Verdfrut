@@ -10,13 +10,13 @@ const nextConfig: NextConfig = {
   },
   // Permite imports desde packages del workspace.
   transpilePackages: [
-    '@verdfrut/ai',
-    '@verdfrut/maps',
-    '@verdfrut/observability',
-    '@verdfrut/supabase',
-    '@verdfrut/types',
-    '@verdfrut/ui',
-    '@verdfrut/utils',
+    '@tripdrive/ai',
+    '@tripdrive/maps',
+    '@tripdrive/observability',
+    '@tripdrive/supabase',
+    '@tripdrive/types',
+    '@tripdrive/ui',
+    '@tripdrive/utils',
   ],
   // Imágenes desde Supabase Storage (públicas).
   images: {

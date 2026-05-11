@@ -1,7 +1,7 @@
 // CRUD de zonas. Solo accesible para admin.
 
-import { PageHeader, DataTable, Badge, type Column } from '@verdfrut/ui';
-import type { Zone } from '@verdfrut/types';
+import { PageHeader, DataTable, Badge, type Column } from '@tripdrive/ui';
+import type { Zone } from '@tripdrive/types';
 import { requireRole } from '@/lib/auth';
 import { listZones } from '@/lib/queries/zones';
 import { CreateZoneButton } from './create-zone-button';

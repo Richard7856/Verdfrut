@@ -23,14 +23,14 @@ const nextConfig: NextConfig = {
   },
   // Permite imports desde packages del workspace.
   transpilePackages: [
-    '@verdfrut/ai',
-    '@verdfrut/maps',
-    '@verdfrut/observability',
-    '@verdfrut/supabase',
-    '@verdfrut/types',
-    '@verdfrut/ui',
-    '@verdfrut/utils',
-    '@verdfrut/flow-engine',
+    '@tripdrive/ai',
+    '@tripdrive/maps',
+    '@tripdrive/observability',
+    '@tripdrive/supabase',
+    '@tripdrive/types',
+    '@tripdrive/ui',
+    '@tripdrive/utils',
+    '@tripdrive/flow-engine',
   ],
   // Imágenes de evidencia desde Supabase Storage.
   images: {

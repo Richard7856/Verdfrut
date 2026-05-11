@@ -3,8 +3,8 @@
 // Las transiciones se exponen como funciones nombradas (no un setStatus genérico).
 
 import 'server-only';
-import { createServerClient } from '@verdfrut/supabase/server';
-import type { Route, RouteStatus } from '@verdfrut/types';
+import { createServerClient } from '@tripdrive/supabase/server';
+import type { Route, RouteStatus } from '@tripdrive/types';
 
 interface RouteRow {
   id: string;

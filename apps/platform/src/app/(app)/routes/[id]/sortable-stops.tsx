@@ -26,8 +26,8 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Badge, toast, type BadgeTone } from '@verdfrut/ui';
-import type { Stop, StopStatus } from '@verdfrut/types';
+import { Badge, toast, type BadgeTone } from '@tripdrive/ui';
+import type { Stop, StopStatus } from '@tripdrive/types';
 import { reorderStopsAction, deleteStopFromRouteAction } from '../actions';
 
 interface StopWithStore {

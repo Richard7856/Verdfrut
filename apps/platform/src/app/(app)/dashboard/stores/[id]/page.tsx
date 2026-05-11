@@ -3,8 +3,8 @@
 
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { PageHeader, Card, Badge, DataTable, type Column } from '@verdfrut/ui';
-import { todayInZone, formatDateTimeInZone } from '@verdfrut/utils';
+import { PageHeader, Card, Badge, DataTable, type Column } from '@tripdrive/ui';
+import { todayInZone, formatDateTimeInZone } from '@tripdrive/utils';
 import { requireRole } from '@/lib/auth';
 import { getStore } from '@/lib/queries/stores';
 import { getStoreVisits, type StoreVisitRow } from '@/lib/queries/dashboard';

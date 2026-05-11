@@ -7,8 +7,8 @@
 // del rate limit a tumbar el endpoint que lo usa.
 
 import 'server-only';
-import { createServiceRoleClient } from '@verdfrut/supabase/server';
-import { logger } from '@verdfrut/observability';
+import { createServiceRoleClient } from '@tripdrive/supabase/server';
+import { logger } from '@tripdrive/observability';
 
 interface BucketConfig {
   /** Ventana en milisegundos. */

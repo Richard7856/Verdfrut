@@ -3,11 +3,11 @@
 // pueda enviarles notifs cuando llegue un reporte de chofer.
 //
 // Patrón idéntico al endpoint del driver — duplicado intencional para no
-// acoplar apps. Cuando crezca, mover a @verdfrut/notifications.
+// acoplar apps. Cuando crezca, mover a @tripdrive/notifications.
 
 import 'server-only';
-import { createServerClient } from '@verdfrut/supabase/server';
-import type { UserRole } from '@verdfrut/types';
+import { createServerClient } from '@tripdrive/supabase/server';
+import type { UserRole } from '@tripdrive/types';
 
 interface RequestBody {
   endpoint: string;

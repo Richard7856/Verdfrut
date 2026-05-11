@@ -2,8 +2,8 @@
 // Ver ADR-021. Las INSERTs viven en server actions y/o el handler del outbox.
 
 import 'server-only';
-import { createServerClient } from '@verdfrut/supabase/server';
-import type { ChatMessage, MessageSender } from '@verdfrut/types';
+import { createServerClient } from '@tripdrive/supabase/server';
+import type { ChatMessage, MessageSender } from '@tripdrive/types';
 
 export function mapMessage(row: Record<string, unknown>): ChatMessage {
   const get = <T>(k: string): T => row[k] as T;

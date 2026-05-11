@@ -8,7 +8,7 @@
 
 import 'server-only';
 import { requireDriverProfile } from '@/lib/auth';
-import { createServerClient } from '@verdfrut/supabase/server';
+import { createServerClient } from '@tripdrive/supabase/server';
 import { getMapboxDirections } from '@/lib/mapbox';
 
 interface BodyPayload {

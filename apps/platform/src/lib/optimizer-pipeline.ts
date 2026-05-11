@@ -8,7 +8,7 @@
 // es leer entidades, llamar Railway, mapear el response.
 
 import 'server-only';
-import { localTimeToUnix } from '@verdfrut/utils';
+import { localTimeToUnix } from '@tripdrive/utils';
 import { callOptimizer, getUnassignedStoreIds } from './optimizer';
 import { listDepots } from '@/lib/queries/depots';
 import { getStoresByIds } from '@/lib/queries/stores';

@@ -9,7 +9,7 @@
 // snapshot devuelve mismo resultado) — Postgres puede cachear plan.
 
 import 'server-only';
-import { createServerClient } from '@verdfrut/supabase/server';
+import { createServerClient } from '@tripdrive/supabase/server';
 
 export type AnomalyKind = 'silent_driver' | 'route_delayed' | 'chat_open_long';
 export type AnomalySeverity = 'high' | 'medium';

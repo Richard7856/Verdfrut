@@ -11,7 +11,7 @@
 // verá datos de otra zona aunque pase un zoneId distinto al suyo.
 
 import 'server-only';
-import { createServerClient } from '@verdfrut/supabase/server';
+import { createServerClient } from '@tripdrive/supabase/server';
 
 export interface DashboardFilters {
   from: string;

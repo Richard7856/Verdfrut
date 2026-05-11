@@ -12,8 +12,8 @@
 
 import { useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { Button, Card } from '@verdfrut/ui';
-import { haversineMeters } from '@verdfrut/utils';
+import { Button, Card } from '@tripdrive/ui';
+import { haversineMeters } from '@tripdrive/utils';
 import type { DriverPosition } from '@/lib/use-driver-position';
 import type { NavigationStop } from './navigation-map';
 

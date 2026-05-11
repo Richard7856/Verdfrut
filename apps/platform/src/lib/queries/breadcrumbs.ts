@@ -3,7 +3,7 @@
 // de cada chofer activo en una sola query (evita N+1).
 
 import 'server-only';
-import { createServerClient } from '@verdfrut/supabase/server';
+import { createServerClient } from '@tripdrive/supabase/server';
 
 export interface LastBreadcrumb {
   lat: number;

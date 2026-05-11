@@ -1,6 +1,6 @@
 // Sistema de componentes VerdFrut.
 // Importar tokens.css UNA vez en el global de cada app:
-//   import '@verdfrut/ui/tokens.css';
+//   import '@tripdrive/ui/tokens.css';
 
 export * from './cn';
 export * from './button';

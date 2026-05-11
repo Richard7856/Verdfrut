@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { Button, Field, Input, Modal, Select, toast } from '@verdfrut/ui';
-import type { Zone } from '@verdfrut/types';
+import { Button, Field, Input, Modal, Select, toast } from '@tripdrive/ui';
+import type { Zone } from '@tripdrive/types';
 import { createStoreAction } from './actions';
 
 export function CreateStoreButton({ zones }: { zones: Zone[] }) {

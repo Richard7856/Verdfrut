@@ -1,8 +1,8 @@
 'use client';
 
 import { useMemo, useState, useTransition } from 'react';
-import { Button, Field, Input, Modal, Select, toast } from '@verdfrut/ui';
-import type { Depot, Zone } from '@verdfrut/types';
+import { Button, Field, Input, Modal, Select, toast } from '@tripdrive/ui';
+import type { Depot, Zone } from '@tripdrive/types';
 import { createVehicleAction } from './actions';
 
 export function CreateVehicleButton({ zones, depots }: { zones: Zone[]; depots: Depot[] }) {

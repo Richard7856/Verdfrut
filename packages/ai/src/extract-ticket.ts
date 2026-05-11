@@ -2,7 +2,7 @@
 // Diseñado para correr en Route Handlers (server-side).
 
 import Anthropic from '@anthropic-ai/sdk';
-import type { TicketData } from '@verdfrut/types';
+import type { TicketData } from '@tripdrive/types';
 
 const MODEL = 'claude-sonnet-4-6';
 const MAX_RETRIES = 2;

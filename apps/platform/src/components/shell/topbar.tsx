@@ -1,7 +1,7 @@
 // Topbar — breadcrumb + búsqueda global + acciones + usuario.
 // Densidad y altura siguen los tokens de identidad (--vf-top-h = 56px).
 
-import type { UserProfile } from '@verdfrut/types';
+import type { UserProfile } from '@tripdrive/types';
 import { LogoutButton } from './logout-button';
 import { ThemeToggle } from './theme-toggle';
 import { SoundToggle } from './sound-toggle';

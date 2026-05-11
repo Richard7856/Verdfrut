@@ -8,8 +8,8 @@
 
 import { useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, toast } from '@verdfrut/ui';
-import type { Route } from '@verdfrut/types';
+import { Button, toast } from '@tripdrive/ui';
+import type { Route } from '@tripdrive/types';
 import {
   approveRouteAction,
   publishRouteAction,

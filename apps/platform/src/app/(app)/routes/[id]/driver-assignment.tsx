@@ -6,8 +6,8 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, Select, toast } from '@verdfrut/ui';
-import type { Driver, Route, UserProfile } from '@verdfrut/types';
+import { Button, Select, toast } from '@tripdrive/ui';
+import type { Driver, Route, UserProfile } from '@tripdrive/types';
 import { assignDriverAction } from '../actions';
 
 interface DriverWithProfile {

@@ -6,7 +6,7 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, Modal, Field } from '@verdfrut/ui';
+import { Button, Modal, Field } from '@tripdrive/ui';
 import { transferRouteRemainderAction } from './transfer-action';
 
 interface DriverOption {

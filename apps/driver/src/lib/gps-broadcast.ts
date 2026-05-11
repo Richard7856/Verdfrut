@@ -21,7 +21,7 @@
 //   debe mostrarle cómo habilitarlo. NO bloqueamos el resto de la app.
 
 import { useEffect, useRef, useState } from 'react';
-import { createBrowserClient } from '@verdfrut/supabase/browser';
+import { createBrowserClient } from '@tripdrive/supabase/browser';
 
 const BROADCAST_INTERVAL_MS = 8_000;     // emitir al supervisor cada 8s
 const BREADCRUMB_INTERVAL_MS = 90_000;   // persistir DB cada 1.5 min

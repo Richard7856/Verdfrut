@@ -10,8 +10,8 @@
 //   3. Devuelve { deleted, orphans } para auditoría en los logs del cron.
 
 import { NextResponse } from 'next/server';
-import { createServiceRoleClient } from '@verdfrut/supabase/server';
-import { logger } from '@verdfrut/observability';
+import { createServiceRoleClient } from '@tripdrive/supabase/server';
+import { logger } from '@tripdrive/observability';
 
 interface OrphanRow {
   user_id: string;

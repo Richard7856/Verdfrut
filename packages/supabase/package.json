@@ -1,5 +1,5 @@
 {
-  "name": "@verdfrut/supabase",
+  "name": "@tripdrive/supabase",
   "version": "0.1.0",
   "private": true,
   "main": "./src/index.ts",
@@ -19,7 +19,7 @@
   "dependencies": {
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.105.1",
-    "@verdfrut/types": "workspace:*"
+    "@tripdrive/types": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.7.4",

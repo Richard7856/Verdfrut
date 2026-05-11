@@ -2,9 +2,9 @@
 // Driver = UserProfile con role='driver' + datos operativos extras (licencia, etc.)
 
 import 'server-only';
-import { createServerClient } from '@verdfrut/supabase/server';
-import type { TableUpdate } from '@verdfrut/supabase';
-import type { Driver } from '@verdfrut/types';
+import { createServerClient } from '@tripdrive/supabase/server';
+import type { TableUpdate } from '@tripdrive/supabase';
+import type { Driver } from '@tripdrive/types';
 
 interface DriverRow {
   id: string;

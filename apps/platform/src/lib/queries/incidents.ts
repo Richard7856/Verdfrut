@@ -3,7 +3,7 @@
 // Admin/dispatcher ven todos.
 
 import 'server-only';
-import { createServerClient } from '@verdfrut/supabase/server';
+import { createServerClient } from '@tripdrive/supabase/server';
 import type {
   ChatMessage,
   ChatStatus,
@@ -14,7 +14,7 @@ import type {
   ReportType,
   ResolutionType,
   TicketData,
-} from '@verdfrut/types';
+} from '@tripdrive/types';
 
 function mapDeliveryReport(row: Record<string, unknown>): DeliveryReport {
   const get = <T>(k: string): T => row[k] as T;

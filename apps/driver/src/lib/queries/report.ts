@@ -2,7 +2,7 @@
 // El report es 1-a-1 con stop. Se crea cuando el chofer marca arrival.
 
 import 'server-only';
-import { createServerClient } from '@verdfrut/supabase/server';
+import { createServerClient } from '@tripdrive/supabase/server';
 import type {
   ChatStatus,
   DeliveryReport,
@@ -11,7 +11,7 @@ import type {
   ReportType,
   ResolutionType,
   TicketData,
-} from '@verdfrut/types';
+} from '@tripdrive/types';
 
 /**
  * Mapper de la fila DB a domain object. Usado por queries y server actions.

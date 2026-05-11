@@ -13,7 +13,7 @@
 // página el banner sigue ahí; al cerrarlo o cambiar de dispatch, desaparece.
 
 import { useEffect, useState } from 'react';
-import { Card } from '@verdfrut/ui';
+import { Card } from '@tripdrive/ui';
 
 export interface RestructureSnapshot {
   before: {

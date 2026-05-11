@@ -3,7 +3,7 @@
 
 import type { Metadata, Viewport } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
-import { Toaster } from '@verdfrut/ui';
+import { Toaster } from '@tripdrive/ui';
 import { RegisterServiceWorker } from '@/components/register-service-worker';
 import { OutboxMount } from '@/components/outbox-mount';
 import { InactivityGuard } from '@/components/inactivity-guard';

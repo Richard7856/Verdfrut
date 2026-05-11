@@ -6,8 +6,8 @@
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { createBrowserClient } from '@verdfrut/supabase/browser';
-import { Button, Card } from '@verdfrut/ui';
+import { createBrowserClient } from '@tripdrive/supabase/browser';
+import { Button, Card } from '@tripdrive/ui';
 
 type OtpType = 'invite' | 'recovery' | 'magiclink' | 'signup' | 'email_change';
 

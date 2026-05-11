@@ -13,7 +13,7 @@
 // pasa los datos via props.
 
 import { useEffect, useRef } from 'react';
-import { mapboxgl, setMapboxToken } from '@verdfrut/maps';
+import { mapboxgl, setMapboxToken } from '@tripdrive/maps';
 
 export interface RouteMapStop {
   storeId: string;

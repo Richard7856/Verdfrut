@@ -9,7 +9,7 @@
 
 import { notFound } from 'next/navigation';
 import { headers } from 'next/headers';
-import { Badge, Card } from '@verdfrut/ui';
+import { Badge, Card } from '@tripdrive/ui';
 import { getDispatchByPublicToken, listRoutesByDispatch } from '@/lib/queries/dispatches';
 import { listStopsForRoutes } from '@/lib/queries/stops';
 import { listVehicles } from '@/lib/queries/vehicles';
@@ -18,7 +18,7 @@ import { listZones } from '@/lib/queries/zones';
 import { MultiRouteMapServer } from '@/components/map/multi-route-map-server';
 import { consume as rateLimit, LIMITS } from '@/lib/rate-limit';
 import { PublicRouteCard } from './public-route-card';
-import type { DispatchStatus, Store } from '@verdfrut/types';
+import type { DispatchStatus, Store } from '@tripdrive/types';
 
 export const dynamic = 'force-dynamic';
 

@@ -1,7 +1,7 @@
 // Transiciones del flujo de cada tipo de reporte.
 // Cada función pura recibe el contexto y devuelve el siguiente paso.
 
-import type { EntregaStep, TiendaCerradaStep, BasculaStep, ReportType } from '@verdfrut/types';
+import type { EntregaStep, TiendaCerradaStep, BasculaStep, ReportType } from '@tripdrive/types';
 
 export interface FlowContext {
   hasIncidents?: boolean;

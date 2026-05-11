@@ -6,8 +6,8 @@
 import { redirect } from 'next/navigation';
 import { requireDriverProfile } from '@/lib/auth';
 import { getDriverRouteForDate, getRouteStopsWithStores } from '@/lib/queries/route';
-import { createServerClient } from '@verdfrut/supabase/server';
-import { todayInZone } from '@verdfrut/utils';
+import { createServerClient } from '@tripdrive/supabase/server';
+import { todayInZone } from '@tripdrive/utils';
 import { getMapboxDirections } from '@/lib/mapbox';
 import { NavigationClient } from '@/components/navigate/navigation-client';
 import type { NavigationStop, NavigationDepot } from '@/components/navigate/navigation-map';

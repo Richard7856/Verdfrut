@@ -8,7 +8,7 @@ import type {
   IncidentDetail,
   ResolutionType,
   TicketData,
-} from '@verdfrut/types';
+} from '@tripdrive/types';
 import type { EvidenceBucket } from '../storage';
 
 export type OutboxStatus = 'pending' | 'in_flight' | 'failed' | 'done';

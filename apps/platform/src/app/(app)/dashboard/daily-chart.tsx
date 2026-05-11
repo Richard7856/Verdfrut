@@ -14,7 +14,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { Card } from '@verdfrut/ui';
+import { Card } from '@tripdrive/ui';
 import type { DailySeriesPoint } from '@/lib/queries/dashboard';
 
 interface Props {

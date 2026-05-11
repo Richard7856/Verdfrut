@@ -4,8 +4,8 @@
 // Suscribe a postgres_changes en `messages` filtrado por report_id.
 
 import { useEffect, useState, useCallback } from 'react';
-import { createBrowserClient } from '@verdfrut/supabase/browser';
-import type { ChatMessage, MessageSender } from '@verdfrut/types';
+import { createBrowserClient } from '@tripdrive/supabase/browser';
+import type { ChatMessage, MessageSender } from '@tripdrive/types';
 
 function rowToMessage(row: Record<string, unknown>): ChatMessage {
   return {

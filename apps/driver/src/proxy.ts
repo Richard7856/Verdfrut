@@ -9,7 +9,7 @@
 //     antes del login para mostrar el banner "Instalar app").
 
 import { NextResponse, type NextRequest } from 'next/server';
-import { createMiddlewareClient } from '@verdfrut/supabase/middleware';
+import { createMiddlewareClient } from '@tripdrive/supabase/middleware';
 
 const PUBLIC_PATHS = [
   '/login',

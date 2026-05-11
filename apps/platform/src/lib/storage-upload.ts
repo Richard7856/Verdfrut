@@ -7,7 +7,7 @@
 // ArrayBuffer en una server action (ej. composer del comercial sube foto).
 
 import 'server-only';
-import { createServerClient } from '@verdfrut/supabase/server';
+import { createServerClient } from '@tripdrive/supabase/server';
 
 // Allow-list — mismo conjunto que driver (ADR-023 / #43).
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);

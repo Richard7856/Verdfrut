@@ -6,8 +6,8 @@
 
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button, Card, CardHeader, Field, Input, Select, toast, cn } from '@verdfrut/ui';
-import type { Dispatch, Driver, Store, Vehicle, Zone } from '@verdfrut/types';
+import { Button, Card, CardHeader, Field, Input, Select, toast, cn } from '@tripdrive/ui';
+import type { Dispatch, Driver, Store, Vehicle, Zone } from '@tripdrive/types';
 import { createAndOptimizeRoute, cancelRouteAction } from '../actions';
 
 interface Props {

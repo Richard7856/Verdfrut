@@ -1,8 +1,8 @@
 'use client';
 
 import { useTransition } from 'react';
-import { Button, toast } from '@verdfrut/ui';
-import type { Vehicle } from '@verdfrut/types';
+import { Button, toast } from '@tripdrive/ui';
+import type { Vehicle } from '@tripdrive/types';
 import { toggleVehicleActiveAction } from './actions';
 
 export function ToggleVehicleActiveCell({ vehicle }: { vehicle: Vehicle }) {

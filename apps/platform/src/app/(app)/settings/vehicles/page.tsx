@@ -1,7 +1,7 @@
 // CRUD de camiones.
 
-import { Badge, DataTable, EmptyState, PageHeader, type Column, type BadgeTone } from '@verdfrut/ui';
-import type { Vehicle, VehicleStatus } from '@verdfrut/types';
+import { Badge, DataTable, EmptyState, PageHeader, type Column, type BadgeTone } from '@tripdrive/ui';
+import type { Vehicle, VehicleStatus } from '@tripdrive/types';
 import { requireRole } from '@/lib/auth';
 import { listVehicles } from '@/lib/queries/vehicles';
 import { listZones } from '@/lib/queries/zones';

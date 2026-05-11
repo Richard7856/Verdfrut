@@ -3,8 +3,8 @@
 // Step final — chofer elige el resultado y submitea el reporte.
 
 import { useState } from 'react';
-import { Button } from '@verdfrut/ui';
-import type { ResolutionType } from '@verdfrut/types';
+import { Button } from '@tripdrive/ui';
+import type { ResolutionType } from '@tripdrive/types';
 import type { StepProps } from '../stop-detail-client';
 
 const OPTIONS: { value: ResolutionType; label: string; description: string }[] = [

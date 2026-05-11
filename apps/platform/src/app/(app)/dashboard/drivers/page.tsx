@@ -1,8 +1,8 @@
 // Listado de choferes con métricas del período — Sprint 15.
 
 import Link from 'next/link';
-import { PageHeader, Card, DataTable, type Column } from '@verdfrut/ui';
-import { todayInZone } from '@verdfrut/utils';
+import { PageHeader, Card, DataTable, type Column } from '@tripdrive/ui';
+import { todayInZone } from '@tripdrive/utils';
 import { requireRole } from '@/lib/auth';
 import { listZones } from '@/lib/queries/zones';
 import { getDashboardTopDrivers, type TopDriverRow } from '@/lib/queries/dashboard';

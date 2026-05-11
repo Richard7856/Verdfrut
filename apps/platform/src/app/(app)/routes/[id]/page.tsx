@@ -3,9 +3,9 @@
 
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { Badge, Button, Card, CardHeader, PageHeader, type BadgeTone } from '@verdfrut/ui';
-import type { RouteStatus, StopStatus } from '@verdfrut/types';
-import { formatDateTimeInZone, formatDuration } from '@verdfrut/utils';
+import { Badge, Button, Card, CardHeader, PageHeader, type BadgeTone } from '@tripdrive/ui';
+import type { RouteStatus, StopStatus } from '@tripdrive/types';
+import { formatDateTimeInZone, formatDuration } from '@tripdrive/utils';
 import { requireRole } from '@/lib/auth';
 import { getRoute } from '@/lib/queries/routes';
 import { listStopsForRoute } from '@/lib/queries/stops';
@@ -101,7 +101,7 @@ export default async function RouteDetailPage({ params }: PageProps) {
   // tienda no puede recibir dos veces el mismo día desde el mismo tiro).
   const usedInDispatchStoreIds = new Set<string>(stops.map((s) => s.storeId));
   if (route.dispatchId) {
-    const supabaseDup = await (await import('@verdfrut/supabase/server')).createServerClient();
+    const supabaseDup = await (await import('@tripdrive/supabase/server')).createServerClient();
     const { data: siblingRoutes } = await supabaseDup
       .from('routes')
       .select('id')

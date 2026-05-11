@@ -1,9 +1,9 @@
 // ADR-046: card read-only de cada ruta para la vista pública. Sin drag, sin
 // dropdowns, sin botones de mover. Solo info.
 
-import { Badge, Card, type BadgeTone } from '@verdfrut/ui';
-import { formatDuration } from '@verdfrut/utils';
-import type { Route, RouteStatus, Stop, Store, Vehicle } from '@verdfrut/types';
+import { Badge, Card, type BadgeTone } from '@tripdrive/ui';
+import { formatDuration } from '@tripdrive/utils';
+import type { Route, RouteStatus, Stop, Store, Vehicle } from '@tripdrive/types';
 
 const STATUS: Record<RouteStatus, { text: string; tone: BadgeTone }> = {
   DRAFT: { text: 'Borrador', tone: 'neutral' },

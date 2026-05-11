@@ -9,8 +9,8 @@
 //
 // Roles permitidos: admin, dispatcher, zone_manager.
 
-import { PageHeader } from '@verdfrut/ui';
-import { todayInZone } from '@verdfrut/utils';
+import { PageHeader } from '@tripdrive/ui';
+import { todayInZone } from '@tripdrive/utils';
 import { requireRole } from '@/lib/auth';
 import { listZones } from '@/lib/queries/zones';
 import {

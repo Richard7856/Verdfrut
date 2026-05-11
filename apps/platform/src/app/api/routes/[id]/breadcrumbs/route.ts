@@ -4,7 +4,7 @@
 
 import 'server-only';
 import { requireRole } from '@/lib/auth';
-import { createServerClient } from '@verdfrut/supabase/server';
+import { createServerClient } from '@tripdrive/supabase/server';
 
 const MAX_BREADCRUMBS = 500; // límite defensivo — 500 puntos = ~12 horas a 1/90s
 

@@ -50,7 +50,7 @@ INSERT INTO zones (code, name) VALUES
 ### 4. Probar login
 
 ```bash
-pnpm --filter @verdfrut/platform exec next dev --port 3001
+pnpm --filter @tripdrive/platform exec next dev --port 3001
 ```
 
 - Abre http://localhost:3001

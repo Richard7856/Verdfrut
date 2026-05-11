@@ -13,8 +13,8 @@
 // arranca directamente en `extracted` sin volver a llamar Anthropic.
 
 import { useEffect, useState } from 'react';
-import { Button, Card, Spinner } from '@verdfrut/ui';
-import type { TicketData, TicketItem } from '@verdfrut/types';
+import { Button, Card, Spinner } from '@tripdrive/ui';
+import type { TicketData, TicketItem } from '@tripdrive/types';
 import { StepShell } from '../step-shell';
 import type { StepProps } from '../stop-detail-client';
 

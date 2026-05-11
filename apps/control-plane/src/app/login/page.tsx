@@ -1,6 +1,6 @@
 // Login del Control Plane — shared password con cookie HMAC.
 
-import { Card } from '@verdfrut/ui';
+import { Card } from '@tripdrive/ui';
 import { LoginForm } from './login-form';
 
 export const metadata = { title: 'Login · TripDrive Control Plane' };

@@ -1,4 +1,4 @@
-import { Card } from '@verdfrut/ui';
+import { Card } from '@tripdrive/ui';
 import { LoginForm } from './login-form';
 
 export const metadata = { title: 'Iniciar sesión' };

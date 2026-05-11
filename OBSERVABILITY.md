@@ -1,6 +1,6 @@
 # Observabilidad — TripDrive
 
-> Setup: ADR-051 (2026-05-10). Package: `@verdfrut/observability`.
+> Setup: ADR-051 (2026-05-10). Package: `@tripdrive/observability`.
 
 Esta guía explica cómo está montada la telemetría de errores en TripDrive, cómo usarla en código nuevo, y cómo operar el dashboard de Sentry.
 
@@ -67,14 +67,14 @@ Reemplazo de `console.error`:
 console.error('[chat.push] error:', err);
 
 // ✅ Ahora
-import { logger } from '@verdfrut/observability';
+import { logger } from '@tripdrive/observability';
 await logger.error('chat.push falló', { reportId, zoneId, err });
 ```
 
 API completa:
 
 ```ts
-import { logger } from '@verdfrut/observability';
+import { logger } from '@tripdrive/observability';
 
 // Error: bug o falla operativa. Va a Sentry + stdout.
 await logger.error('descripción corta', { ...context, err });
@@ -126,7 +126,7 @@ Next.js corre código en 3 ambientes distintos:
 | **server** | Node.js (server actions, RSC, API routes) | Tiene fs/network nativo, no DOM |
 | **edge** | Edge runtime (middleware, edge funcs) | Subset de Node, sin filesystem |
 
-Cada uno necesita su propio `Sentry.init()` con integraciones específicas. El package `@verdfrut/observability` los unifica con `initSentry(Sentry, { context })`.
+Cada uno necesita su propio `Sentry.init()` con integraciones específicas. El package `@tripdrive/observability` los unifica con `initSentry(Sentry, { context })`.
 
 ---
 

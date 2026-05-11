@@ -12,7 +12,7 @@
 // Sentry solo agrega telemetría para que el operador en oficina sepa qué falló.
 
 import * as Sentry from '@sentry/nextjs';
-import { initSentry, configureLogger } from '@verdfrut/observability';
+import { initSentry, configureLogger } from '@tripdrive/observability';
 
 configureLogger({ app: 'driver' });
 initSentry(Sentry, { app: 'driver', context: 'client' });

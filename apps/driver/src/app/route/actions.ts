@@ -11,9 +11,9 @@
 
 import 'server-only';
 import { revalidatePath } from 'next/cache';
-import { createServerClient, createServiceRoleClient } from '@verdfrut/supabase/server';
-import { todayInZone } from '@verdfrut/utils';
-import { logger } from '@verdfrut/observability';
+import { createServerClient, createServiceRoleClient } from '@tripdrive/supabase/server';
+import { todayInZone } from '@tripdrive/utils';
+import { logger } from '@tripdrive/observability';
 import { requireDriverProfile } from '@/lib/auth';
 
 interface ActionResult {

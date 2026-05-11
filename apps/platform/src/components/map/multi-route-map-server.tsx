@@ -8,7 +8,7 @@
 //   - Vehicles: un solo IN (...)
 
 import 'server-only';
-import type { Route } from '@verdfrut/types';
+import type { Route } from '@tripdrive/types';
 import { listStopsForRoutes } from '@/lib/queries/stops';
 import { getStoresByIds } from '@/lib/queries/stores';
 import { getVehiclesByIds } from '@/lib/queries/vehicles';

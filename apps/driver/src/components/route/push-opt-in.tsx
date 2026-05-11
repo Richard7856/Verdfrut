@@ -8,7 +8,7 @@
 // rechazo persistente requiere ir a settings del navegador).
 
 import { useEffect, useState } from 'react';
-import { Button } from '@verdfrut/ui';
+import { Button } from '@tripdrive/ui';
 import { getPushState, subscribeToPush, type PushPermissionState } from '@/lib/push-subscription';
 
 export function PushOptIn() {

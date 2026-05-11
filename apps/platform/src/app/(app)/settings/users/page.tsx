@@ -1,7 +1,7 @@
 // CRUD de usuarios (admin, dispatcher, zone_manager, driver).
 
-import { Badge, DataTable, PageHeader, type Column, type BadgeTone } from '@verdfrut/ui';
-import type { UserProfile, UserRole } from '@verdfrut/types';
+import { Badge, DataTable, PageHeader, type Column, type BadgeTone } from '@tripdrive/ui';
+import type { UserProfile, UserRole } from '@tripdrive/types';
 import { requireRole } from '@/lib/auth';
 import { listUsers } from '@/lib/queries/users';
 import { listZones } from '@/lib/queries/zones';

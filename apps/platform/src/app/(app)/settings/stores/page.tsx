@@ -1,7 +1,7 @@
 // CRUD de tiendas. Tabla + modal de creación. Filtro por zona pendiente para Fase 1.b.
 
-import { Badge, DataTable, EmptyState, PageHeader, type Column } from '@verdfrut/ui';
-import type { Store } from '@verdfrut/types';
+import { Badge, DataTable, EmptyState, PageHeader, type Column } from '@tripdrive/ui';
+import type { Store } from '@tripdrive/types';
 import { requireRole } from '@/lib/auth';
 import { listStores } from '@/lib/queries/stores';
 import { listZones } from '@/lib/queries/zones';

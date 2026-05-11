@@ -8,8 +8,8 @@
 // service role client (RLS bypass).
 
 import { NextResponse } from 'next/server';
-import { createServiceRoleClient } from '@verdfrut/supabase/server';
-import { logger } from '@verdfrut/observability';
+import { createServiceRoleClient } from '@tripdrive/supabase/server';
+import { logger } from '@tripdrive/observability';
 
 export async function POST(req: Request): Promise<NextResponse> {
   const token = req.headers.get('x-cron-token');

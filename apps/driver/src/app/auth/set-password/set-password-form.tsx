@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { Button, Field, Input } from '@verdfrut/ui';
+import { Button, Field, Input } from '@tripdrive/ui';
 import { setPasswordAction } from './actions';
 
 const MIN_LENGTH = 8;

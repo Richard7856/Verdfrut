@@ -7,7 +7,7 @@
 //   - No, sigue sin atender → cerrar como `sin_entrega`. La parada queda skipped.
 
 import { useState } from 'react';
-import { Button } from '@verdfrut/ui';
+import { Button } from '@tripdrive/ui';
 import type { StepProps } from '../stop-detail-client';
 
 // Las acciones de "sí abrieron" y "no, cerramos" ahora pasan por el outbox

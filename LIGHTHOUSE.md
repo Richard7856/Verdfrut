@@ -22,8 +22,8 @@ Un TTI > 5s con 3G simulado significa que el chofer espera mientras la fila avan
 ```bash
 # Levantar la driver app en modo prod local (importante: NO dev)
 cd /Users/richardfigueroa/Downloads/VerdFrut
-pnpm --filter @verdfrut/driver build
-pnpm --filter @verdfrut/driver start  # corre en :3001
+pnpm --filter @tripdrive/driver build
+pnpm --filter @tripdrive/driver start  # corre en :3001
 ```
 
 Abrir Chrome → http://localhost:3001 → DevTools → tab **Lighthouse**.

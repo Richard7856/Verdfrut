@@ -2,7 +2,7 @@
 // Los steps individuales lo usan para que el aspecto sea consistente.
 
 import type { ReactNode } from 'react';
-import { Button } from '@verdfrut/ui';
+import { Button } from '@tripdrive/ui';
 
 interface Props {
   title: string;

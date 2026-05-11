@@ -14,7 +14,7 @@
 // rutas/día es despreciable. Para 50+ tendríamos que cachear o bulk endpoint.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { mapboxgl, setMapboxToken } from '@verdfrut/maps';
+import { mapboxgl, setMapboxToken } from '@tripdrive/maps';
 
 export interface MultiRouteEntry {
   routeId: string;

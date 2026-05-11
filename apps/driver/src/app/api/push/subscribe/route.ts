@@ -6,8 +6,8 @@
 // re-emite la subscription tras renovar las VAPID keys.
 
 import 'server-only';
-import { createServerClient } from '@verdfrut/supabase/server';
-import type { UserRole } from '@verdfrut/types';
+import { createServerClient } from '@tripdrive/supabase/server';
+import type { UserRole } from '@tripdrive/types';
 
 interface RequestBody {
   endpoint: string;

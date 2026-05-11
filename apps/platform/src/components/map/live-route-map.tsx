@@ -12,8 +12,8 @@
 // primer broadcast, el marker aparece y luego se mueve suavemente.
 
 import { useEffect, useRef, useState } from 'react';
-import { mapboxgl, setMapboxToken } from '@verdfrut/maps';
-import { createBrowserClient } from '@verdfrut/supabase/browser';
+import { mapboxgl, setMapboxToken } from '@tripdrive/maps';
+import { createBrowserClient } from '@tripdrive/supabase/browser';
 import type { RouteMapStop, RouteMapDepot } from './route-map';
 
 interface DriverPosition {

@@ -1,7 +1,7 @@
 // CRUD de depots (CEDIS / Hubs).
 
-import { PageHeader, DataTable, Badge, type Column } from '@verdfrut/ui';
-import type { Depot } from '@verdfrut/types';
+import { PageHeader, DataTable, Badge, type Column } from '@tripdrive/ui';
+import type { Depot } from '@tripdrive/types';
 import { requireRole } from '@/lib/auth';
 import { listDepots } from '@/lib/queries/depots';
 import { listZones } from '@/lib/queries/zones';

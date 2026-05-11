@@ -1,7 +1,7 @@
 // Grid de 12 KPIs principales — Sprint 14.
 // Server component. Recibe el overview ya computado.
 
-import { Card } from '@verdfrut/ui';
+import { Card } from '@tripdrive/ui';
 import type { DashboardOverview } from '@/lib/queries/dashboard';
 
 interface Props {
