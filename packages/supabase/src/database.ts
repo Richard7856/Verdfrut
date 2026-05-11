@@ -852,6 +852,15 @@ export type Database = {
       }
       is_admin_or_dispatcher: { Args: never; Returns: boolean }
       mark_timed_out_chats: { Args: never; Returns: number }
+      tripdrive_restructure_dispatch: {
+        Args: {
+          p_created_by: string
+          p_dispatch_id: string
+          p_old_route_ids: string[]
+          p_routes_json: Json
+        }
+        Returns: string[]
+      }
       archive_old_breadcrumbs: {
         Args: { retention_days?: number }
         Returns: number

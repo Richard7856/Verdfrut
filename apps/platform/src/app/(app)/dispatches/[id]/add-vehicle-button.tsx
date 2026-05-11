@@ -8,6 +8,7 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button, Modal, Select, toast } from '@verdfrut/ui';
 import { addVehicleToDispatchAction } from '../actions';
+import { persistRestructureSnapshot } from './restructure-snapshot-banner';
 
 interface VehicleOption {
   id: string;
@@ -27,9 +28,20 @@ interface Props {
   availableVehicles: VehicleOption[];
   /** Choferes activos en la zona del tiro. */
   availableDrivers: DriverOption[];
+  /**
+   * H3.5: si alguna ruta del tiro tuvo reorder manual o stops agregados/borrados
+   * después del optimizer (version > 1), avisar al dispatcher porque
+   * redistribuir va a recalcular desde cero, perdiendo el orden manual.
+   */
+  hasManualReorders?: boolean;
 }
 
-export function AddVehicleButton({ dispatchId, availableVehicles, availableDrivers }: Props) {
+export function AddVehicleButton({
+  dispatchId,
+  availableVehicles,
+  availableDrivers,
+  hasManualReorders = false,
+}: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
@@ -58,6 +70,14 @@ export function AddVehicleButton({ dispatchId, availableVehicles, availableDrive
         driverId === '' ? null : driverId,
       );
       if (res.ok) {
+        // H3.4: guardar snapshot pre/post para que el banner muestre el delta.
+        if (res.before && res.after) {
+          persistRestructureSnapshot(dispatchId, {
+            before: res.before,
+            after: res.after,
+            unassignedStoreIds: res.unassignedStoreIds ?? [],
+          });
+        }
         toast.success('Camioneta agregada — paradas re-distribuidas entre todas las rutas');
         close();
         router.refresh();
@@ -134,6 +154,20 @@ export function AddVehicleButton({ dispatchId, availableVehicles, availableDrive
               ))}
             </Select>
           </div>
+          {hasManualReorders && (
+            <div
+              className="rounded border px-2 py-1.5 text-[11px]"
+              style={{
+                borderColor: 'var(--color-warning-border, #fbbf24)',
+                background: 'var(--color-warning-bg, #fef3c7)',
+                color: 'var(--color-warning-fg, #92400e)',
+              }}
+            >
+              ⚠ Alguna ruta del tiro tiene cambios manuales (reorden, agregar o
+              borrar paradas). Redistribuir va a recalcular el orden desde cero —
+              esos ajustes se pierden.
+            </div>
+          )}
           <p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
             Solo se re-distribuyen tiros con todas sus rutas en pre-publicación
             (DRAFT/OPTIMIZED/APPROVED). Si alguna ruta ya está publicada o en

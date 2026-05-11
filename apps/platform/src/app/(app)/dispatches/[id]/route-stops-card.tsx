@@ -65,6 +65,8 @@ interface Props {
   availableDepots?: Array<{ id: string; code: string; name: string }>;
   /** Tiendas de la zona que NO están aún en esta ruta — para el botón "+ Agregar parada". */
   availableStoresToAdd?: Array<{ id: string; code: string; name: string }>;
+  /** H3.5: alguna ruta del tiro tiene version > 1 (cambios manuales). Pasado al RemoveVehicleButton. */
+  dispatchHasManualReorders?: boolean;
 }
 
 const EDITABLE_STATUSES = new Set<RouteStatus>(['DRAFT', 'OPTIMIZED', 'APPROVED']);
@@ -96,6 +98,7 @@ export function RouteStopsCard({
   isDepotOverride = false,
   availableDepots = [],
   availableStoresToAdd = [],
+  dispatchHasManualReorders = false,
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -292,11 +295,13 @@ export function RouteStopsCard({
           {EDITABLE_STATUSES.has(route.status) && (
             <RemoveVehicleButton
               routeId={route.id}
+              dispatchId={dispatchId}
               vehicleLabel={vehicle?.alias ?? vehicle?.plate ?? 'la ruta'}
               remainingAfter={
                 siblings.filter((s) => s.id !== route.id && s.status !== 'CANCELLED').length
               }
               stopsCount={items.length}
+              hasManualReorders={dispatchHasManualReorders}
             />
           )}
         </div>

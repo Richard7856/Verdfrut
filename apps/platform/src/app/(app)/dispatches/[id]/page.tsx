@@ -21,6 +21,7 @@ import { DispatchActions } from './dispatch-actions';
 import { RouteStopsCard } from './route-stops-card';
 import { ShareDispatchButton } from './share-dispatch-button';
 import { AddVehicleButton } from './add-vehicle-button';
+import { RestructureSnapshotBanner } from './restructure-snapshot-banner';
 import type { ChatStatus, DispatchStatus, Store } from '@verdfrut/types';
 
 export const dynamic = 'force-dynamic';
@@ -117,6 +118,12 @@ export default async function DispatchDetailPage({ params }: Props) {
     (s) => s.isActive && s.zoneId === dispatch.zoneId && !usedInDispatchStoreIds.has(s.id),
   );
 
+  // H3.5: ¿alguna ruta viva tiene version > 1? Indica reorder manual / cambios
+  // post-optimizer. Si redistribuyen, eso se pierde — el modal lo advierte.
+  const hasManualReorders = routes.some(
+    (r) => r.status !== 'CANCELLED' && r.version > 1,
+  );
+
   // Choferes activos en la zona para el selector.
   const profilesByUserId = new Map(zoneUsers.map((p) => [p.id, p]));
   const availableDriverOpts = zoneDrivers
@@ -146,6 +153,12 @@ export default async function DispatchDetailPage({ params }: Props) {
 
       <EtaModeBanner show={isEtaModeDemo()} />
 
+      {/* H3.4: banner comparativo tras redistribuir (lee sessionStorage). */}
+      <RestructureSnapshotBanner
+        dispatchId={dispatch.id}
+        storesById={new Map(stores.map((s) => [s.id, { code: s.code, name: s.name }]))}
+      />
+
       {dispatch.notes && (
         <Card className="mb-4 border-[var(--color-border)] bg-[var(--vf-surface-2)]">
           <p className="text-sm text-[var(--color-text)]">{dispatch.notes}</p>
@@ -169,6 +182,7 @@ export default async function DispatchDetailPage({ params }: Props) {
               dispatchId={dispatch.id}
               availableVehicles={availableVehicles}
               availableDrivers={availableDriverOpts}
+              hasManualReorders={hasManualReorders}
             />
             {/* Botón legacy: crear ruta nueva manualmente (sin redistribuir). */}
             <Link href={`/routes/new?dispatchId=${dispatch.id}`}>
@@ -231,6 +245,7 @@ export default async function DispatchDetailPage({ params }: Props) {
                     isDepotOverride={isDepotOverride}
                     availableDepots={availableDepotOptions}
                     availableStoresToAdd={availableStoresForRoute}
+                    dispatchHasManualReorders={hasManualReorders}
                   />
                 </li>
               );

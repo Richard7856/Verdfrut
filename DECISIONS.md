@@ -2280,3 +2280,98 @@ Adicional: la APK demo está en modo Custom Tab (barra Chrome visible) porque as
 - Issue #133: A/B comparativo "el mismo tiro con haversine vs Mapbox" — surfacing del delta en UI cuando se re-optimiza con token activo. Tiene sinergia con #111.
 - Issue #134: feature flag por tenant para "modo demo" intencional (algunos contextos comerciales se prefieren con números aproximados).
 - Issue #135: cron HTTP health check externo (UptimeRobot / Better Stack) para que el operador sepa si Vercel está down — no depende solo de Sentry.
+
+## [2026-05-10] ADR-053: Sprint H3 — Robustez del split/merge (RPC atómica + preservar overrides + banner + audit)
+
+**Contexto:** ADR-048 entregó la feature "agregar/quitar camionetas con re-rutear automático", pero con caveats documentados:
+- **Atomicidad parcial:** si el optimizer Railway fallaba después de cancelar las rutas viejas, el tiro quedaba vacío (issue #108).
+- **Pérdida de overrides:** el `depot_override_id` por ruta se perdía al redistribuir — el dispatcher tenía que re-aplicarlos (issue #110).
+- **Sin surface de unassigned:** si el optimizer no podía asignar una tienda (capacidad/ventana), el ID aparecía en el result pero la UI no lo mostraba (issue #109).
+- **Sin métricas comparativas:** el dispatcher no veía si la redistribución mejoró o empeoró km totales (issue #111).
+- **Riesgo de pérdida de trabajo manual:** si una ruta tenía reorder manual (version > 1), redistribuir lo recalculaba desde cero sin avisar (issue #112).
+- **Drag cross-route:** no soportado entre cards (issue #95).
+
+**Decisión:** Atacar los 5 issues más impactantes en un sprint encadenado. El #95 queda deferred (refactor del DndContext = alto riesgo + el dropdown "Mover a →" cubre el caso).
+
+### Cambios
+
+#### H3.1 — RPC atómica + two-phase commit
+
+1. **Migración 032:** `tripdrive_restructure_dispatch(p_dispatch_id, p_old_route_ids[], p_routes_json, p_created_by)` RPC Postgres que en UNA transacción:
+   - Valida que ninguna ruta del set old está en post-publicación (race-safe).
+   - Borra stops de las viejas, las marca CANCELLED.
+   - Inserta las rutas nuevas con sus stops + métricas + depot_override_id ya seteado.
+   - Si algo falla, rollback automático → tiro intacto.
+   - `SECURITY DEFINER` + grant solo a `service_role`.
+
+2. **Nuevo módulo `lib/optimizer-pipeline.ts`:** función pura `computeOptimizationPlan(input)` que carga entities, valida zona, llama optimizer Railway y devuelve un plan estructurado por ruta — **sin tocar BD**.
+
+3. **Refactor `restructureDispatchInternal`:** ahora es two-phase commit explícito:
+   - **Fase 1 (sin BD):** captura snapshot pre, captura overrides actuales, llama `computeOptimizationPlan`. Si falla, return error sin tocar BD.
+   - **Fase 2 (RPC atómica):** pasa el plan a la RPC. Si rollback, tiro vuelve exactamente como estaba.
+
+   Bug crítico resuelto: el flujo previo cancelaba rutas viejas ANTES de saber si el optimizer iba a funcionar. Ahora si el optimizer falla, las rutas viejas siguen vivas sin un solo cambio.
+
+#### H3.2 — Surfacing de unassigned stops
+
+- `RestructureSnapshotBanner` (nuevo) muestra lista de tiendas no asignadas con códigos resueltos.
+- El banner persiste en `sessionStorage` con TTL de 10 min — sobrevive `router.refresh()` y refresh de página.
+- Mensaje accionable: "X tienda(s) sin asignar. Agrega manualmente o suma otra camioneta."
+
+#### H3.3 — Preservar depot override por vehicle
+
+- Antes de fase 1, capturamos `oldDepotOverridesByVehicleId: Map<vehicleId, depotId>` de las rutas vivas.
+- Filtramos a los vehículos que SIGUEN en la nueva asignación (vehículos nuevos no tienen override previo).
+- Pasamos el map a `computeOptimizationPlan` → optimizer respeta override del CEDIS de salida.
+- RPC inserta `depot_override_id` en la nueva ruta.
+
+#### H3.4 — Banner comparativo km antes/después
+
+- Cada acción (`addVehicleToDispatchAction`, `removeVehicleFromDispatchAction`) ahora retorna `{ before, after }` con km, min y route count.
+- El cliente persiste el snapshot en `sessionStorage:restructureSnapshot:<dispatchId>`.
+- `RestructureSnapshotBanner` lee el snapshot al cargar `/dispatches/[id]` y muestra:
+  - Métricas pre con strikethrough + post en bold.
+  - Delta resaltado (verde si km baja, amarillo si sube).
+  - Sección de unassigned stops si aplica.
+  - Botón × para descartar.
+
+#### H3.5 — Confirm reorders manuales
+
+- Server (page detail) calcula `hasManualReorders = routes.some(r => r.status !== 'CANCELLED' && r.version > 1)`.
+- Se pasa como prop a `AddVehicleButton` y `RemoveVehicleButton`.
+- Modal muestra warning amarillo: "Las rutas tienen cambios manuales — redistribuir recalcula desde cero, el orden manual se pierde."
+- El dispatcher decide informado.
+
+#### H3.6 — Drag cross-route (DEFERRED)
+
+- Implementación correcta requiere mover `DndContext` al nivel de la page (envuelve todas las cards) + handler global que detecta drop cross-card.
+- Riesgo: ~3h de refactor + tests + posibles regresiones en drag intra-route que YA funciona.
+- ROI bajo porque el dropdown "Mover a →" ya cubre el caso operativo principal.
+- **Diferido al backlog** — issue #95 sigue abierto.
+
+### Alternativas consideradas
+
+- *Mantener rollback manual (TS):* descartado — no es robusto frente a errores parciales. Postgres ya tiene transacciones, hay que usarlas.
+- *Llamar optimizer DENTRO de la transacción (vía pg_net):* descartado — el optimizer Railway tarda 1-5s, mantener una transacción Postgres abierta tanto tiempo bloquea connection pool. Two-phase es lo correcto.
+- *Soft delete de rutas viejas (status='RESTRUCTURED'):* descartado — agregar status nuevo rompe code paths existentes. `CANCELLED` ya es suficiente para "no es una ruta viva" y se filtra desde el query inicial.
+- *Snapshot pre/post en BD (tabla `dispatch_restructure_history`):* descartado para V1 — sessionStorage es suficiente para el caso de uso UI. Tabla de history válida si llegamos a auditoría requerida (issue futuro).
+- *Banner persistent en BD vs sessionStorage:* descartado el persistent — la métrica solo importa "ahora", expira a 10 min, no hay valor en mantenerla cross-session.
+- *Block del redistribuir si hay reorders manuales:* descartado — debe ser una elección informada del dispatcher, no un bloqueo. Warning + confirm es el patrón correcto.
+
+### Riesgos / Limitaciones
+
+- *La RPC `tripdrive_restructure_dispatch` no genera entrada en `route_versions`* — las rutas nuevas son version 1. Si querían tracking de "esta es la 3ra redistribución del día", hay que agregar audit table separada.
+- *El sessionStorage del banner no se sincroniza entre tabs* del mismo dispatcher — si abre el tiro en 2 tabs y redistribuye en uno, el otro no muestra banner. Aceptable: caso edge.
+- *El delta "manual reorders" cuenta cualquier version > 1*, incluyendo bumps post-publicación (que son legítimos del chofer). Falso positivo posible en tiros completos — pero como `hasManualReorders` solo bloquea redistribuir pre-publicación, no afecta operación real (post-publicación no puede redistribuir igual).
+- *Si Mapbox Matrix falla y cae a haversine durante redistribución*, el banner mostrará "ETAs aproximados" pero el delta vs. el `before` (que también era haversine) será comparable. Si el `before` era Mapbox y el `after` cae a haversine, el delta es engañoso. Mitigación: el banner ETA modo demo (ADR-052) advierte el contexto.
+- *La RPC inserta status `OPTIMIZED` directamente,* saltando `DRAFT`. Es coherente porque ya tenemos el plan del optimizer, pero rompe la asunción "toda ruta empieza DRAFT". Si algún code path depende de eso, ajustar.
+- *`depotOverrideId` solo se preserva* si el vehículo está en el nuevo set. Si el dispatcher elimina la camioneta y agrega otra distinta, no hay forma de "transferir el override" — la nueva ruta usa el depot del nuevo vehículo. Aceptable.
+
+### Oportunidades de mejora
+
+- Issue #136: tabla `dispatch_restructure_history` para audit operativo (quién redistribuyó, cuándo, delta km).
+- Issue #137: tracking de versión por tiro (no solo por ruta) — útil para "esta es la 3ra redistribución de hoy".
+- Issue #138: opción "deshacer redistribución" durante 5 min — leer último snapshot y restaurar.
+- Issue #139: re-implementar #95 (drag cross-route) con DndContext compartido cuando haya capacidad.
+- Issue #140: banner persistente cross-tab via BroadcastChannel API.
+- Issue #141: auto-aplicar el override de depot si las nuevas camionetas comparten zona con las viejas (heurística "el dispatcher querría preservar este CEDIS por zona, no por vehículo").

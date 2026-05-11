@@ -4,13 +4,15 @@
 // Operaciones: crear, renombrar, eliminar, asignar/desasignar rutas, mover paradas.
 
 import { revalidatePath } from 'next/cache';
-import { createServerClient } from '@verdfrut/supabase/server';
+import { createServerClient, createServiceRoleClient } from '@verdfrut/supabase/server';
+import { logger } from '@verdfrut/observability';
 import { requireRole } from '@/lib/auth';
 import { moveStopToAnotherRoute, deleteStopsForRoute } from '@/lib/queries/stops';
 import { cancelRoute } from '@/lib/queries/routes';
 import { listRoutesByDispatch } from '@/lib/queries/dispatches';
 import { listStopsForRoute } from '@/lib/queries/stops';
-import { createAndOptimizeRoute, type CreateAndOptimizeResult } from '../routes/actions';
+import { computeOptimizationPlan } from '@/lib/optimizer-pipeline';
+import { type CreateAndOptimizeResult } from '../routes/actions';
 import {
   runAction,
   requireUuid,
@@ -287,17 +289,42 @@ interface RestructureInput {
   dispatchId: string;
   /** Lista final de asignaciones tras el cambio. Cada entrada = 1 ruta nueva. */
   vehicleAssignments: Array<{ vehicleId: string; driverId: string | null }>;
+  /** Identificador del usuario que ejecuta — para audit y created_by. */
+  createdBy: string;
 }
 
 /**
- * Helper interno: cancela las rutas pre-publicación del tiro, recolecta sus
- * stops y llama a `createAndOptimizeRoute` con los vehículos pedidos.
+ * Snapshot del tiro previo a la redistribución — devolver al UI para banner
+ * comparativo (H3.4) y audit.
+ */
+interface PreRestructureSnapshot {
+  totalDistanceMeters: number;
+  totalDurationSeconds: number;
+  routeCount: number;
+  stopCount: number;
+}
+
+export interface RestructureDispatchResult extends CreateAndOptimizeResult {
+  /** Métricas pre y post para que la UI muestre el delta (H3.4). */
+  before?: PreRestructureSnapshot;
+  after?: PreRestructureSnapshot;
+}
+
+/**
+ * Helper interno (ADR-053): two-phase commit.
  *
- * Devuelve los nuevos route ids en éxito o un error legible.
+ *   Fase 1 (fuera de BD): captura snapshot pre, valida estado, llama optimizer
+ *     vía `computeOptimizationPlan`. Si falla, return error sin tocar BD.
+ *   Fase 2 (RPC Postgres atómica): cancela rutas viejas + inserta nuevas en
+ *     una transacción. Si falla, rollback automático → tiro intacto.
+ *
+ * Esto resuelve el bug original de ADR-048 donde si el optimizer fallaba
+ * después de cancelar las rutas viejas, el tiro quedaba vacío. Ahora la
+ * cancelación y la inserción son atómicas.
  */
 async function restructureDispatchInternal(
   input: RestructureInput,
-): Promise<CreateAndOptimizeResult> {
+): Promise<RestructureDispatchResult> {
   const dispatchId = requireUuid('dispatchId', input.dispatchId);
   if (input.vehicleAssignments.length === 0) {
     throw new ValidationError('vehicleAssignments', 'Debes asignar al menos un camión.');
@@ -311,11 +338,11 @@ async function restructureDispatchInternal(
     .maybeSingle();
   if (dErr || !dispatch) throw new ValidationError('dispatchId', 'Tiro no encontrado.');
 
-  // Listar rutas vivas del tiro. Las CANCELLED las ignoramos — su historial queda.
+  // Rutas vivas (no CANCELLED).
   const allRoutes = await listRoutesByDispatch(dispatchId);
   const liveRoutes = allRoutes.filter((r) => r.status !== 'CANCELLED');
 
-  // Si alguna ruta está post-publicación, abortar — no es seguro re-rutear.
+  // Validar status — no se puede redistribuir post-publicación.
   const POST_PUBLISH = new Set(['PUBLISHED', 'IN_PROGRESS', 'INTERRUPTED', 'COMPLETED']);
   const blocking = liveRoutes.find((r) => POST_PUBLISH.has(r.status));
   if (blocking) {
@@ -326,14 +353,21 @@ async function restructureDispatchInternal(
     );
   }
 
-  // Recolectar todos los store_ids únicos de las rutas vivas, en orden estable.
+  // Recolectar storeIds únicos en orden estable. H3.3: capturar también los
+  // depot overrides que existían en cada vehículo para preservarlos en las
+  // rutas nuevas (si el dispatcher había cambiado el CEDIS de salida, no
+  // queremos perder ese trabajo al redistribuir).
   const allStoreIds: string[] = [];
-  const seen = new Set<string>();
+  const seenStores = new Set<string>();
+  const oldDepotOverridesByVehicleId = new Map<string, string>();
   for (const r of liveRoutes) {
+    if (r.depotOverrideId) {
+      oldDepotOverridesByVehicleId.set(r.vehicleId, r.depotOverrideId);
+    }
     const stops = await listStopsForRoute(r.id);
     for (const s of stops) {
-      if (!seen.has(s.storeId)) {
-        seen.add(s.storeId);
+      if (!seenStores.has(s.storeId)) {
+        seenStores.add(s.storeId);
         allStoreIds.push(s.storeId);
       }
     }
@@ -346,25 +380,105 @@ async function restructureDispatchInternal(
     );
   }
 
-  // Cancelar rutas viejas (status CANCELLED + drop stops) ANTES de crear las nuevas.
-  // Esto libera las store_ids para que createAndOptimizeRoute no choque con
-  // restricciones de unicidad lógica (una tienda por tiro/día).
-  for (const r of liveRoutes) {
-    await deleteStopsForRoute(r.id);
-    await cancelRoute(r.id);
+  // Snapshot pre (H3.4): métricas que va a comparar el banner.
+  const before: PreRestructureSnapshot = {
+    totalDistanceMeters: liveRoutes.reduce((s, r) => s + (r.totalDistanceMeters ?? 0), 0),
+    totalDurationSeconds: liveRoutes.reduce((s, r) => s + (r.totalDurationSeconds ?? 0), 0),
+    routeCount: liveRoutes.length,
+    stopCount: allStoreIds.length,
+  };
+
+  // Construir map de overrides para los vehículos que SIGUEN en la nueva
+  // asignación (los nuevos pueden no haber tenido override previo, se quedan
+  // sin override = depot del vehículo). H3.3.
+  const newVehicleIds = new Set(input.vehicleAssignments.map((a) => a.vehicleId));
+  const preservedOverrides = new Map<string, string>();
+  for (const [vId, depotId] of oldDepotOverridesByVehicleId.entries()) {
+    if (newVehicleIds.has(vId)) {
+      preservedOverrides.set(vId, depotId);
+    }
   }
 
-  // Llamar al action existente — ya orquesta optimizer + persistencia + dispatch.
-  const result = await createAndOptimizeRoute({
-    name: dispatch.name as string,
-    date: dispatch.date as string,
-    vehicleIds: input.vehicleAssignments.map((a) => a.vehicleId),
-    driverIds: input.vehicleAssignments.map((a) => a.driverId),
-    storeIds: allStoreIds,
-    dispatchId,
-  });
+  // FASE 1: calcular plan via optimizer. SI FALLA AQUÍ, no tocamos BD.
+  let plan;
+  try {
+    plan = await computeOptimizationPlan({
+      date: dispatch.date as string,
+      vehicleIds: input.vehicleAssignments.map((a) => a.vehicleId),
+      driverIds: input.vehicleAssignments.map((a) => a.driverId),
+      storeIds: allStoreIds,
+      vehicleDepotOverrides: preservedOverrides.size > 0 ? preservedOverrides : undefined,
+      routeNamePrefix: dispatch.name as string,
+    });
+  } catch (err) {
+    await logger.error('restructureDispatch: optimizer falló (tiro intacto)', {
+      dispatchId, err,
+    });
+    throw err instanceof Error ? err : new Error('Optimizer falló');
+  }
 
-  return result;
+  if (plan.routes.length === 0) {
+    throw new ValidationError(
+      'optimizer',
+      'El optimizador no pudo asignar ninguna parada con la flota seleccionada. ' +
+        'Verifica capacidad de vehículos vs demanda total.',
+    );
+  }
+
+  // FASE 2: RPC atómica. Cancelar rutas viejas + insertar nuevas en transacción.
+  const oldRouteIds = liveRoutes.map((r) => r.id);
+  const routesJson = plan.routes.map((r) => ({
+    vehicle_id: r.vehicleId,
+    driver_id: r.driverId ?? '',
+    depot_override_id: r.depotOverrideId ?? '',
+    name: r.name,
+    total_distance_meters: r.totalDistanceMeters,
+    total_duration_seconds: r.totalDurationSeconds,
+    estimated_start_at: r.estimatedStartAt,
+    estimated_end_at: r.estimatedEndAt,
+    stops: r.stops.map((s) => ({
+      store_id: s.storeId,
+      sequence: s.sequence,
+      planned_arrival_at: s.plannedArrivalAt,
+      planned_departure_at: s.plannedDepartureAt,
+      load: s.load,
+    })),
+  }));
+
+  const admin = createServiceRoleClient();
+  const { data: newRouteIds, error: rpcErr } = await admin.rpc(
+    'tripdrive_restructure_dispatch',
+    {
+      p_dispatch_id: dispatchId,
+      p_old_route_ids: oldRouteIds,
+      p_routes_json: routesJson,
+      p_created_by: input.createdBy,
+    },
+  );
+
+  if (rpcErr) {
+    await logger.error('restructureDispatch: RPC falló — tiro queda como estaba', {
+      dispatchId, err: rpcErr,
+    });
+    // Rollback automático del Postgres: el tiro vuelve a su estado previo.
+    throw new Error(`Redistribución falló: ${rpcErr.message}`);
+  }
+
+  const after: PreRestructureSnapshot = {
+    totalDistanceMeters: plan.totalDistanceMeters,
+    totalDurationSeconds: plan.totalDurationSeconds,
+    routeCount: plan.routes.length,
+    stopCount: allStoreIds.length - plan.unassignedStoreIds.length,
+  };
+
+  return {
+    ok: true,
+    routeIds: (newRouteIds as unknown as string[]) ?? [],
+    unassignedStoreIds: plan.unassignedStoreIds,
+    dispatchId,
+    before,
+    after,
+  };
 }
 
 /**
@@ -375,8 +489,8 @@ export async function addVehicleToDispatchAction(
   dispatchId: string,
   newVehicleId: string,
   newDriverId: string | null,
-): Promise<CreateAndOptimizeResult> {
-  await requireRole('admin', 'dispatcher');
+): Promise<RestructureDispatchResult> {
+  const profile = await requireRole('admin', 'dispatcher');
   try {
     const id = requireUuid('dispatchId', dispatchId);
     requireUuid('newVehicleId', newVehicleId);
@@ -404,6 +518,7 @@ export async function addVehicleToDispatchAction(
         ...existingAssignments,
         { vehicleId: newVehicleId, driverId: newDriverId },
       ],
+      createdBy: profile.id,
     });
 
     revalidatePath('/dispatches');
@@ -422,8 +537,8 @@ export async function addVehicleToDispatchAction(
  */
 export async function removeVehicleFromDispatchAction(
   routeId: string,
-): Promise<CreateAndOptimizeResult> {
-  await requireRole('admin', 'dispatcher');
+): Promise<RestructureDispatchResult> {
+  const profile = await requireRole('admin', 'dispatcher');
   try {
     const id = requireUuid('routeId', routeId);
     const supabase = await createServerClient();
@@ -470,6 +585,7 @@ export async function removeVehicleFromDispatchAction(
         vehicleId: r.vehicleId,
         driverId: r.driverId,
       })),
+      createdBy: profile.id,
     });
 
     revalidatePath('/dispatches');
