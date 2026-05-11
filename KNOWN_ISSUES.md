@@ -691,3 +691,101 @@ Formato:
 - Bug isolation Mapbox markers (escapaban container al scroll)
 - Bug listRoutesByDispatch (mostraba 0 rutas con limit frágil)
 - Bug redirect post-creación (iba a /routes en vez de /dispatches)
+
+---
+
+## 📍 Actualización 2026-05-11 — post Sprints H1-H6
+
+**56 ADRs documentados, 33 migraciones tenant + 1 CP, 0 críticos.**
+
+ADRs nuevos en este ciclo: ADR-046 a ADR-056 (11 ADRs).
+
+### Issues nuevos del ciclo H1-H6
+
+#### Marca y dominio (Sprint H6)
+- #113 Validar trademark MX (IMPI) + US (USPTO) clases 39 + 42.
+- #114 Comprar `tripdrive.com` si disponible.
+- #115 Diseño de logo definitivo.
+- #116 Email transaccional `hola@tripdrive.xyz`, `soporte@tripdrive.xyz`.
+- #117 Registrar handles `@tripdrive` en LinkedIn/X/Instagram.
+
+#### Observability (Sprint H1 / ADR-051)
+- #125 Migrar 22 `console.error` legacy restantes a `logger.*`.
+- #126 Habilitar Sentry Performance tracing con alertas P95.
+- #127 Integración Slack para alertas Sentry.
+- #128 Pantalla `/audit/sentry-summary` con KPIs propios.
+- #129 Crons reportan latencia a Sentry para detectar timeouts.
+- #130 Evaluar Posthog para product analytics (separado de Sentry).
+
+#### ETAs reales + crons (Sprint H2 / ADR-052)
+- #131 Alerta Sentry "Mapbox fallback haversine" si >N veces/hora.
+- #132 Contador en `/audit/observability` con queries Mapbox usadas.
+- #133 A/B comparativo haversine vs Mapbox en UI.
+- #134 Feature flag por tenant para modo demo intencional.
+- #135 Health check externo (UptimeRobot / Better Stack).
+
+#### Robustez split/merge (Sprint H3 / ADR-053)
+- #136 Tabla `dispatch_restructure_history` para audit operativo.
+- #137 Tracking de versión por tiro (no solo por ruta).
+- #138 Opción "deshacer redistribución" durante 5 min.
+- #139 Re-implementar drag cross-route (#95) con DndContext compartido.
+- #140 Banner cross-tab via BroadcastChannel API.
+- #141 Auto-aplicar override de depot por zona (heurística).
+
+#### Performance (Sprint H4 / ADR-054)
+- #142 Endpoint cron `POST /api/cron/rate-limit-cleanup` ✅ HECHO en H5.
+- #143 Click imagen chat → lightbox ✅ HECHO en H5.
+- #144 Diferenciar timeout iOS LP vs red lenta en compressImage.
+- #145 Correr Lighthouse audit driver real.
+- #146 Migrar `new Date().toISOString()` legacy a `nowUtcIso()`.
+- #147 Profiling Server Components con Sentry Performance.
+- #148 `tenant_config` table en BD para bbox/region (más flexible que ENV).
+
+#### Reportería + UX (Sprint H5 / ADR-055)
+- #149 Dashboard del driver app (stops/fotos/kg movidos del mes).
+- #150 Drill-down por ruta en `/reports`.
+- #151 Export XLSX directo desde `/reports`.
+- #152 Anomaly detection en `/audit`.
+- #153 Alertas Slack para chat-failures nuevos.
+- #154 Filtros por estado/tipo/chofer en `/incidents`.
+- #155 Comparativa mes-vs-mes en `/reports`.
+
+#### Rebrand fase 2 (Sprint H6 / ADR-056)
+- #156 Eliminar lectura cookie `vf-theme` legacy tras 30 días productivos.
+- #157 Migrar gradualmente call sites de `--vf-*` → `--td-*` cuando se toque cada componente.
+- #158 Invertir aliases CSS (`--vf-*: var(--td-*)`) cuando mayoría migre.
+- #159 Rename `/etc/verdfrut/` → `/etc/tripdrive/` para VPS dedicado.
+- #160 Redirect 308 `tripdrive.com` → `tripdrive.xyz` si llegamos a comprar `.com`.
+- #161 Validar GitHub repo rename no rompe links externos.
+
+### Resueltos en este ciclo (H1-H6)
+
+- #122 `/audit/chat-failures` ✅ implementado (H5).
+- #124 Rate-limit Postgres distribuido ✅ implementado (H4).
+- #108 RPC atómica restructure_dispatch ✅ implementado (H3).
+- #109 Surfacing unassigned stops post-redistribuir ✅ implementado (H3).
+- #110 Preservar depot override al redistribuir ✅ implementado (H3).
+- #111 Banner comparativo km antes/después ✅ implementado (H3).
+- #112 Warning si hay reorders manuales antes de redistribuir ✅ implementado (H3).
+- #118 `<img>` → `<Image>` en chat thread ✅ implementado (H4).
+- #120 Helper `nowUtcIso()` ✅ implementado (H4).
+- #121 Tenant bbox configurable ✅ implementado (H4).
+- #20 Compresión defensiva iOS Low Power ✅ implementado (H4).
+- #142 Cron `rate-limit-cleanup` endpoint ✅ implementado (H5).
+- #143 Lightbox imagen chat ✅ implementado (H5).
+- #77 assetlinks.json con Content-Type correcto ✅ implementado (H2 — pendiente verificar tras deploy).
+
+### Total issues abiertos al cierre
+
+**~110 trackeados.** 0 críticos. ~30 importantes (operativos + features). ~80 cosméticos/refactor.
+
+### Estado de bloqueantes operativos del user (post-sesión)
+
+- ✅ Dominio `tripdrive.xyz` comprado en Hostinger.
+- ✅ Nameservers en Vercel.
+- ⏳ Custom domains en 3 proyectos Vercel — en curso al cierre.
+- ⏳ `SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `MAPBOX_DIRECTIONS_TOKEN`, `ANTHROPIC_API_KEY` en Vercel — pendiente.
+- ⏳ 4 schedules n8n — pendiente.
+- ⏳ Smoke tests post-deploy — pendiente.
+
+Sprint H7 (pruebas con cliente real) **bloqueado** hasta que cierre lo anterior.

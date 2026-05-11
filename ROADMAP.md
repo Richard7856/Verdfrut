@@ -1,6 +1,6 @@
-# TripDrive — Roadmap (post Sprint H4)
+# TripDrive — Roadmap (post Sprint H6)
 
-> Actualizado el 2026-05-11. La plataforma se llama **TripDrive** (dominio `tripdrive.xyz`). Primer cliente productivo: **VerdFrut**, alias operativo de su contrato con NETO Tiendas en CDMX y Toluca.
+> Actualizado el 2026-05-11. La plataforma se llama **TripDrive** (dominio `tripdrive.xyz` comprado en Hostinger, nameservers en Vercel). Primer cliente productivo: **VerdFrut**, alias operativo de su contrato con NETO Tiendas en CDMX y Toluca.
 
 ---
 
@@ -34,11 +34,17 @@
 ## 🚧 Sprint H7 — Pruebas con cliente real *(siguiente, variable)*
 
 ### Pre-condición operativa (depende del user):
-- [ ] Comprar dominio `tripdrive.xyz` (Cloudflare Registrar recomendado, ver `DOMAINS.md`)
-- [ ] Configurar DNS: 4 CNAMEs a Vercel
-- [ ] Agregar custom domains en los 3 proyectos Vercel
-- [ ] Setear env vars Sentry/Mapbox/Anthropic en Vercel
+- [x] Comprar dominio `tripdrive.xyz` (Hostinger ✅ 2026-05-11)
+- [x] Configurar DNS: nameservers a Vercel ✅
+- [ ] Agregar custom domains en los 3 proyectos Vercel (en curso)
+- [ ] `SENTRY_AUTH_TOKEN` (crear Organization Token en Sentry)
+- [ ] `NEXT_PUBLIC_SENTRY_DSN` en los 3 proyectos Vercel
+- [ ] `MAPBOX_DIRECTIONS_TOKEN` en platform
+- [ ] `ANTHROPIC_API_KEY` en driver
+- [ ] Redeploy los 3 proyectos para aplicar env vars
 - [ ] Configurar 4 schedules n8n (timeout-chats, orphans, breadcrumbs, rate-limit-cleanup)
+- [ ] Smoke tests con curl post-deploy
+- [ ] Test Sentry (throw error en server action temp)
 
 ### Pruebas (Sprint en sí):
 - Test piloto con NETO — operación real
