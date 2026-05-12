@@ -20,5 +20,8 @@ export interface Store {
   // En el futuro puede ser dinámica por pedido del día (Fase 5+).
   demand: number[];
   isActive: boolean;
+  // Si las coords (lat/lng) son ground truth (CSV cliente, validación manual,
+  // geocoding ROOFTOP) o aproximadas (geocoding APPROXIMATE, fallback). ADR-042.
+  coordVerified: boolean;
   createdAt: string;
 }

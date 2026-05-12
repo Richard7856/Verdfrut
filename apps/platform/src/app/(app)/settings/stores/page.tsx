@@ -1,5 +1,6 @@
 // CRUD de tiendas. Tabla + modal de creación. Filtro por zona pendiente para Fase 1.b.
 
+import Link from 'next/link';
 import { Badge, DataTable, EmptyState, PageHeader, type Column } from '@tripdrive/ui';
 import type { Store } from '@tripdrive/types';
 import { requireRole } from '@/lib/auth';
@@ -30,8 +31,28 @@ export default async function StoresPage() {
   }
 
   const columns: Column<Store>[] = [
-    { key: 'code', header: 'Código', cell: (s) => <span className="font-mono">{s.code}</span> },
-    { key: 'name', header: 'Tienda', cell: (s) => s.name },
+    {
+      key: 'code',
+      header: 'Código',
+      cell: (s) => (
+        <Link
+          href={`/settings/stores/${s.id}`}
+          className="font-mono hover:underline"
+          style={{ color: 'var(--vf-text)' }}
+        >
+          {s.code}
+        </Link>
+      ),
+    },
+    {
+      key: 'name',
+      header: 'Tienda',
+      cell: (s) => (
+        <Link href={`/settings/stores/${s.id}`} className="hover:underline">
+          {s.name}
+        </Link>
+      ),
+    },
     {
       key: 'zone',
       header: 'Zona',
@@ -51,6 +72,16 @@ export default async function StoresPage() {
           : '—',
     },
     {
+      key: 'coords',
+      header: 'Coords',
+      cell: (s) =>
+        s.coordVerified ? (
+          <Badge tone="success">Verificadas</Badge>
+        ) : (
+          <Badge tone="warning">Sin verificar</Badge>
+        ),
+    },
+    {
       key: 'status',
       header: 'Estado',
       cell: (s) => (
@@ -63,7 +94,18 @@ export default async function StoresPage() {
       key: 'actions',
       header: '',
       align: 'right',
-      cell: (s) => <ToggleStoreActiveCell store={s} />,
+      cell: (s) => (
+        <div className="flex items-center justify-end gap-3">
+          <Link
+            href={`/settings/stores/${s.id}`}
+            className="text-xs hover:underline"
+            style={{ color: 'var(--vf-text-mute)' }}
+          >
+            Editar
+          </Link>
+          <ToggleStoreActiveCell store={s} />
+        </div>
+      ),
     },
   ];
 

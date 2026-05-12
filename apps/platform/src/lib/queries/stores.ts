@@ -21,11 +21,12 @@ interface StoreRow {
   service_time_seconds: number;
   demand: number[] | null;
   is_active: boolean;
+  coord_verified: boolean;
   created_at: string;
 }
 
 const STORE_COLS =
-  'id, code, name, zone_id, address, lat, lng, contact_name, contact_phone, receiving_window_start, receiving_window_end, service_time_seconds, demand, is_active, created_at';
+  'id, code, name, zone_id, address, lat, lng, contact_name, contact_phone, receiving_window_start, receiving_window_end, service_time_seconds, demand, is_active, coord_verified, created_at';
 
 // Demanda default cuando una tienda no la tiene seteada (ej: stores creadas antes de la migración).
 // Convención: [peso_kg, volumen_m3, cajas].
@@ -47,6 +48,7 @@ function toStore(row: StoreRow): Store {
     serviceTimeSeconds: row.service_time_seconds,
     demand: row.demand ?? DEFAULT_DEMAND,
     isActive: row.is_active,
+    coordVerified: row.coord_verified,
     createdAt: row.created_at,
   };
 }
@@ -134,6 +136,8 @@ interface UpdateStoreInput {
   receivingWindowEnd?: string | null;
   serviceTimeSeconds?: number;
   isActive?: boolean;
+  coordVerified?: boolean;
+  demand?: number[];
 }
 
 export async function updateStore(id: string, input: UpdateStoreInput): Promise<Store> {
@@ -151,6 +155,8 @@ export async function updateStore(id: string, input: UpdateStoreInput): Promise<
   if (input.receivingWindowEnd !== undefined) update.receiving_window_end = input.receivingWindowEnd;
   if (input.serviceTimeSeconds !== undefined) update.service_time_seconds = input.serviceTimeSeconds;
   if (input.isActive !== undefined) update.is_active = input.isActive;
+  if (input.coordVerified !== undefined) update.coord_verified = input.coordVerified;
+  if (input.demand !== undefined) update.demand = input.demand;
 
   const { data, error } = await supabase
     .from('stores')

@@ -157,6 +157,7 @@ interface StoreRow {
   service_time_seconds: number;
   demand: number[];
   is_active: boolean;
+  coord_verified?: boolean;
   created_at: string;
 }
 
@@ -193,6 +194,7 @@ function toStore(row: StoreRow): Store {
     serviceTimeSeconds: row.service_time_seconds,
     demand: row.demand,
     isActive: row.is_active,
+    coordVerified: row.coord_verified ?? false,
     createdAt: row.created_at,
   };
 }

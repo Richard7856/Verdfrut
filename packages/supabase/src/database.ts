@@ -607,6 +607,7 @@ export type Database = {
           code: string
           contact_name: string | null
           contact_phone: string | null
+          coord_verified: boolean
           created_at: string
           demand: number[]
           id: string
@@ -624,6 +625,7 @@ export type Database = {
           code: string
           contact_name?: string | null
           contact_phone?: string | null
+          coord_verified?: boolean
           created_at?: string
           demand?: number[]
           id?: string
@@ -641,6 +643,7 @@ export type Database = {
           code?: string
           contact_name?: string | null
           contact_phone?: string | null
+          coord_verified?: boolean
           created_at?: string
           demand?: number[]
           id?: string

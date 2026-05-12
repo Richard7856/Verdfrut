@@ -59,7 +59,7 @@ export async function getStopContext(stopId: string): Promise<StopContext | null
       .from('stores')
       .select(
         `id, code, name, zone_id, address, lat, lng, contact_name, contact_phone,
-         receiving_window_start, receiving_window_end, service_time_seconds, demand, is_active, created_at`,
+         receiving_window_start, receiving_window_end, service_time_seconds, demand, is_active, coord_verified, created_at`,
       )
       .eq('id', stopRow.store_id)
       .maybeSingle(),
@@ -115,6 +115,7 @@ export async function getStopContext(stopId: string): Promise<StopContext | null
       serviceTimeSeconds: storeRes.data.service_time_seconds,
       demand: storeRes.data.demand,
       isActive: storeRes.data.is_active,
+      coordVerified: storeRes.data.coord_verified ?? false,
       createdAt: storeRes.data.created_at,
     },
     route: {
