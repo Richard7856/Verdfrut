@@ -16,7 +16,8 @@ import { listStores } from '@/lib/queries/stores';
 import { listDepots } from '@/lib/queries/depots';
 import { MultiRouteMapServer } from '@/components/map/multi-route-map-server';
 import { EtaModeBanner, isEtaModeDemo } from '@/components/shell/eta-mode-banner';
-import { AssignRouteForm } from './assign-route-form';
+// `AssignRouteForm` removido — ADR-040 hizo dispatch_id NOT NULL, ya no
+// existen rutas huérfanas que vincular a un tiro.
 import { DispatchActions } from './dispatch-actions';
 import { RouteStopsCard } from './route-stops-card';
 import { ShareDispatchButton } from './share-dispatch-button';
@@ -46,9 +47,8 @@ export default async function DispatchDetailPage({ params }: Props) {
   const dispatch = await getDispatch(id);
   if (!dispatch) notFound();
 
-  const [routes, allRoutesData, zones, vehicles, stores, zoneDrivers, zoneUsers, allDepots] = await Promise.all([
+  const [routes, zones, vehicles, stores, zoneDrivers, zoneUsers, allDepots] = await Promise.all([
     listRoutesByDispatch(id),
-    listRoutes({ date: dispatch.date, zoneId: dispatch.zoneId, limit: 200 }),
     listZones(),
     listVehicles({}),
     listStores({ activeOnly: false }),
@@ -70,10 +70,8 @@ export default async function DispatchDetailPage({ params }: Props) {
     vehicleId: r.vehicleId,
   }));
 
-  // Rutas candidatas a agregar: misma zona, misma fecha, sin dispatch_id.
-  const candidateRoutes = allRoutesData.rows.filter(
-    (r) => r.dispatchId === null,
-  );
+  // ADR-040 (2026-04): `routes.dispatch_id` es NOT NULL — toda ruta vive
+  // dentro de un tiro. La query de "candidateRoutes huérfanas" se eliminó.
 
   const status = DISPATCH_STATUS_LABEL[dispatch.status];
   const zone = zones.find((z) => z.id === dispatch.zoneId);
@@ -194,9 +192,14 @@ export default async function DispatchDetailPage({ params }: Props) {
         </header>
 
         {routes.length === 0 ? (
-          <Card className="border-[var(--color-border)] bg-[var(--vf-surface-2)]">
-            <p className="text-sm text-[var(--color-text-muted)]">
-              Este tiro no tiene rutas todavía. Crea una nueva o vincula una ruta existente abajo.
+          <Card className="border-[var(--color-border)] bg-[var(--vf-surface-2)] p-8 text-center">
+            <p className="text-base font-medium text-[var(--color-text)]">
+              Este tiro está vacío
+            </p>
+            <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+              Usa los botones de arriba: <strong>+ Agregar camioneta</strong> abre el wizard
+              de selección de tiendas con auto-optimización, o <strong>+ Ruta manual</strong>
+              te lleva al formulario completo.
             </p>
           </Card>
         ) : (
@@ -253,17 +256,10 @@ export default async function DispatchDetailPage({ params }: Props) {
           </ul>
         )}
 
-        {candidateRoutes.length > 0 && (
-          <Card className="border-[var(--color-border)]">
-            <p className="mb-2 text-xs font-medium text-[var(--color-text)]">
-              Vincular ruta existente al tiro
-            </p>
-            <p className="mb-3 text-xs text-[var(--color-text-muted)]">
-              Solo rutas de la misma zona y fecha sin tiro asignado.
-            </p>
-            <AssignRouteForm dispatchId={dispatch.id} candidates={candidateRoutes} vehicles={vehicles} />
-          </Card>
-        )}
+        {/* Card "Vincular ruta existente" eliminada — ADR-040 hizo
+            routes.dispatch_id NOT NULL, ya no existen rutas huérfanas que
+            vincular. Si en el futuro queremos "mover ruta entre tiros", es
+            feature aparte (moveRouteToAnotherDispatch action). */}
       </section>
     </>
   );
