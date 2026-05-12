@@ -17,7 +17,7 @@ interface NavItem {
   href: string;
   label: string;
   roles: UserRole[];
-  group: 'GENERAL' | 'OPERACIÓN' | 'CATÁLOGO' | 'SISTEMA';
+  group: 'GENERAL' | 'CLIENTES' | 'OPERACIÓN' | 'CATÁLOGO' | 'SISTEMA';
   badge?: string | number;
 }
 
@@ -33,6 +33,11 @@ const NAV_ITEMS: NavItem[] = [
   // Admin / dispatcher — supervisión global
   { href: '/dashboard', label: 'Overview', roles: ['admin', 'dispatcher'], group: 'GENERAL' },
   { href: '/map', label: 'Mapa en vivo', roles: ['admin', 'dispatcher'], group: 'GENERAL' },
+
+  // CLIENTES — shell del feature multi-cliente (en desarrollo). Mientras es
+  // shell-only, todo NETO opera con el modelo actual; la sección sirve para
+  // mostrar la visión del feature en la presentación.
+  { href: '/customers', label: 'Clientes', roles: ['admin', 'dispatcher'], group: 'CLIENTES', badge: 'Nuevo' },
 
   { href: '/routes', label: 'Rutas', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
   { href: '/dispatches', label: 'Tiros (agrupar rutas)', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
@@ -51,7 +56,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/settings/users', label: 'Usuarios', roles: ['admin'], group: 'SISTEMA' },
 ];
 
-const GROUP_ORDER: NavItem['group'][] = ['GENERAL', 'OPERACIÓN', 'CATÁLOGO', 'SISTEMA'];
+const GROUP_ORDER: NavItem['group'][] = ['GENERAL', 'CLIENTES', 'OPERACIÓN', 'CATÁLOGO', 'SISTEMA'];
 
 const ENV_LABEL = process.env.NEXT_PUBLIC_ENV_LABEL ?? 'PROD';
 
