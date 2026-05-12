@@ -45,15 +45,27 @@ export function DataTable<T>({
   }
 
   return (
-    <div className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)]">
+    <div
+      className="overflow-hidden rounded-[var(--radius-lg)] border bg-[var(--color-surface)]"
+      style={{ borderColor: 'var(--vf-line-strong)' }}
+    >
       <table className="w-full text-left text-sm">
-        <thead className="bg-[var(--color-surface-muted)] text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
+        {/* Header: peso 600 + tracking ligero + un punto más de contraste para
+            scanability (`--vf-text-mute` ya subió en tokens). UI/UX 2026-05-12. */}
+        <thead
+          className="text-[11px] uppercase tracking-[0.06em]"
+          style={{
+            background: 'var(--vf-surface-2)',
+            color: 'var(--vf-text-mute)',
+            borderBottom: '1px solid var(--vf-line-strong)',
+          }}
+        >
           <tr>
             {columns.map((col) => (
               <th
                 key={col.key}
                 className={cn(
-                  'px-4 py-3 font-medium',
+                  'px-4 py-3 font-semibold',
                   col.align === 'right' && 'text-right',
                   col.align === 'center' && 'text-center',
                   col.className,
@@ -64,21 +76,24 @@ export function DataTable<T>({
             ))}
           </tr>
         </thead>
-        <tbody className="divide-y divide-[var(--color-border)]">
+        {/* Filas: padding vertical 14px (de 12 antes) para mejor respiración,
+            separadores con `--vf-line` (que ahora es +0.06 L más visible). */}
+        <tbody className="divide-y" style={{ borderColor: 'var(--vf-line)' }}>
           {rows.map((row) => (
             <tr
               key={rowKey(row)}
               onClick={onRowClick ? () => onRowClick(row) : undefined}
               className={cn(
                 'transition-colors',
-                onRowClick && 'cursor-pointer hover:bg-[var(--color-surface-muted)]',
+                onRowClick && 'cursor-pointer hover:bg-[var(--vf-surface-3)]',
               )}
+              style={{ borderTopColor: 'var(--vf-line)' }}
             >
               {columns.map((col) => (
                 <td
                   key={col.key}
                   className={cn(
-                    'px-4 py-3 text-[var(--color-text)]',
+                    'px-4 py-3.5 text-[var(--color-text)]',
                     col.align === 'right' && 'text-right',
                     col.align === 'center' && 'text-center',
                     col.className,

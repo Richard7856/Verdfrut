@@ -28,7 +28,9 @@ export function Badge({ tone = 'neutral', className, children, ...rest }: BadgeP
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-[var(--radius-sm)] border px-2 py-0.5 text-xs font-medium',
+        'inline-flex items-center gap-1 whitespace-nowrap rounded-[var(--radius-sm)] border px-2 py-0.5 text-xs font-medium',
+        // whitespace-nowrap: en columnas estrechas (ej. "Sin verificar")
+        // los badges se rompían a 2 líneas y se veían deformes. UI/UX 2026-05-12.
         TONE_CLASSES[tone],
         className,
       )}

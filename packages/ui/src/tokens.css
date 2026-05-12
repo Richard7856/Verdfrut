@@ -121,16 +121,38 @@
      visible como hover sobre fondos oscuros. surface-1/2 heredan via la
      indirección var(--vf-bg-elev) / var(--vf-bg-sub) que cambian arriba. */
   --vf-surface-3: oklch(0.26 0.014 155);
-  --vf-line:      oklch(0.28 0.012 155);  /* #323a35 */
-  --vf-line-soft: oklch(0.24 0.010 155);  /* #2a322e */
-  --vf-line-strong: oklch(0.34 0.014 155);  /* #3e4640 */
-  --vf-text:      oklch(0.96 0.004 155);  /* #f1f3f0 */
-  --vf-text-mute: oklch(0.72 0.008 155);  /* #a8b0aa */
-  --vf-text-faint:oklch(0.56 0.006 155);  /* #7d847f */
+  /* Separadores +20% de luminancia para ser perceptibles sin perder elegancia.
+     Antes (0.28/0.24/0.34) eran casi invisibles entre filas de DataTable en
+     dark mode — auditoría UI/UX 2026-05-12. */
+  --vf-line:      oklch(0.34 0.012 155);  /* +0.06 L vs antes */
+  --vf-line-soft: oklch(0.28 0.010 155);  /* +0.04 L */
+  --vf-line-strong: oklch(0.42 0.014 155);  /* +0.08 L — para separación de secciones */
+  --vf-text:      oklch(0.96 0.004 155);
+  --vf-text-mute: oklch(0.74 0.008 155);  /* +0.02 L para mejor contraste de headers tabla */
+  --vf-text-faint:oklch(0.60 0.006 155);  /* +0.04 L */
   /* Sombras más profundas para compensar el fondo oscuro */
   --vf-sh-1: 0 1px 0 rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3);
   --vf-sh-2: 0 1px 0 rgba(0,0,0,0.4), 0 4px 12px rgba(0,0,0,0.35);
   --vf-sh-3: 0 8px 24px rgba(0,0,0,0.5), 0 1px 0 rgba(0,0,0,0.4);
+
+  /* ====== Estados (warn/ok/crit/info) en dark mode ====== */
+  /* Fix WCAG AA: antes el `fg` era el mismo color oscuro del light theme
+     (ej: warn-fg L=0.40) renderizando sobre un bg también oscuro → contraste
+     ~1.5:1. Auditoría UI/UX 2026-05-12 corrigió a fg L~0.82-0.85 que pasa AA
+     sobre `bg-elev` L=0.22. Los bg ahora mezclan con bg-elev en vez de
+     transparent para que la opacidad sea pareja sobre cualquier surface. */
+  --vf-warn-fg:     oklch(0.86 0.16 85);
+  --vf-warn-bg:     color-mix(in oklch, var(--vf-warn) 22%, var(--vf-bg-elev));
+  --vf-warn-border: color-mix(in oklch, var(--vf-warn) 48%, var(--vf-bg-elev));
+  --vf-ok-fg:       oklch(0.80 0.15 155);
+  --vf-ok-bg:       color-mix(in oklch, var(--vf-ok) 22%, var(--vf-bg-elev));
+  --vf-ok-border:   color-mix(in oklch, var(--vf-ok) 45%, var(--vf-bg-elev));
+  --vf-crit-fg:     oklch(0.78 0.16 25);
+  --vf-crit-bg:     color-mix(in oklch, var(--vf-crit) 22%, var(--vf-bg-elev));
+  --vf-crit-border: color-mix(in oklch, var(--vf-crit) 45%, var(--vf-bg-elev));
+  --vf-info-fg:     oklch(0.80 0.13 240);
+  --vf-info-bg:     color-mix(in oklch, var(--vf-info) 22%, var(--vf-bg-elev));
+  --vf-info-border: color-mix(in oklch, var(--vf-info) 45%, var(--vf-bg-elev));
 }
 
 /* ============================================================================
@@ -161,21 +183,24 @@
   --color-text-subtle:  var(--vf-text-faint);
   --color-text-inverse: var(--vf-text-on-dark);
 
-  --color-success-bg:     color-mix(in oklch, var(--vf-ok) 14%, transparent);
-  --color-success-fg:     var(--vf-ok);
-  --color-success-border: color-mix(in oklch, var(--vf-ok) 30%, transparent);
+  /* Estados — apuntan a --vf-*-bg/fg/border que cambian con [data-theme].
+     Antes hardcoding aquí rompía el dark mode (ej: warning-fg quedaba en
+     oklch(0.40) ilegible sobre el bg también oscuro). Auditoría UI/UX 2026-05-12. */
+  --color-success-bg:     var(--vf-ok-bg);
+  --color-success-fg:     var(--vf-ok-fg);
+  --color-success-border: var(--vf-ok-border);
 
-  --color-warning-bg:     color-mix(in oklch, var(--vf-warn) 18%, transparent);
-  --color-warning-fg:     oklch(0.40 0.13 80);
-  --color-warning-border: color-mix(in oklch, var(--vf-warn) 40%, transparent);
+  --color-warning-bg:     var(--vf-warn-bg);
+  --color-warning-fg:     var(--vf-warn-fg);
+  --color-warning-border: var(--vf-warn-border);
 
-  --color-danger-bg:      color-mix(in oklch, var(--vf-crit) 14%, transparent);
-  --color-danger-fg:      var(--vf-crit);
-  --color-danger-border:  color-mix(in oklch, var(--vf-crit) 35%, transparent);
+  --color-danger-bg:      var(--vf-crit-bg);
+  --color-danger-fg:      var(--vf-crit-fg);
+  --color-danger-border:  var(--vf-crit-border);
 
-  --color-info-bg:        color-mix(in oklch, var(--vf-info) 14%, transparent);
-  --color-info-fg:        var(--vf-info);
-  --color-info-border:    color-mix(in oklch, var(--vf-info) 35%, transparent);
+  --color-info-bg:        var(--vf-info-bg);
+  --color-info-fg:        var(--vf-info-fg);
+  --color-info-border:    var(--vf-info-border);
 
   --font-sans: var(--vf-font-sans);
   --font-mono: var(--vf-font-mono);
