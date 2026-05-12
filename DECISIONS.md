@@ -2664,3 +2664,70 @@ route_versions + push al chofer.
 - Issue #166: Restringir feature a Tier Pro+ cuando entre pricing multi-tier
   (hoy disponible para todos los tenants).
 - Issue #167: Botón "Cancelar re-opt en curso" cuando latencia >5s.
+
+## [2026-05-12] ADR-075: Stream B / Fase N1 — Scaffold app nativa Expo (Android-only)
+
+**Contexto:**
+El PWA driver actual (`apps/driver`) tiene limitaciones conocidas que afectan
+operación real: tarda en cargar (Mapbox bundle 750 KB), iOS Safari mata
+`watchPosition` al bloquear pantalla (#31), look genérico vs Waze/Google Maps,
+push web limitado vs nativo. Plan de migración a app nativa documentado en
+`STREAM_B_NATIVE_APP.md` con 9 fases (N1-N9).
+
+Esta fase N1 establece el scaffold mínimo viable: el chofer puede instalar
+la APK, hacer login con sus credenciales Supabase existentes, y ver una
+pantalla placeholder con el roadmap. Cero feature operativo todavía — el
+PWA actual sigue siendo la fuente de verdad hasta cutover en N9.
+
+**Decisión:**
+Crear nuevo workspace `apps/driver-native/` con:
+- **Expo SDK 53 managed workflow** (no React Native bare): elimina necesidad
+  de Xcode/CocoaPods/Gradle local, EAS Build compila en cloud.
+- **Expo Router** file-based routing (paralelo conceptual a Next.js App
+  Router que ya usamos en web).
+- **TypeScript estricto** + `metro.config.js` con `watchFolders` apuntando
+  al monorepo root + `disableHierarchicalLookup` para evitar conflictos
+  de dependencias entre apps.
+- **Bundle ID Android `xyz.tripdrive.driver`**: distinto del PWA legacy
+  `com.verdfrut.driver` para que un chofer pueda tener ambas instaladas
+  durante la transición sin conflicto.
+- **Plataforma Android únicamente en V1**: confirmado por el 95% Android
+  del primer cliente. iOS pospuesto, pero el código es portable (Expo
+  soporta ambos sin cambios de lógica).
+- **AuthGate centralizado en `_layout.tsx`** que escucha
+  `supabase.auth.onAuthStateChange` y redirige entre `(auth)` y `(driver)`
+  segmentos según sesión.
+- **AsyncStorage** para persistir sesión Supabase (no cookies, no aplica
+  en native).
+
+**Alternativas consideradas:**
+1. **React Native bare**: descartado por overhead de Xcode/Gradle local.
+   Si Expo limita después, se puede ejectar.
+2. **Capacitor wrapping del PWA actual**: descartado — hereda los problemas
+   del PWA que justifican la migración.
+3. **Flutter (Dart)**: descartado por curva de lenguaje + no comparte con
+   el resto del monorepo TypeScript.
+4. **Bundle ID `com.verdfrut.driver` reusable**: descartado porque al
+   actualizar in-place Android pediría que el chofer desinstale la PWA
+   primero. Mejor mantener ambos como apps separadas hasta cutover.
+
+**Riesgos:**
+- EAS Build free tier (30 builds/mes Android) puede no alcanzar si iteramos
+  mucho en N2-N6. Mitigación: upgrade a Production tier $29/mes si el
+  contador se acerca al límite.
+- Compartir paquetes workspace puede romper en Metro si las versiones de
+  React divergen entre apps/packages. Mitigación: `disableHierarchicalLookup`
+  + tener React 19 declarado solo en `package.json` del driver-native.
+- Bundle ID nuevo significa que NO hay update path desde la APK Bubblewrap
+  existente. Mitigación: documentado, los choferes en N9 instalan nueva
+  y desinstalan vieja.
+
+**Mejoras futuras:**
+- Issue #168: Mover credenciales Supabase a EAS Secrets cuando entremos
+  a builds production (hoy en `.env.local` para dev local).
+- Issue #169: Migrar `react-native-url-polyfill` cuando Expo SDK incluya
+  fetch nativo apropiado (rumoreado para SDK 54+).
+- Issue #170: Setup `expo-updates` (OTA) cuando arranque Fase N6 (beta).
+- Issue #171: Compartir más packages workspace (`@tripdrive/ai`,
+  `@tripdrive/utils`) cuando las pantallas de evidencia/chat lleguen (N4-N5).
+- Issue #172: Tests E2E con Maestro o Detox cuando la app pase Fase N5.

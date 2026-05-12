@@ -147,7 +147,7 @@ apps/driver-native/                ← nuevo monorepo workspace
 
 ## 3. Fases (Definition of Done)
 
-### Fase N1 — Setup + Auth + Scaffold ⚪
+### Fase N1 — Setup + Auth + Scaffold ✅ DONE 2026-05-12 (ADR-075)
 
 **Meta**: la app arranca en un dispositivo Android. Chofer puede hacer login
 con su email/password de Supabase y ve una pantalla vacía "Mi ruta del día".

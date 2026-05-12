@@ -308,12 +308,12 @@ Ver `KNOWN_ISSUES.md` para lista completa con severidades. Resumen al 2026-05-12
 
 ## 8. Roadmap: streams en curso
 
-### Stream B — Migración a App Nativa (Expo) 🔴 EN CURSO
+### Stream B — Migración a App Nativa (Expo Android-only V1) 🟢 EN CURSO
 Reemplaza el PWA driver actual por app React Native nativa.
 
 | Fase | Meta | DoD |
 |---|---|---|
-| N1 | Setup Expo + auth Supabase + scaffold | App arranca con login, navega a pantalla vacía "Mi ruta del día" |
+| N1 ✅ | Setup Expo + auth Supabase + scaffold | **DONE 2026-05-12** — apps/driver-native/ creado, login funcional, pantalla placeholder. ADR-075. |
 | N2 | Pantalla "Mi ruta del día" | Lista paradas + mapa nativo overview |
 | N3 | Detalle parada + deeplink Google Maps + GPS bg | Chofer puede "Navegar", app trackea en bg |
 | N4 | Evidencia: cámara + OCR + offline queue | Foto + ticket extraction funciona offline |

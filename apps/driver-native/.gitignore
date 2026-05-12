@@ -1,0 +1,36 @@
+# Expo / EAS
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native build artifacts
+android/
+ios/
+*.apk
+*.aab
+*.ipa
+
+# Node / package
+node_modules/
+.pnpm-debug.log*
+yarn-error.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# EAS credentials (NUNCA commitear)
+google-play-service-account.json
+*.keystore
+*.jks
+credentials.json
+
+# Env
+.env
+.env.local
+.env.*.local
