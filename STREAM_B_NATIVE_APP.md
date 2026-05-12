@@ -1,7 +1,12 @@
-# Stream B — Migración a App Nativa (Expo)
+# Stream B — Migración a App Nativa (Android-only, Expo)
 
 > Plan detallado para reemplazar el PWA driver actual (`apps/driver`) por
-> una app React Native nativa construida con Expo.
+> una app Android nativa construida con Expo + React Native.
+>
+> **Plataformas en V1**: **solo Android (APK + Play Store)**.
+> **iOS**: pospuesto post-cutover. Decisión 2026-05-12: 95% choferes del
+> primer cliente son Android, el otro 5% puede conseguir Android. No vale
+> la pena el costo de Apple Developer + review process en esta etapa.
 >
 > **Estado**: 🔴 Próximo a arrancar (espera confirmación de decisiones).
 > **Owner**: Richard + Claude.
@@ -30,18 +35,30 @@ Quejas del usuario sobre el PWA actual:
 ```
 Frontend       Expo SDK 53+ (managed workflow)
 Lenguaje       TypeScript estricto
-UI             React Native + Tailwind via nativewind (o styled-components RN)
-Maps           react-native-maps con PROVIDER_GOOGLE (Android/iOS native)
+Plataforma     Android únicamente (APK + Play Store)
+UI             React Native + nativewind (Tailwind para RN)
+Maps           react-native-maps con PROVIDER_GOOGLE (Google Maps nativo Android)
 Navigation     Expo Router (file-based, similar a Next.js App Router)
 Storage        expo-sqlite (outbox/queue) + AsyncStorage (preferences)
 GPS            expo-location con background task + foreground service Android
 Camera         expo-camera + expo-image-picker
-Push           expo-notifications (FCM Android + APNS iOS)
+Push           expo-notifications (FCM Android)
 Build          EAS Build (Expo Application Services)
-Updates OTA    EAS Update (push de JS bundle sin re-store)
+Updates OTA    EAS Update (push de JS bundle sin re-publicar APK)
 Backend conn   Supabase JS SDK (compartido con web)
 Validation     Zod (compartido con packages/types)
 ```
+
+### Por qué Android-only en V1
+
+- 95% choferes del primer cliente operan Android.
+- Costo Apple Developer Program ($99/año) + review process (1-3 semanas
+  por submission) = bloqueo innecesario para esta etapa.
+- Expo permite agregar iOS más tarde con cambios mínimos (mismo código RN,
+  solo agregar `eas build --platform ios` cuando se decida).
+- Sideload de APK es trivial en Android (WhatsApp → instalar), no requiere
+  store hasta Fase N8.
+- Si entra un cliente con flota mixta Android+iOS, se evalúa iOS entonces.
 
 ### Por qué Expo y no React Native bare
 
@@ -138,21 +155,23 @@ con su email/password de Supabase y ve una pantalla vacía "Mi ruta del día".
 **DoD**:
 - [ ] `apps/driver-native/` creado con Expo SDK 53.
 - [ ] `pnpm-workspace.yaml` incluye nueva app.
-- [ ] EAS configurado (`eas.json` con development + preview profiles).
-- [ ] Bundle ID definitivo: `xyz.tripdrive.driver` (Android) / `xyz.tripdrive.driver` (iOS).
+- [ ] EAS configurado (`eas.json` con development + preview profiles, **solo Android**).
+- [ ] Bundle ID Android: `xyz.tripdrive.driver`.
 - [ ] Logo + splash screen + adaptive icon generados desde `tripdrive-icon.png`.
 - [ ] Pantalla `/login` funcional con Supabase auth.
 - [ ] Pantalla `/route` placeholder ("Tu ruta del día — pronto").
-- [ ] Build de desarrollo (`eas build --profile development`) genera APK
-      instalable en 1 dispositivo Android via `adb install`.
+- [ ] Build de desarrollo (`eas build --profile development --platform android`)
+      genera APK instalable en 1 dispositivo Android via `adb install` o
+      WhatsApp sideload.
 - [ ] README con instrucciones de setup local.
 
 **Documentación entregable**:
-- ADR-067: stack y razones de Expo.
+- ADR-067: stack y razones de Expo + decisión Android-only V1.
 - `apps/driver-native/README.md` con setup.
 
 **Riesgos**:
-- EAS Build cuenta no creada → bloqueante. Crear primero.
+- EAS Build cuenta no creada → bloqueante. Crear primero (free tier suficiente
+  para 30 builds/mes Android, alcanza para iteración).
 - Bundle ID conflicto con APK Bubblewrap actual (`com.verdfrut.driver`).
   Mitigación: usar bundle ID nuevo `xyz.tripdrive.driver`. APK actual queda
   como "app legacy" que se desinstala al cutover.
@@ -318,51 +337,60 @@ de semana.
 
 ---
 
-### Fase N7 — TestFlight + Play Internal Testing ⚪
+### Fase N7 — Play Internal Testing ⚪
 
-**Meta**: app subida a ambas stores en modo "internal testing". Equipo
-TripDrive + 2-3 choferes adicionales pueden instalar via TestFlight (iOS)
-o Internal Testing (Android).
+**Meta**: app subida a Play Console en modo "Internal Testing". Equipo
+TripDrive + 2-3 choferes adicionales pueden instalar vía link directo
+de Play Internal Testing (no store público todavía).
 
 **DoD**:
-- [ ] Apple Developer Program activado ($99/año).
-- [ ] Google Play Console activado ($25 una vez).
-- [ ] App ID + provisioning profile iOS configurados.
-- [ ] Bundle ID Android registrado.
-- [ ] Build de release con `eas build --profile production`.
-- [ ] Upload a App Store Connect (TestFlight).
+- [ ] Google Play Console activado ($25 USD una vez).
+- [ ] Bundle ID Android `xyz.tripdrive.driver` registrado.
+- [ ] Build de release con `eas build --profile production --platform android`.
+- [ ] Generar **AAB** (Android App Bundle) en lugar de APK puro (Play
+      Store requiere AAB desde 2021).
 - [ ] Upload a Play Console (Internal Testing track).
-- [ ] Screenshots + descripción + privacy policy URL preparados.
-- [ ] Beta testers invitados via email.
+- [ ] Listing básico: título, descripción corta, descripción larga,
+      ícono 512×512, feature graphic 1024×500.
+- [ ] Screenshots: 2-8 capturas del dispositivo Android.
+- [ ] Privacy policy URL (vive en landing tripdrive.xyz/privacy).
+- [ ] Data Safety form completado (declarar qué datos usa la app:
+      ubicación, fotos, identificadores).
+- [ ] Beta testers invitados via email (lista hasta 100 personas).
 
 **Documentación entregable**:
-- `RELEASE_CHECKLIST.md` con pasos de submit a stores.
+- `RELEASE_CHECKLIST.md` con pasos de submit a Play Store.
 
 **Riesgos**:
-- Apple review puede pedir cambios (background location justification,
-  privacy manifest). Mitigación: justificación clara + iteración con
-  Apple si rechaza.
+- Google Play review primera vez puede tardar 7-14 días (después es ~24h
+  por update). Mitigación: empezar pronto.
+- Data Safety mal declarado = rechazo. Mitigación: revisar manifest y
+  declarar TODO lo que se usa (location ALWAYS, camera, foreground service).
+- Background location justification requiere consent screen explícito al
+  chofer. Mitigación: prompt claro "Necesitamos tu ubicación cuando estás
+  en ruta para que tu supervisor pueda verte en el mapa".
 
 ---
 
-### Fase N8 — Publish stores ⚪
+### Fase N8 — Publish Play Store ⚪
 
-**Meta**: app descargable desde App Store + Play Store por cualquier
-chofer con el link.
+**Meta**: app descargable desde Google Play Store por cualquier chofer
+con el link.
 
 **DoD**:
-- [ ] iOS: submit a App Store review.
-- [ ] Apple aprueba (típicamente 24-72h).
-- [ ] Android: promote de Internal Testing a Production.
-- [ ] Google aprueba (típicamente 1-3 días).
-- [ ] URLs públicas funcionan:
-  - `https://apps.apple.com/mx/app/tripdrive-chofer/idXXXX`
+- [ ] Promote de Internal Testing → Production en Play Console.
+- [ ] Google aprueba (típicamente 1-3 días post-internal-testing).
+- [ ] URL pública funciona:
   - `https://play.google.com/store/apps/details?id=xyz.tripdrive.driver`
-- [ ] Landing actualizada con badges "Disponible en App Store + Google Play".
+- [ ] Landing actualizada con badge "Disponible en Google Play".
+- [ ] Apple Store: **NO aplica en V1** — pospuesto.
 
 **Riesgos**:
-- Apple rechaza por cualquier razón → loop de re-submission. Mitigación:
-  responder rápido + tener buena documentación de cómo funciona.
+- Google puede pedir cambios menores. Mitigación: responder rápido,
+  EAS Update permite hotfix sin re-submit.
+- App rechazada por background location → revisar Permissions Declaration
+  Form en Play Console. Justificación: tracking de chofer durante turno
+  laboral con consent visible.
 
 ---
 
@@ -395,17 +423,20 @@ deprecada formalmente. Código `apps/driver` eliminado del repo.
 
 ---
 
-## 4. Costos durante Stream B
+## 4. Costos durante Stream B (Android-only)
 
 | Item | Costo | Cuándo se paga |
 |---|---|---|
-| Apple Developer Program | $99 USD/año | Antes de Fase N7 |
+| Apple Developer Program | ~~$99 USD/año~~ | **NO APLICA V1** |
 | Google Play Console | $25 USD (una vez) | Antes de Fase N7 |
-| EAS Build (Production tier) | $29 USD/mes | Desde Fase N1 |
+| EAS Build (Free tier hasta 30 builds/mes Android) | $0 | Free tier alcanza para iteración inicial |
+| EAS Build (Production tier si free no alcanza) | $29 USD/mes | Solo si excede free tier |
 | Google Maps Platform | ~$0/mes (Android nativo gratis) | N3 |
 | Push notifications (Expo) | $0 (gratis hasta 100K/mes) | N5 |
-| **Total recurrente** | **~$37 USD/mes** | |
-| **Total setup** | **~$124 USD una vez** | |
+| **Total recurrente** | **$0-$29 USD/mes** | |
+| **Total setup** | **$25 USD una vez** | |
+
+**Ahorros vs plan original** (con iOS): -$99/año + ~$8/mes promedio.
 
 ---
 
@@ -413,14 +444,16 @@ deprecada formalmente. Código `apps/driver` eliminado del repo.
 
 | # | Decisión | Default |
 |---|---|---|
-| 1 | Bundle ID Android e iOS | `xyz.tripdrive.driver` |
-| 2 | Nombre visible en stores | "TripDrive Conductor" |
+| 1 | Bundle ID Android | `xyz.tripdrive.driver` |
+| 2 | Nombre visible en Play Store | "TripDrive Conductor" |
 | 3 | Icon: usar `tripdrive-icon.png` actual o diseñar nuevo | Usar actual primero, redesign opcional |
 | 4 | Splash screen: ícono o lockup completo | Ícono centrado + background dark `--vf-bg` |
 | 5 | Estilo de mapa: dark / light / system | System (auto follow OS) |
-| 6 | Apple Developer cuenta: individual o LLC | Empezar individual, migrar a LLC si se constituye |
-| 7 | Soporte iOS desde día 1 o solo Android | Solo Android (sideload rápido) hasta Fase N6 mínimo |
-| 8 | Compartir packages workspace via symlinks o publicar a npm privado | Symlinks (workspace) — no agregar npm |
+| 6 | Compartir packages workspace via symlinks o npm | Symlinks (workspace) — no agregar npm |
+
+**iOS = pospuesto V1**: cuando un cliente con flota iOS aparezca, evaluamos.
+Mientras tanto, todo el código es portable (Expo soporta ambos sin cambios
+de lógica).
 
 ---
 

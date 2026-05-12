@@ -366,6 +366,13 @@ Plan completo conservado en `MULTI_CUSTOMER.md` (a crear cuando arranque).
 - ✅ Modelo de pricing: 3 tiers + add-ons + setup fee + mínimo perfiles.
 - ✅ Navegación turn-by-turn delegada a Waze/Google Maps nativo, no propia.
 - ✅ Roadmap por metas (DoD), no por tiempos.
+- ✅ **Orden de streams: C primero (Optimizer), B en paralelo (Native),
+  A pospuesto** (Multi-Customer). Razón: C entrega WIN operativo en 2-3
+  semanas, B necesita arrancar temprano por su duración, A es comercial sin
+  urgencia hasta que NETO esté impecable.
+- ✅ **Stream B Android-only V1**: 95% choferes del primer cliente son
+  Android, el otro 5% puede conseguir Android. iOS pospuesto hasta que
+  aparezca cliente con flota iOS.
 
 ---
 
@@ -381,7 +388,7 @@ Plan completo conservado en `MULTI_CUSTOMER.md` (a crear cuando arranque).
 | 6 | OTA updates con EAS o sin | **Sí EAS Update** — iteración rápida |
 | 7 | Compartir packages workspace en native (types, supabase client) | **Sí**, ya estructurado para esto |
 | 8 | Cuándo eliminar `apps/driver` | **Cuando 1 chofer opere nativa 1 semana sin issues** |
-| 9 | iOS desde día 1 o Android primero | **Solo Android** primero (sideload rápido, Apple review tarda) |
+| 9 | ~~iOS desde día 1 o Android primero~~ | **CERRADO**: Android-only en V1 |
 | 10 | Stripe/Conekta vs facturación manual | **Manual primero**, automatizar cuando >5 clientes pagando |
 
 ---
@@ -402,14 +409,15 @@ Plan completo conservado en `MULTI_CUSTOMER.md` (a crear cuando arranque).
 - Web Push (VAPID)
 - Bubblewrap (APK TWA wrapper)
 
-### Driver nativa (próxima)
+### Driver nativa (próxima — Android-only V1)
 - Expo SDK 53+
 - React Native 0.76+
 - TypeScript
+- **Plataforma**: Android únicamente en V1 (iOS pospuesto)
 - `react-native-maps` (Google nativo)
-- `expo-location` (GPS background)
+- `expo-location` (GPS background + foreground service Android)
 - `expo-camera` (evidencia)
-- `expo-notifications` (push)
+- `expo-notifications` (FCM push)
 - `expo-sqlite` (offline queue)
 - Supabase JS SDK (compartido con web)
 
@@ -428,9 +436,9 @@ Plan completo conservado en `MULTI_CUSTOMER.md` (a crear cuando arranque).
 - Sentry (observability)
 - Resend (email transaccional — pendiente setup)
 - Google Workspace (email humano — en propagación)
-- Apple Developer Program ($99/año, próxima compra)
+- ~~Apple Developer Program~~ — **POSPUESTO V1** (Android-only)
 - Google Play Console ($25 una vez, próxima compra)
-- EAS Build ($29/mes production, próxima compra)
+- EAS Build (free tier inicialmente; $29/mes si supera 30 builds/mes)
 
 ---
 
