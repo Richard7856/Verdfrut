@@ -21,7 +21,11 @@ const PUBLIC_PATHS = [
   '/favicon.ico',
 ];
 
-const PUBLIC_PREFIXES = ['/icon-', '/apple-touch-icon'];
+// `.well-known/assetlinks.json` debe ser público sin auth — Android lo lee
+// para validar el TWA (sin sesión); si redirige a /login, la APK abre con
+// barra Chrome visible (modo Custom Tab). El prefix cubre cualquier otro
+// recurso .well-known que agreguemos (ej. apple-app-site-association).
+const PUBLIC_PREFIXES = ['/icon-', '/apple-touch-icon', '/.well-known/'];
 
 function isPublicPath(pathname: string): boolean {
   if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + '/'))) return true;
