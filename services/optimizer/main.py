@@ -20,6 +20,12 @@ from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
+from google_routes import (
+    GoogleRoutesError,
+    LatLng,
+    compute_route_matrix,
+)
+
 
 VROOM_BIN = os.environ.get("VROOM_BIN_PATH", "/usr/local/bin/vroom")
 API_KEY = os.environ.get("OPTIMIZER_API_KEY", "")
@@ -147,6 +153,183 @@ def optimize(
     if req.matrix is not None:
         response = _backfill_distances_from_matrix(response, req, vroom_output)
     return response
+
+
+# ----------------------------------------------------------------------------
+# Re-optimización en vivo con Google Routes (Stream C / Fase O1 — ADR-074)
+# ----------------------------------------------------------------------------
+
+
+class StopInput(BaseModel):
+    """Una parada pendiente del chofer con coords + restricciones."""
+    stop_id: str  # UUID en BD del platform; opaco para el optimizer
+    location: tuple[float, float]
+    service_seconds: int = 1800  # default 30 min
+
+
+class ReoptimizeLiveRequest(BaseModel):
+    """
+    Re-optimización en vivo: chofer está en `current_position`, le quedan
+    `pending_stops` paradas que NO han sido completadas. Necesitamos la
+    secuencia óptima considerando tráfico ACTUAL.
+
+    Convención: NO incluimos las stops ya completadas (su sequence es
+    histórico y no se toca). NO incluimos el depot — el chofer no regresa
+    durante la ruta, solo al final (eso ya está modelado en el optimizer
+    nocturno).
+    """
+    current_position: tuple[float, float]
+    pending_stops: list[StopInput]
+    shift_end_unix: int  # límite del turno; las stops fuera salen como unassigned
+
+
+class ReoptimizeLiveStop(BaseModel):
+    """Una parada en la nueva secuencia, con ETA recalculada."""
+    stop_id: str
+    sequence: int  # 1-indexed
+    arrival_unix: int
+    departure_unix: int
+
+
+class ReoptimizeLiveResponse(BaseModel):
+    stops: list[ReoptimizeLiveStop]
+    unassigned_stop_ids: list[str]  # paradas que no caben en el shift restante
+    total_duration_seconds: int  # tiempo total de la ruta restante
+    total_distance_meters: int
+    google_routes_calls: int  # para tracking de costo
+
+
+@app.post("/reoptimize-live", response_model=ReoptimizeLiveResponse)
+async def reoptimize_live(
+    req: ReoptimizeLiveRequest,
+    _: None = Depends(verify_token),
+) -> ReoptimizeLiveResponse:
+    """
+    Re-optimiza las paradas pendientes de un chofer con tráfico real-time.
+
+    Flujo:
+      1. Construye matrix N×N con Google Routes API (N = current + stops).
+      2. Pasa a VROOM con start=current_position, jobs=pending_stops.
+      3. Devuelve secuencia óptima + ETAs proyectadas.
+
+    Costo: 1 call por cada par (origin, dest) con i!=j → ~N×(N-1) calls.
+    Para 10 stops + posición = 11 puntos = 110 calls = ~$0.55 USD por re-opt.
+    """
+    n_pending = len(req.pending_stops)
+    if n_pending == 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No hay paradas pendientes para re-optimizar",
+        )
+
+    # 1. Build matrix con Google Routes — current_position primero (índice 0)
+    #    y luego cada pending stop.
+    points = [LatLng(lat=req.current_position[0], lng=req.current_position[1])]
+    for s in req.pending_stops:
+        points.append(LatLng(lat=s.location[0], lng=s.location[1]))
+
+    try:
+        durations, distances = await compute_route_matrix(points)
+    except GoogleRoutesError as e:
+        # No hacemos fallback a haversine acá: el llamador pidió Google
+        # explícito para tener precisión. Mejor falla fast con mensaje claro.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Google Routes API error: {e}",
+        )
+
+    n = len(points)
+    google_calls = n * (n - 1)
+
+    # 2. Pasar a VROOM. Convención de IDs:
+    #    - vehicle.id = 1 (un solo chofer)
+    #    - vehicle.start = índice 0 (current_position)
+    #    - vehicle.end = índice 0 (no regreso a depot durante la ruta;
+    #      el shift_end es la única restricción de cierre)
+    #    - jobs.id = 1..N (índices 1..N en la matrix corresponden a pending_stops)
+    #
+    # Importante: la matrix usa los índices de `points`. Los jobs deben
+    # apuntar a sus posiciones en esa matrix.
+
+    # Construir input VROOM directamente (sin pasar por OptimizeRequest porque
+    # el formato es más simple para 1 vehículo + N jobs).
+    vroom_input = {
+        "vehicles": [
+            {
+                "id": 1,
+                "start_index": 0,
+                "end_index": 0,
+                "time_window": [0, req.shift_end_unix - 0],  # offset desde "ahora"
+                "profile": "car",
+            }
+        ],
+        "jobs": [
+            {
+                "id": i + 1,
+                "location_index": i + 1,
+                "service": s.service_seconds,
+            }
+            for i, s in enumerate(req.pending_stops)
+        ],
+        "matrices": {
+            "car": {
+                "durations": durations,
+                "distances": distances,
+            }
+        },
+    }
+
+    vroom_output = run_vroom(vroom_input)
+
+    # 3. Parsear output VROOM y mapear IDs internos → stop_id externo.
+    if not vroom_output.get("routes"):
+        # VROOM no pudo asignar nada — todas las stops out of window
+        return ReoptimizeLiveResponse(
+            stops=[],
+            unassigned_stop_ids=[s.stop_id for s in req.pending_stops],
+            total_duration_seconds=0,
+            total_distance_meters=0,
+            google_routes_calls=google_calls,
+        )
+
+    route = vroom_output["routes"][0]
+    response_stops: list[ReoptimizeLiveStop] = []
+    seq = 1
+
+    # `arrival` y `departure` que VROOM devuelve son segundos desde "ahora"
+    # (el shift relativo). Convertimos a unix sumando timestamp actual.
+    import time
+    now_unix = int(time.time())
+
+    for step in route["steps"]:
+        if step["type"] != "job":
+            continue  # skip start/end del depot virtual
+        job_id = step["job"]
+        stop_index = job_id - 1
+        stop_input = req.pending_stops[stop_index]
+        response_stops.append(
+            ReoptimizeLiveStop(
+                stop_id=stop_input.stop_id,
+                sequence=seq,
+                arrival_unix=now_unix + step["arrival"],
+                departure_unix=now_unix + step["arrival"] + step.get("service", 0),
+            )
+        )
+        seq += 1
+
+    # Paradas que VROOM no asignó (no caben en el turno restante).
+    assigned_ids = {s.stop_id for s in response_stops}
+    unassigned_ids = [
+        s.stop_id for s in req.pending_stops if s.stop_id not in assigned_ids
+    ]
+
+    return ReoptimizeLiveResponse(
+        stops=response_stops,
+        unassigned_stop_ids=unassigned_ids,
+        total_duration_seconds=route.get("duration", 0),
+        total_distance_meters=route.get("distance", 0),
+        google_routes_calls=google_calls,
+    )
 
 
 # ----------------------------------------------------------------------------

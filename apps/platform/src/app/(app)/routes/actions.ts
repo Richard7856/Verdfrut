@@ -23,6 +23,7 @@ import {
 } from '@/lib/queries/routes';
 import {
   bulkReorderStops,
+  bulkApplyReoptResult,
   createStops,
   deleteStopsForRoute,
   listStopsForRoute,
@@ -33,7 +34,8 @@ import { getStoresByIds } from '@/lib/queries/stores';
 import { getVehiclesByIds } from '@/lib/queries/vehicles';
 import { getDriversByIds } from '@/lib/queries/drivers';
 import { listDepots } from '@/lib/queries/depots';
-import { callOptimizer, getUnassignedStoreIds } from '@/lib/optimizer';
+import { getLastBreadcrumbsByRouteIds } from '@/lib/queries/breadcrumbs';
+import { callOptimizer, callReoptimizeLive, getUnassignedStoreIds } from '@/lib/optimizer';
 import { notifyDriverOfPublishedRoute, notifyDriverOfRouteChange } from '@/lib/push';
 import { requireUuid, runAction, ValidationError, type ActionResult } from '@/lib/validation';
 
@@ -870,4 +872,174 @@ export async function deleteStopFromRouteAction(stopId: string): Promise<ActionR
     await deleteStopFromRoute(id);
     revalidatePath('/routes');
   });
+}
+
+/**
+ * Stream C / Fase O1 — Re-optimización en vivo con tráfico real (Google Routes).
+ *
+ * Caso: chofer atrasado o llega tienda urgente. Recalculamos la secuencia óptima
+ * de paradas pendientes considerando tráfico ACTUAL de MX (vs Mapbox Matrix del
+ * planning nocturno que usa estimaciones).
+ *
+ * Reglas:
+ *  - Solo en PUBLISHED / IN_PROGRESS (sin sentido en pre-publish — usar reoptimize regular).
+ *  - admin/dispatcher only (no driver).
+ *  - Cooldown 30min entre re-opts (anti-abuso + protección de costo Google Routes).
+ *  - Requiere que el chofer haya publicado al menos 1 breadcrumb GPS reciente
+ *    (sin posición actual no podemos re-optimizar).
+ *  - Bumpa version + audit + push al chofer "tu ruta se actualizó por tráfico".
+ *
+ * Costo aproximado: 1 re-opt de 10 stops = ~110 calls Google Routes = ~$0.55 USD.
+ */
+export interface ReoptimizeLiveResult extends ActionResult {
+  reorderedStops?: number;
+  unassignedStops?: number;
+  googleRoutesCalls?: number;
+}
+
+const REOPT_COOLDOWN_MS = 30 * 60_000; // 30 min — anti-abuso + protección costo
+
+export async function reoptimizeLiveAction(
+  routeId: string,
+): Promise<ReoptimizeLiveResult> {
+  const profile = await requireRole('admin', 'dispatcher');
+  try {
+    const id = requireUuid('routeId', routeId);
+
+    const route = await getRoute(id);
+    if (!route) throw new ValidationError('routeId', 'Ruta no existe');
+    if (!['PUBLISHED', 'IN_PROGRESS'].includes(route.status)) {
+      throw new ValidationError(
+        'status',
+        `Re-optimización en vivo solo aplica a rutas PUBLISHED o IN_PROGRESS (actual: ${route.status}).`,
+      );
+    }
+    if (!route.estimatedEndAt) {
+      throw new ValidationError(
+        'shift',
+        'Esta ruta no tiene estimatedEndAt — no podemos calcular el shift restante.',
+      );
+    }
+
+    // Cooldown check: si hay re-opt reciente en route_versions, abortar.
+    const supabase = await (await import('@tripdrive/supabase/server')).createServerClient();
+    const cooldownCutoff = new Date(Date.now() - REOPT_COOLDOWN_MS).toISOString();
+    const { data: recentReopts } = await supabase
+      .from('route_versions')
+      .select('id, created_at, reason')
+      .eq('route_id', id)
+      .gte('created_at', cooldownCutoff)
+      .like('reason', '%Live re-opt%')
+      .limit(1);
+    if (recentReopts && recentReopts.length > 0) {
+      throw new ValidationError(
+        'cooldown',
+        'Hace menos de 30 min se hizo otra re-optimización en vivo. Espera para evitar abuso de la API.',
+      );
+    }
+
+    // Leer última posición del chofer (breadcrumb más reciente, lookback 30 min).
+    const breadcrumbs = await getLastBreadcrumbsByRouteIds([id], { lookbackMinutes: 30 });
+    const lastPos = breadcrumbs.get(id);
+    if (!lastPos) {
+      throw new ValidationError(
+        'gps',
+        'No hay posición GPS reciente del chofer (últimos 30 min). Asegúrate de que el GPS esté activo.',
+      );
+    }
+
+    // Listar stops pending — son las que vamos a re-secuenciar.
+    const allStops = await listStopsForRoute(id);
+    const pendingStops = allStops.filter((s) => s.status === 'pending');
+    if (pendingStops.length === 0) {
+      throw new ValidationError(
+        'stops',
+        'No hay paradas pendientes para re-optimizar.',
+      );
+    }
+
+    // Cargar coords reales de las stores (las stops tienen storeId, no coords).
+    const stores = await getStoresByIds(pendingStops.map((s) => s.storeId));
+    const storesById = new Map(stores.map((s) => [s.id, s]));
+
+    const pendingStopsInput = pendingStops.flatMap((stop) => {
+      const store = storesById.get(stop.storeId);
+      if (!store) return [];
+      return [{
+        stop_id: stop.id,
+        location: [store.lat, store.lng] as [number, number],
+        service_seconds: store.serviceTimeSeconds,
+      }];
+    });
+
+    if (pendingStopsInput.length !== pendingStops.length) {
+      await logger.warn('[reoptimizeLiveAction] algunas stops sin store asociado', {
+        routeId: id,
+        expected: pendingStops.length,
+        found: pendingStopsInput.length,
+      });
+    }
+
+    // shiftEnd en unix seconds.
+    const shiftEndUnix = Math.floor(new Date(route.estimatedEndAt).getTime() / 1000);
+
+    // Llamar al optimizer con Google Routes.
+    let result;
+    try {
+      result = await callReoptimizeLive({
+        currentPosition: [lastPos.lat, lastPos.lng],
+        pendingStops: pendingStopsInput,
+        shiftEndUnix,
+      });
+    } catch (err) {
+      await logger.error('[reoptimizeLiveAction] optimizer call falló', {
+        err,
+        routeId: id,
+      });
+      throw new Error(err instanceof Error ? err.message : 'Optimizer error');
+    }
+
+    // baseSequenceOffset = max sequence de las stops NO pending (completed/arrived/skipped).
+    // Las nuevas pending arrancan después.
+    const nonPendingMaxSeq = Math.max(
+      0,
+      ...allStops.filter((s) => s.status !== 'pending').map((s) => s.sequence),
+    );
+
+    await bulkApplyReoptResult(id, result, nonPendingMaxSeq);
+
+    // Audit + push.
+    try {
+      await incrementRouteVersion(
+        id,
+        profile.id,
+        `Live re-opt with traffic (Google Routes, ${result.google_routes_calls} calls)`,
+      );
+      await notifyDriverOfRouteChange(
+        id,
+        'Tu ruta se actualizó por tráfico — revisa el nuevo orden de paradas.',
+      );
+    } catch (err) {
+      await logger.error('[reoptimizeLiveAction] audit/push falló', {
+        err,
+        routeId: id,
+      });
+    }
+
+    revalidatePath(`/routes/${id}`);
+    revalidatePath('/routes');
+    if (route.dispatchId) revalidatePath(`/dispatches/${route.dispatchId}`);
+
+    return {
+      ok: true,
+      reorderedStops: result.stops.length,
+      unassignedStops: result.unassigned_stop_ids.length,
+      googleRoutesCalls: result.google_routes_calls,
+    };
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return { ok: false, error: err.message };
+    }
+    return { ok: false, error: err instanceof Error ? err.message : 'Error desconocido' };
+  }
 }

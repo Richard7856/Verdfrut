@@ -69,7 +69,7 @@ cuando se necesita.
 
 ## 2. Fases (Definition of Done)
 
-### Fase O1 — Integrar Google Routes API ⚪
+### Fase O1 — Integrar Google Routes API ✅ DONE 2026-05-12 (ADR-074)
 
 **Meta**: el optimizer tiene un cliente Google Routes API funcional.
 Dispatcher tiene botón "Re-optimizar con tráfico actual" en `/dispatches/[id]`

@@ -323,10 +323,10 @@ Reemplaza el PWA driver actual por app React Native nativa.
 | N8 | Publish stores | App descargable desde App Store + Play Store |
 | N9 | Cutover + deprecar PWA | `apps/driver` eliminado del repo |
 
-### Stream C — Optimizer mejorado con Google Routes 🟡 PRÓXIMO
+### Stream C — Optimizer mejorado con Google Routes 🟢 EN CURSO
 | Fase | Meta | DoD |
 |---|---|---|
-| O1 | Integrar Google Routes API | Botón "Re-optimizar con tráfico actual" funciona |
+| O1 ✅ | Integrar Google Routes API | **DONE 2026-05-12** — Botón "Re-optimizar con tráfico actual" funciona en RouteStopsCard. ADR-074. |
 | O2 | Re-optimización automática trigger >15min | Chofer atrasado dispara re-cálculo automático |
 | O3 | Predicción ETAs por hora del día | Planning del día sugiere shift óptimo |
 | O4 | ML-learned service time por tienda | `service_time_seconds` calculado de histórico |

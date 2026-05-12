@@ -2608,3 +2608,59 @@ Adicional: la APK demo está en modo Custom Tab (barra Chrome visible) porque as
 - Issue #159: rename de `tenants.json` path `/etc/verdfrut/` → `/etc/tripdrive/` cuando se haga deploy a VPS dedicado (Vercel actual no usa file system).
 - Issue #160: configurar redirect 308 `tripdrive.com` → `tripdrive.xyz` si llegamos a comprar `.com`.
 - Issue #161: validar que GitHub repo rename no rompe links externos en docs/issues/PRs ya creados.
+
+## [2026-05-12] ADR-074: Stream C / Fase O1 — Re-optimización en vivo con Google Routes API
+
+**Contexto:**
+El optimizer actual usa Mapbox Distance Matrix para calcular tiempos de viaje
+entre paradas. Mapbox no incluye tráfico real-time en MX (usa data TomTom +
+crowdsourced). Cuando un chofer se atrasa por tráfico o llega una parada urgente,
+no hay forma de re-secuenciar pendientes considerando las condiciones ACTUALES.
+
+Google Routes API v2 (`directions/v2:computeRoutes`) sí ofrece tráfico real
+basado en Waze + GPS Android. La diferencia operativa es significativa: en hora
+pico CDMX, los tiempos reales son 30-50% mayores que los planeados con Mapbox.
+
+**Decisión:**
+Implementar endpoint nuevo `POST /reoptimize-live` en FastAPI que:
+1. Recibe posición actual del chofer + lista de stops pendientes + shift_end.
+2. Construye matrix N×N con Google Routes API (N×(N-1) calls en paralelo).
+3. Pasa la matrix a VROOM con start=current_position.
+4. Devuelve secuencia óptima + ETAs proyectadas.
+
+UI: botón "🚦 Re-optimizar con tráfico actual" en `RouteStopsCard`, visible solo
+en PUBLISHED/IN_PROGRESS. Confirm dialog menciona costo aproximado en USD para
+desincentivar abuso casual.
+
+Cooldown server-side de 30 min entre re-opts (consultado vía `route_versions`
+con reason que matchea "Live re-opt"). Cuando se ejecuta, audit en
+route_versions + push al chofer.
+
+**Alternativas consideradas:**
+1. **Migración total a Google Routes (planning + live)**: descartado por costo
+   $865/mes a escala vs $200-300/mes del approach híbrido.
+2. **TomTom o HERE en lugar de Google**: descartado por menor cobertura MX.
+3. **Implementar tráfico propio con crowdsourced del driver**: descartado por
+   masa crítica necesaria (5K+ choferes activos).
+
+**Riesgos:**
+- **Costo descontrolado**: 1 re-opt = N×(N-1) calls a $0.005 c/u. 20 stops
+  = 380 calls = $1.90. Mitigación: cooldown 30min + confirm visible + cap GCP
+  Budget Alert en $300 USD/mes.
+- **Latencia API**: ~2-4s para matrix 15 stops. Mitigación: paralelización
+  con asyncio.gather + timeout 20s en cliente platform.
+- **Google API down**: NO hacemos fallback a haversine (perdería precisión que
+  justificó el call). Falla fast con error claro al dispatcher.
+- **Bucle infinito de re-opts**: imposible — cooldown 30min en server.
+
+**Mejoras futuras:**
+- Issue #162: Cache de matrix por (origin, destination, hour_of_day, day_of_week)
+  con TTL 7 días. Reduce calls ~70% en operación recurrente.
+- Issue #163: Re-optimización automática cuando chofer atrasa >15min (Fase O2).
+- Issue #164: Predicción de ETAs por hora del día para sugerir shift óptimo
+  (Fase O3, usa `departureTime` future de Google Routes).
+- Issue #165: ML-learned `service_time_seconds` por tienda (Fase O4, NO usa
+  Google Routes, solo histórico SQL).
+- Issue #166: Restringir feature a Tier Pro+ cuando entre pricing multi-tier
+  (hoy disponible para todos los tenants).
+- Issue #167: Botón "Cancelar re-opt en curso" cuando latencia >5s.

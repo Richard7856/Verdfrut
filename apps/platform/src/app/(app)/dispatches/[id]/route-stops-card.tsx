@@ -26,11 +26,16 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Badge, Card, Select, toast } from '@tripdrive/ui';
+import { Badge, Button, Card, Select, toast } from '@tripdrive/ui';
 import { formatDuration, formatKilometers } from '@tripdrive/utils';
 import type { Route, RouteStatus, Stop, Store, Vehicle } from '@tripdrive/types';
 import { moveStopToAnotherRouteAction } from '../actions';
-import { reorderStopsAction, assignDepotToRouteAction, deleteStopFromRouteAction } from '../../routes/actions';
+import {
+  reorderStopsAction,
+  assignDepotToRouteAction,
+  deleteStopFromRouteAction,
+  reoptimizeLiveAction,
+} from '../../routes/actions';
 import { AddStopButton } from '../../routes/[id]/add-stop-button';
 import { RemoveVehicleButton } from './remove-vehicle-button';
 
@@ -104,6 +109,7 @@ export function RouteStopsCard({
   const [pending, startTransition] = useTransition();
   const [movingStopId, setMovingStopId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reoptPending, setReoptPending] = useState(false);
 
   const status = STATUS[route.status];
   const vehicle = vehicles.find((v) => v.id === route.vehicleId);
@@ -246,6 +252,45 @@ export function RouteStopsCard({
     });
   }
 
+  // Stream C O1 (ADR-074): re-optimización en vivo con tráfico real.
+  // Solo visible en PUBLISHED/IN_PROGRESS. Cooldown 30min en server-side.
+  // Costo aproximado al dispatcher: ~$0.50 USD por re-opt — el botón está
+  // gateado por confirm explícito para evitar abuso casual.
+  function handleReoptimizeLive() {
+    const pendingCount = stops.filter((s) => s.status === 'pending').length;
+    if (pendingCount === 0) {
+      toast.error('Sin paradas pendientes', 'No hay nada que re-optimizar.');
+      return;
+    }
+    const ok = confirm(
+      `Re-optimizar ${pendingCount} parada(s) pendiente(s) con tráfico actual.\n\n` +
+        `• Llama Google Routes API (~$${(pendingCount * 0.05).toFixed(2)} USD aprox).\n` +
+        `• El chofer recibirá push: "tu ruta se actualizó por tráfico".\n` +
+        `• Cooldown: 30 min hasta poder re-optimizar de nuevo.\n\n` +
+        `¿Continuar?`,
+    );
+    if (!ok) return;
+
+    setReoptPending(true);
+    startTransition(async () => {
+      const res = await reoptimizeLiveAction(route.id);
+      setReoptPending(false);
+      if (res.ok) {
+        const reordered = res.reorderedStops ?? 0;
+        const unassigned = res.unassignedStops ?? 0;
+        toast.success(
+          'Re-optimización aplicada',
+          unassigned > 0
+            ? `${reordered} paradas reordenadas, ${unassigned} marcadas como skipped (no caben en el turno).`
+            : `${reordered} paradas reordenadas con tráfico actual.`,
+        );
+        router.refresh();
+      } else {
+        toast.error('No se pudo re-optimizar', res.error);
+      }
+    });
+  }
+
   // Format helpers
   const fmtTime = (iso: string | null) =>
     iso
@@ -324,6 +369,28 @@ export function RouteStopsCard({
         >
           ⚠️ Las paradas se reordenaron después de publicar — las ETAs mostradas son del orden original y ya no se cumplirán.
         </p>
+      )}
+
+      {/* Stream C O1 — Re-optimizar con tráfico actual. Solo en post-publish
+          porque pre-publish ya usa el reoptimize regular más barato (Mapbox).
+          Aquí necesitamos Google Routes con tráfico real porque hay un chofer
+          que ya está en ruta. */}
+      {isPostPublish && stops.some((s) => s.status === 'pending') && (
+        <div className="mt-2 flex items-center justify-between gap-2 rounded border border-[var(--color-border)] bg-[var(--vf-surface-2)] px-2 py-1.5 text-xs">
+          <span style={{ color: 'var(--vf-text-mute)' }}>
+            ¿Atraso por tráfico o cambio?
+          </span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={handleReoptimizeLive}
+            isLoading={reoptPending}
+            disabled={pending || reoptPending}
+          >
+            🚦 Re-optimizar con tráfico actual
+          </Button>
+        </div>
       )}
 
       {/* ADR-047: selector inline de CEDIS de salida. Editable solo en pre-publicación.

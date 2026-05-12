@@ -48,6 +48,89 @@ interface OptimizeContext {
 }
 
 /**
+ * Re-optimización en vivo con tráfico real (Stream C / Fase O1 — ADR-074).
+ * Llama al endpoint `/reoptimize-live` que internamente usa Google Routes API.
+ *
+ * Caso de uso: chofer atrasado o llega tienda urgente — recalcular secuencia
+ * de paradas pendientes con tráfico actual de MX.
+ *
+ * NO usa la misma `callOptimizer` porque el payload + response shape son
+ * distintos (sin matrix client-side; Google la calcula server-side).
+ */
+export interface ReoptimizeLiveStopInput {
+  stop_id: string;
+  location: [number, number]; // [lat, lng]
+  service_seconds?: number;
+}
+
+export interface ReoptimizeLiveStopResult {
+  stop_id: string;
+  sequence: number;
+  arrival_unix: number;
+  departure_unix: number;
+}
+
+export interface ReoptimizeLiveResponse {
+  stops: ReoptimizeLiveStopResult[];
+  unassigned_stop_ids: string[];
+  total_duration_seconds: number;
+  total_distance_meters: number;
+  google_routes_calls: number;
+}
+
+export async function callReoptimizeLive(input: {
+  currentPosition: [number, number];
+  pendingStops: ReoptimizeLiveStopInput[];
+  shiftEndUnix: number;
+}): Promise<ReoptimizeLiveResponse> {
+  const url = process.env.OPTIMIZER_URL;
+  const apiKey = process.env.OPTIMIZER_API_KEY;
+  if (!url || !apiKey) {
+    throw new Error('[optimizer.reoptimizeLive] OPTIMIZER_URL u OPTIMIZER_API_KEY no definidas');
+  }
+
+  const payload = {
+    current_position: input.currentPosition,
+    pending_stops: input.pendingStops.map((s) => ({
+      stop_id: s.stop_id,
+      location: s.location,
+      service_seconds: s.service_seconds ?? 1800,
+    })),
+    shift_end_unix: input.shiftEndUnix,
+  };
+
+  // Timeout más generoso que /optimize porque Google Routes hace N×(N-1)
+  // calls en paralelo — para 15 stops son 240 calls, ~3-4s de latencia.
+  const controller = new AbortController();
+  const timeoutMs = 20_000;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(`${url}/reoptimize-live`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`[optimizer.reoptimizeLive] HTTP ${res.status}: ${text.slice(0, 300)}`);
+    }
+    return (await res.json()) as ReoptimizeLiveResponse;
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new Error(`[optimizer.reoptimizeLive] Timeout después de ${timeoutMs}ms`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
  * Llama al optimizer con la lista de vehículos y tiendas.
  * Devuelve la respuesta cruda — el caller la mapea a stops persistidos.
  */

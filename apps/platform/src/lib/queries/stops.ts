@@ -201,6 +201,66 @@ export async function bulkReorderStops(
 }
 
 /**
+ * Stream C O1 (ADR-074): aplica el resultado de re-optimización en vivo a las
+ * stops pending de una ruta. Setea sequence + planned_arrival_at + planned_departure_at
+ * basado en lo que Google Routes + VROOM calcularon con tráfico actual.
+ *
+ * Las stops completadas/skipped NO se tocan (sus sequence ya son históricos).
+ * Solo afecta a las pending del input.
+ *
+ * Stops marcadas como `unassignedStopIds` se ponen como skipped con notas
+ * "Sin tiempo en el turno restante" — el dispatcher decide si transferir
+ * a otra ruta o cancelar.
+ */
+export async function bulkApplyReoptResult(
+  routeId: string,
+  result: {
+    stops: Array<{
+      stop_id: string;
+      sequence: number;
+      arrival_unix: number;
+      departure_unix: number;
+    }>;
+    unassigned_stop_ids: string[];
+  },
+  baseSequenceOffset: number,
+): Promise<void> {
+  const supabase = await createServerClient();
+
+  // El sequence en la BD debe partir de baseSequenceOffset + 1 (el chofer
+  // ya completó N paradas; las nuevas empiezan después de esas).
+  for (const stop of result.stops) {
+    const { error } = await supabase
+      .from('stops')
+      .update({
+        sequence: baseSequenceOffset + stop.sequence,
+        planned_arrival_at: new Date(stop.arrival_unix * 1000).toISOString(),
+        planned_departure_at: new Date(stop.departure_unix * 1000).toISOString(),
+      })
+      .eq('id', stop.stop_id)
+      .eq('route_id', routeId);
+    if (error) {
+      throw new Error(`[stops.bulkApplyReoptResult.update] stop ${stop.stop_id}: ${error.message}`);
+    }
+  }
+
+  // Stops que VROOM no asignó (no caben en shift restante) → skipped.
+  for (const stopId of result.unassigned_stop_ids) {
+    const { error } = await supabase
+      .from('stops')
+      .update({
+        status: 'skipped',
+        notes: 'Re-optimización: sin tiempo en el turno restante. Revisar transferencia.',
+      })
+      .eq('id', stopId)
+      .eq('route_id', routeId);
+    if (error) {
+      throw new Error(`[stops.bulkApplyReoptResult.skip] stop ${stopId}: ${error.message}`);
+    }
+  }
+}
+
+/**
  * Agrega una nueva parada a una ruta existente (al final de la secuencia).
  * ADR-036: el dispatcher necesita poder agregar paradas que el optimizer no
  * asignó (tiendas muy lejos, fuera de capacity, etc.) o tiendas nuevas.
