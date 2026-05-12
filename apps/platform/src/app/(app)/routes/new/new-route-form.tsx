@@ -41,10 +41,71 @@ export function NewRouteForm({ zones, stores, vehicles, drivers, dispatch }: Pro
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
+  // UX 2026-05-12: con 50+ tiendas en una zona, scroll-find era doloroso.
+  // Agregamos filtros client-side: búsqueda por code/name/address + toggle
+  // de verified/sin verificar + modal de "pegar lista de códigos" para
+  // selección bulk desde XLSX/Sheets externos.
+  const [searchQuery, setSearchQuery] = useState('');
+  const [verifiedFilter, setVerifiedFilter] = useState<'all' | 'verified' | 'unverified'>('all');
+  const [pasteOpen, setPasteOpen] = useState(false);
+  const [pasteText, setPasteText] = useState('');
+  const [pasteResult, setPasteResult] = useState<{ matched: number; missed: string[] } | null>(null);
+
   // Filtrar por zona seleccionada.
   const zoneStores = useMemo(() => stores.filter((s) => s.zoneId === zoneId), [stores, zoneId]);
   const zoneVehicles = useMemo(() => vehicles.filter((v) => v.zoneId === zoneId), [vehicles, zoneId]);
   const zoneDrivers = useMemo(() => drivers.filter((d) => d.zoneId === zoneId), [drivers, zoneId]);
+
+  // Tiendas visibles tras aplicar buscador + filter de verified. El SelectAll
+  // del SelectorCard opera sobre estos visibles (no sobre todo zoneStores)
+  // para que la acción sea consistente con lo que el usuario ve.
+  const visibleStores = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return zoneStores.filter((s) => {
+      if (verifiedFilter === 'verified' && !s.coordVerified) return false;
+      if (verifiedFilter === 'unverified' && s.coordVerified) return false;
+      if (q.length === 0) return true;
+      return (
+        s.code.toLowerCase().includes(q) ||
+        s.name.toLowerCase().includes(q) ||
+        (s.address ?? '').toLowerCase().includes(q)
+      );
+    });
+  }, [zoneStores, searchQuery, verifiedFilter]);
+
+  // Paste-by-code: usuario pega una lista de códigos (separados por coma, salto
+  // de línea o espacio) y los matcheamos contra zoneStores. Útil para importar
+  // selección desde un XLSX/Sheets ("aquí están los 40 IDs que quiero").
+  function applyPaste() {
+    const tokens = pasteText
+      .split(/[\s,;]+/)
+      .map((t) => t.trim().toUpperCase())
+      .filter(Boolean);
+    if (tokens.length === 0) {
+      setPasteResult({ matched: 0, missed: [] });
+      return;
+    }
+    const byCode = new Map(zoneStores.map((s) => [s.code.toUpperCase(), s.id]));
+    // También aceptar IDs numéricos sueltos asumiendo prefijo de zona (ej. "1550"
+    // se interpreta como "CDMX-1550" si la zona actual es CDMX).
+    const zoneCode = zones.find((z) => z.id === zoneId)?.code ?? '';
+    const ids = new Set<string>();
+    const missed: string[] = [];
+    for (const tok of tokens) {
+      const id =
+        byCode.get(tok) ??
+        byCode.get(`${zoneCode.toUpperCase()}-${tok}`) ??
+        null;
+      if (id) ids.add(id);
+      else missed.push(tok);
+    }
+    setSelectedStores((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) next.add(id);
+      return next;
+    });
+    setPasteResult({ matched: ids.size, missed });
+  }
 
   function toggleStore(id: string) {
     setSelectedStores((prev) => {
@@ -393,26 +454,111 @@ export function NewRouteForm({ zones, stores, vehicles, drivers, dispatch }: Pro
 
         <SelectorCard
           title="Tiendas a visitar"
-          subtitle={`${selectedStores.size} de ${zoneStores.length} seleccionadas`}
+          subtitle={
+            searchQuery || verifiedFilter !== 'all'
+              ? `${selectedStores.size} seleccionadas · ${visibleStores.length} visibles de ${zoneStores.length}`
+              : `${selectedStores.size} de ${zoneStores.length} seleccionadas`
+          }
           empty="No hay tiendas activas en esta zona."
           isEmpty={zoneStores.length === 0}
-          onSelectAll={() => setSelectedStores(new Set(zoneStores.map((s) => s.id)))}
+          onSelectAll={() => {
+            // Selecciona los VISIBLES (después de filtros), agregándolos a la
+            // selección actual sin pisarla. Si quieres seleccionar solo los
+            // visibles, primero "Limpiar" y después "Seleccionar visibles".
+            setSelectedStores((prev) => {
+              const next = new Set(prev);
+              for (const s of visibleStores) next.add(s.id);
+              return next;
+            });
+          }}
+          selectAllLabel={
+            searchQuery || verifiedFilter !== 'all' ? 'Seleccionar visibles' : 'Todos'
+          }
           onClear={() => setSelectedStores(new Set())}
           disabled={pending}
-        >
-          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
-            {zoneStores.map((s) => (
-              <SelectChip
-                key={s.id}
-                selected={selectedStores.has(s.id)}
-                onClick={() => toggleStore(s.id)}
+          toolbar={
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="search"
+                placeholder="Buscar por código, nombre o dirección…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
                 disabled={pending}
-                primary={s.code}
-                secondary={s.name}
+                className="flex-1 min-w-[200px] rounded-[var(--radius-md)] border px-3 py-1.5 text-sm"
+                style={{
+                  background: 'var(--vf-surface-2)',
+                  borderColor: 'var(--vf-line)',
+                  color: 'var(--vf-text)',
+                }}
               />
-            ))}
-          </div>
+              <FilterChips
+                value={verifiedFilter}
+                onChange={setVerifiedFilter}
+                disabled={pending}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  setPasteOpen(true);
+                  setPasteResult(null);
+                }}
+                disabled={pending}
+              >
+                Pegar lista de códigos
+              </Button>
+            </div>
+          }
+        >
+          {visibleStores.length === 0 ? (
+            <p className="py-6 text-center text-sm" style={{ color: 'var(--vf-text-mute)' }}>
+              Sin tiendas que coincidan con los filtros.
+              {' '}
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery('');
+                  setVerifiedFilter('all');
+                }}
+                className="underline hover:no-underline"
+                style={{ color: 'var(--vf-text)' }}
+              >
+                Limpiar filtros
+              </button>
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+              {visibleStores.map((s) => (
+                <SelectChip
+                  key={s.id}
+                  selected={selectedStores.has(s.id)}
+                  onClick={() => toggleStore(s.id)}
+                  disabled={pending}
+                  primary={s.code}
+                  secondary={s.name}
+                  badge={!s.coordVerified ? '⚠' : undefined}
+                />
+              ))}
+            </div>
+          )}
         </SelectorCard>
+
+        {/* Modal paste-by-code: usuario pega lista del XLSX/Sheets y matcheamos. */}
+        {pasteOpen && (
+          <PasteCodesModal
+            zoneCode={zones.find((z) => z.id === zoneId)?.code ?? ''}
+            pasteText={pasteText}
+            onChangeText={setPasteText}
+            onApply={applyPaste}
+            onClose={() => {
+              setPasteOpen(false);
+              setPasteText('');
+              setPasteResult(null);
+            }}
+            result={pasteResult}
+          />
+        )}
       </div>
     </form>
   );
@@ -438,9 +584,16 @@ interface SelectorCardProps {
   onClear: () => void;
   disabled?: boolean;
   children: React.ReactNode;
+  /** Override del label "Todos" — útil cuando el bulk opera sobre filtrados. */
+  selectAllLabel?: string;
+  /** Slot opcional debajo del header con buscadores/filters/acciones extra. */
+  toolbar?: React.ReactNode;
 }
 
-function SelectorCard({ title, subtitle, empty, isEmpty, onSelectAll, onClear, disabled, children }: SelectorCardProps) {
+function SelectorCard({
+  title, subtitle, empty, isEmpty, onSelectAll, onClear, disabled, children,
+  selectAllLabel = 'Todos', toolbar,
+}: SelectorCardProps) {
   return (
     <Card padded={false}>
       <div
@@ -458,7 +611,7 @@ function SelectorCard({ title, subtitle, empty, isEmpty, onSelectAll, onClear, d
         {!isEmpty && (
           <div className="flex gap-1.5">
             <Button type="button" variant="ghost" size="sm" onClick={onSelectAll} disabled={disabled}>
-              Todos
+              {selectAllLabel}
             </Button>
             <Button type="button" variant="ghost" size="sm" onClick={onClear} disabled={disabled}>
               Ninguno
@@ -466,6 +619,14 @@ function SelectorCard({ title, subtitle, empty, isEmpty, onSelectAll, onClear, d
           </div>
         )}
       </div>
+      {!isEmpty && toolbar && (
+        <div
+          className="border-b px-4 py-2.5"
+          style={{ borderColor: 'var(--vf-line)', background: 'var(--vf-surface-2)' }}
+        >
+          {toolbar}
+        </div>
+      )}
       <div className="p-4">
         {isEmpty ? (
           <p className="text-center text-sm" style={{ color: 'var(--vf-text-mute)' }}>
@@ -485,9 +646,11 @@ interface SelectChipProps {
   disabled?: boolean;
   primary: string;
   secondary?: string;
+  /** Indicador opcional a la derecha — para flag de coord_verified, etc. */
+  badge?: string;
 }
 
-function SelectChip({ selected, onClick, disabled, primary, secondary }: SelectChipProps) {
+function SelectChip({ selected, onClick, disabled, primary, secondary, badge }: SelectChipProps) {
   return (
     <button
       type="button"
@@ -524,6 +687,157 @@ function SelectChip({ selected, onClick, disabled, primary, secondary }: SelectC
           </div>
         )}
       </div>
+      {badge && (
+        <span
+          className="shrink-0 text-[11px]"
+          style={{ color: 'var(--vf-warn-fg)' }}
+          title="Coords sin verificar"
+        >
+          {badge}
+        </span>
+      )}
     </button>
+  );
+}
+
+// Filtros del SelectorCard de tiendas — toggle 3-estados (todas / verificadas
+// / sin verificar) que se ajusta a coord_verified del store. Estilo segmented
+// control compacto.
+function FilterChips({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: 'all' | 'verified' | 'unverified';
+  onChange: (v: 'all' | 'verified' | 'unverified') => void;
+  disabled?: boolean;
+}) {
+  const opts: Array<{ key: 'all' | 'verified' | 'unverified'; label: string }> = [
+    { key: 'all', label: 'Todas' },
+    { key: 'verified', label: '✓ Verificadas' },
+    { key: 'unverified', label: '⚠ Sin verificar' },
+  ];
+  return (
+    <div
+      className="inline-flex overflow-hidden rounded-[var(--radius-md)] border"
+      style={{ borderColor: 'var(--vf-line)' }}
+    >
+      {opts.map((o) => {
+        const active = value === o.key;
+        return (
+          <button
+            key={o.key}
+            type="button"
+            onClick={() => onChange(o.key)}
+            disabled={disabled}
+            className="px-2.5 py-1.5 text-[11px] font-medium transition-colors"
+            style={{
+              background: active ? 'var(--vf-green-700)' : 'transparent',
+              color: active ? 'white' : 'var(--vf-text-mute)',
+            }}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Modal para pegar lista de códigos (separados por coma, espacio, nuevas líneas).
+// Útil para importar selección desde XLSX/Sheets ("aquí están los IDs que quiero").
+function PasteCodesModal({
+  zoneCode,
+  pasteText,
+  onChangeText,
+  onApply,
+  onClose,
+  result,
+}: {
+  zoneCode: string;
+  pasteText: string;
+  onChangeText: (t: string) => void;
+  onApply: () => void;
+  onClose: () => void;
+  result: { matched: number; missed: string[] } | null;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)]"
+        style={{ background: 'var(--vf-bg-elev)', color: 'var(--vf-text)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          className="px-6 py-4"
+          style={{ borderBottom: '1px solid var(--vf-line)' }}
+        >
+          <h2 className="text-base font-semibold">Pegar lista de códigos</h2>
+          <p className="mt-1 text-sm" style={{ color: 'var(--vf-text-mute)' }}>
+            Pega códigos separados por coma, espacio o salto de línea. Acepta el
+            código completo (<span className="font-mono">{zoneCode}-1550</span>) o
+            solo el número (<span className="font-mono">1550</span>) — se le
+            antepone <span className="font-mono">{zoneCode}-</span> automático.
+          </p>
+        </div>
+        <div className="px-6 py-5">
+          <textarea
+            value={pasteText}
+            onChange={(e) => onChangeText(e.target.value)}
+            rows={8}
+            placeholder={`Ej:\n1550, 582, 804\n${zoneCode}-1294 ${zoneCode}-805\n288`}
+            className="w-full rounded-[var(--radius-md)] border px-3 py-2 font-mono text-sm"
+            style={{
+              background: 'var(--vf-surface-2)',
+              borderColor: 'var(--vf-line)',
+              color: 'var(--vf-text)',
+            }}
+            autoFocus
+          />
+          {result && (
+            <div
+              className="mt-3 rounded-[var(--radius-md)] border px-3 py-2 text-sm"
+              style={{
+                background: result.missed.length === 0 ? 'var(--vf-ok-bg)' : 'var(--vf-warn-bg)',
+                borderColor: result.missed.length === 0 ? 'var(--vf-ok-border)' : 'var(--vf-warn-border)',
+                color: 'var(--vf-text)',
+              }}
+            >
+              <p>
+                <strong>{result.matched}</strong> tienda{result.matched === 1 ? '' : 's'}{' '}
+                agregada{result.matched === 1 ? '' : 's'} a la selección.
+              </p>
+              {result.missed.length > 0 && (
+                <p className="mt-1" style={{ color: 'var(--vf-warn-fg)' }}>
+                  No encontradas ({result.missed.length}):{' '}
+                  <span className="font-mono">{result.missed.slice(0, 10).join(', ')}</span>
+                  {result.missed.length > 10 && ` (+${result.missed.length - 10} más)`}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+        <div
+          className="flex justify-end gap-2 rounded-b-[var(--radius-lg)] px-6 py-3"
+          style={{ borderTop: '1px solid var(--vf-line)', background: 'var(--vf-bg-sub)' }}
+        >
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+            Cerrar
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            size="sm"
+            onClick={onApply}
+            disabled={pasteText.trim().length === 0}
+          >
+            Aplicar
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
