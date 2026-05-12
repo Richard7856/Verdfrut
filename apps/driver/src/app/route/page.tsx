@@ -2,6 +2,7 @@
 // Server Component: hace queries con la sesión del chofer y RLS hace el resto.
 // Si no hay ruta asignada, muestra estado vacío.
 
+import Image from 'next/image';
 import { requireDriverProfile } from '@/lib/auth';
 import { getDriverRouteForDate, getRouteStopsWithStores } from '@/lib/queries/route';
 import { createServerClient } from '@tripdrive/supabase/server';
@@ -65,9 +66,19 @@ export default async function RoutePage() {
   return (
     <main className="min-h-dvh bg-[var(--vf-bg)] safe-top safe-bottom">
       <header className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
-        <div>
-          <h1 className="text-lg font-semibold text-[var(--color-text)]">TripDrive</h1>
-          <p className="text-xs text-[var(--color-text-muted)]">{profile.fullName}</p>
+        <div className="flex items-center gap-2.5">
+          <Image
+            src="/tripdrive-icon.png"
+            alt="TripDrive"
+            width={28}
+            height={28}
+            priority
+            className="shrink-0"
+          />
+          <div>
+            <h1 className="text-base font-semibold text-[var(--color-text)]">TripDrive</h1>
+            <p className="text-xs text-[var(--color-text-muted)]">{profile.fullName}</p>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           {/* Badge solo aparece si hay items pendientes — ADR-019 */}

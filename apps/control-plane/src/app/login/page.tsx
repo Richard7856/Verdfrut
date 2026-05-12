@@ -1,5 +1,6 @@
 // Login del Control Plane — shared password con cookie HMAC.
 
+import Image from 'next/image';
 import { Card } from '@tripdrive/ui';
 import { LoginForm } from './login-form';
 
@@ -20,11 +21,24 @@ export default async function LoginPage({ searchParams }: Props) {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-[var(--vf-bg)] p-4">
       <div className="w-full max-w-sm">
-        <div className="mb-6 text-center">
-          <h1 className="text-3xl font-bold text-[var(--vf-green-600,#15803d)]">
-            verd<em className="not-italic">frut</em>
-          </h1>
-          <p className="mt-1 text-xs uppercase tracking-[0.15em] text-[var(--color-text-muted)]">
+        <div className="mb-6 flex flex-col items-center">
+          <Image
+            src="/tripdrive-logo-light.png"
+            alt="TripDrive"
+            width={200}
+            height={72}
+            className="td-logo-light h-14 w-auto"
+            priority
+          />
+          <Image
+            src="/tripdrive-logo-dark.png"
+            alt="TripDrive"
+            width={200}
+            height={72}
+            className="td-logo-dark h-14 w-auto"
+            priority
+          />
+          <p className="mt-2 text-xs uppercase tracking-[0.15em] text-[var(--color-text-muted)]">
             Control Plane
           </p>
         </div>

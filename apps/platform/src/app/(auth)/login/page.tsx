@@ -1,5 +1,6 @@
-// Página de login. UI minimalista — re-skin completo cuando llegue identidad visual.
+// Página de login. UI minimalista con el logo TripDrive (lockup completo).
 
+import Image from 'next/image';
 import { Card } from '@tripdrive/ui';
 import { LoginForm } from './login-form';
 
@@ -14,9 +15,26 @@ export default async function LoginPage({ searchParams }: PageProps) {
 
   return (
     <Card className="border-[var(--color-border)]">
-      <div className="mb-6 text-center">
-        <h1 className="text-xl font-semibold text-[var(--color-text)]">TripDrive</h1>
-        <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+      <div className="mb-6 flex flex-col items-center text-center">
+        {/* Stack de 2 lockups: solo uno visible según [data-theme] del root.
+            Reglas en tokens.css con la clase `.td-logo-light` / `.td-logo-dark`. */}
+        <Image
+          src="/tripdrive-logo-light.png"
+          alt="TripDrive"
+          width={180}
+          height={64}
+          className="td-logo-light h-12 w-auto"
+          priority
+        />
+        <Image
+          src="/tripdrive-logo-dark.png"
+          alt="TripDrive"
+          width={180}
+          height={64}
+          className="td-logo-dark h-12 w-auto"
+          priority
+        />
+        <p className="mt-3 text-sm text-[var(--color-text-muted)]">
           Inicia sesión en tu panel
         </p>
       </div>

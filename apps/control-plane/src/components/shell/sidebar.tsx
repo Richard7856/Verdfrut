@@ -3,6 +3,7 @@
 
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@tripdrive/ui';
@@ -104,18 +105,14 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
 
 function BrandMark() {
   return (
-    <div
-      className="grid h-[26px] w-[26px] place-items-center rounded-[7px]"
-      style={{ background: 'var(--vf-green-700)', color: 'white' }}
-    >
-      <svg
-        viewBox="0 0 24 24" width="14" height="14" fill="none"
-        stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-      >
-        <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19.2 2.96c.83 5.78.42 9.16-1.2 11.84A7 7 0 0 1 11 20Z" />
-        <path d="M2 21c0-3 1.85-5.36 5.08-6" />
-      </svg>
-    </div>
+    <Image
+      src="/tripdrive-icon.png"
+      alt="TripDrive"
+      width={28}
+      height={28}
+      priority
+      className="shrink-0"
+    />
   );
 }
 
