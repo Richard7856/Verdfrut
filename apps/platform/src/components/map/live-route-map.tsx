@@ -124,6 +124,9 @@ export function LiveRouteMap({ routeId, stops, depot, geometry, mapboxToken, dri
     });
     mapRef.current = map;
 
+    // react-doctor-disable-next-line react-doctor/effect-needs-cleanup
+    // Cleanup vía `map.remove()` en el return — Mapbox internamente desuscribe
+    // todos los listeners (load, click, etc.) y destruye markers/layers.
     map.on('load', () => {
       // Depot.
       if (depot) {

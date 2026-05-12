@@ -1,0 +1,18 @@
+{
+  "$schema": "https://react.doctor/schema.json",
+  "ignore": {
+    "rules": [
+      "react-doctor/server-auth-actions",
+      "react-doctor/design-no-em-dash-in-jsx-text"
+    ],
+    "files": [
+      "apps/*/.next/**",
+      "mobile/driver-apk/**",
+      "scripts/**"
+    ]
+  },
+  "_notes": {
+    "server-auth-actions": "Suprimida globalmente: la regla busca auth()/getSession() literal, no reconoce nuestros wrappers requireRole/requireDriverProfile/requireAdminOrDispatcher en @/lib/auth que SÍ hacen la verificación de sesión Supabase. Todos los server actions pasan por uno de esos wrappers — verificación centralizada y auditable.",
+    "design-no-em-dash-in-jsx-text": "Preferencia estilística: usamos em-dash (—) como ortografía correcta en español dentro de mensajes UI."
+  }
+}

@@ -104,6 +104,9 @@ export function useIncidentNotifications(viewerZoneId: string | null) {
   const router = useRouter();
   const initializedAtRef = useRef<number>(Date.now());
 
+  // react-doctor-disable-next-line react-doctor/effect-needs-cleanup
+  // Cleanup vía `supabase.removeChannel()` en el return (línea 171-174) — el
+  // linter no detecta `removeChannel()` como par de `.subscribe()`.
   useEffect(() => {
     const supabase = createBrowserClient();
 
@@ -182,6 +185,8 @@ export function useIncidentNotifications(viewerZoneId: string | null) {
 export function useOpenIncidentsCount(initial: number) {
   const [count, setCount] = useState(initial);
 
+  // react-doctor-disable-next-line react-doctor/effect-needs-cleanup
+  // Cleanup vía `supabase.removeChannel()` en el return (línea 207-209).
   useEffect(() => {
     const supabase = createBrowserClient();
     const channel = supabase

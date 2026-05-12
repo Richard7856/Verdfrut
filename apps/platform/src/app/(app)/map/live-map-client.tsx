@@ -260,6 +260,11 @@ function DriversMap({
   }, [mapboxToken]);
 
   // Sync markers cuando cambia drivers o selección.
+  // react-doctor-disable-next-line react-doctor/effect-needs-cleanup
+  // Los markers se limpian dentro del body (loop de líneas 311-316 cuando un
+  // driver desaparece) + en el cleanup del useEffect anterior al desmontaje
+  // (`markersRef.current.forEach((m) => m.remove())`). El addEventListener del
+  // marker botón vive con su elemento DOM — al `marker.remove()` se descarta.
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;

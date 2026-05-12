@@ -16,7 +16,9 @@ import {
 } from '@/lib/validation';
 import type { UserRole } from '@tripdrive/types';
 
-const VALID_ROLES: UserRole[] = ['admin', 'dispatcher', 'zone_manager', 'driver'];
+// `as const` hace el array readonly — defensa contra mutación accidental
+// desde otro request en el server runtime (módulo compartido).
+const VALID_ROLES = ['admin', 'dispatcher', 'zone_manager', 'driver'] as const satisfies readonly UserRole[];
 
 /**
  * El resultado del invite incluye el link copiable para el caso "chofer sin email

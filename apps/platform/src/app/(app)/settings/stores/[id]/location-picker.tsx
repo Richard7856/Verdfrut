@@ -62,20 +62,27 @@ export function LocationPicker({ initialLat, initialLng, mapboxToken, onChange }
       .addTo(map);
     markerRef.current = marker;
 
-    marker.on('dragend', () => {
+    const handleDragEnd = () => {
       const lngLat = marker.getLngLat();
       setCoords({ lat: lngLat.lat, lng: lngLat.lng });
       onChange(lngLat.lat, lngLat.lng);
-    });
+    };
+    marker.on('dragend', handleDragEnd);
 
     // Click en mapa → mover el pin a ese punto.
-    map.on('click', (e) => {
+    const handleMapClick = (e: mapboxgl.MapMouseEvent) => {
       marker.setLngLat(e.lngLat);
       setCoords({ lat: e.lngLat.lat, lng: e.lngLat.lng });
       onChange(e.lngLat.lat, e.lngLat.lng);
-    });
+    };
+    map.on('click', handleMapClick);
 
     return () => {
+      // Cleanup explícito de los listeners ANTES del map.remove() — aunque
+      // `map.remove()` cleanup todo internamente, ser explícito es defensivo
+      // contra futuros refactors y silencia false positive de `effect-needs-cleanup`.
+      marker.off('dragend', handleDragEnd);
+      map.off('click', handleMapClick);
       map.remove();
       mapRef.current = null;
       markerRef.current = null;

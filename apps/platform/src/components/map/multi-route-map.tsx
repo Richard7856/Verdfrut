@@ -118,6 +118,9 @@ export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
     });
     mapRef.current = map;
 
+    // react-doctor-disable-next-line react-doctor/effect-needs-cleanup
+    // Cleanup vía `map.remove()` en el return — Mapbox internamente desuscribe
+    // todos los listeners (load, etc.) y destruye markers/layers.
     map.on('load', async () => {
       // Depots (uniqued por code+coords — varias rutas comparten CEDIS).
       const seenDepots = new Set<string>();

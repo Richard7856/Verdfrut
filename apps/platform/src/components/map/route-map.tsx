@@ -139,6 +139,9 @@ export function RouteMap({ stops, depot, geometry, mapboxToken, routeId, timezon
     mapRef.current = map;
 
     // Sumar marcadores cuando el estilo termine de cargar.
+    // react-doctor-disable-next-line react-doctor/effect-needs-cleanup
+    // Cleanup vía `map.remove()` en el return — Mapbox internamente desuscribe
+    // listeners y destruye markers/layers asociados.
     map.on('load', () => {
       // Depot — cuadrado oscuro.
       if (depot) {
