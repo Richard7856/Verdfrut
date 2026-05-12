@@ -93,7 +93,7 @@ export async function sendChatPushToZoneManagers(params: ChatPushParams): Promis
         await supabase.from('push_subscriptions').delete().eq('id', sub.id);
         console.info(`[chat.push] suscripción ${sub.id} eliminada (${statusCode})`);
       } else {
-        console.error('[chat.push] envío falló:', err);
+        await logger.error('[chat.push] envío falló', { err, subscriptionId: sub.id });
       }
     }
   }

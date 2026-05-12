@@ -14,6 +14,7 @@
 
 import { useEffect, useRef } from 'react';
 import { mapboxgl, setMapboxToken } from '@tripdrive/maps';
+import { logger } from '@tripdrive/observability';
 
 export interface RouteMapStop {
   storeId: string;
@@ -112,7 +113,9 @@ export function RouteMap({ stops, depot, geometry, mapboxToken, routeId, timezon
   useEffect(() => {
     if (!containerRef.current) return;
     if (!mapboxToken) {
-      console.error('[RouteMap] mapboxToken vacío — el mapa no se va a renderizar.');
+      void logger.error('[RouteMap] mapboxToken vacío — el mapa no se va a renderizar', {
+        routeId,
+      });
       return;
     }
 

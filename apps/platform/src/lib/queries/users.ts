@@ -5,6 +5,7 @@
 
 import 'server-only';
 import { createServerClient, createServiceRoleClient } from '@tripdrive/supabase/server';
+import { logger } from '@tripdrive/observability';
 import type { TableUpdate } from '@tripdrive/supabase';
 import type { UserProfile, UserRole } from '@tripdrive/types';
 import { createDriver } from './drivers';
@@ -232,7 +233,10 @@ export async function inviteUser(input: InviteUserInput): Promise<InviteUserResu
   });
   if (linkErr) {
     // No fatal — la invite por email ya salió. Logueamos y devolvemos string vacío.
-    console.error('[users.invite] No se pudo generar link copiable:', linkErr);
+    await logger.error('[users.invite] No se pudo generar link copiable', {
+      err: linkErr,
+      userId,
+    });
     return { userId, inviteLink: '' };
   }
 

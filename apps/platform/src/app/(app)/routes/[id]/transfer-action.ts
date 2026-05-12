@@ -16,6 +16,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { createServerClient } from '@tripdrive/supabase/server';
+import { logger } from '@tripdrive/observability';
 import { requireAdminOrDispatcher } from '@/lib/auth';
 
 export interface TransferResult {
@@ -128,7 +129,10 @@ export async function transferRouteRemainderAction(input: TransferInput): Promis
     })
     .eq('id', input.sourceRouteId);
   if (srcUpdErr) {
-    console.error('[transfer] no se pudo marcar source INTERRUPTED:', srcUpdErr.message);
+    await logger.error('[transfer] no se pudo marcar source INTERRUPTED', {
+      err: srcUpdErr.message,
+      sourceRouteId: input.sourceRouteId,
+    });
     // No revertir el resto — el transfer ya se hizo, solo el status falló.
   }
 

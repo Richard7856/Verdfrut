@@ -5,6 +5,7 @@
 // llega la geometría real, refresca el mapa.
 
 import { useEffect, useState } from 'react';
+import { logger } from '@tripdrive/observability';
 import { RouteMap, type RouteMapStop, type RouteMapDepot } from './route-map';
 
 interface Props {
@@ -38,7 +39,9 @@ export function RouteMapLoader({ routeId, stops, depot, mapboxToken, cacheKey }:
         if (cancelled) return;
         if (data?.geometry) setGeometry(data.geometry);
       })
-      .catch((err) => console.error('[polyline.fetch]', err));
+      .catch((err) => {
+        void logger.error('[polyline.fetch] error', { err, routeId });
+      });
     return () => {
       cancelled = true;
     };

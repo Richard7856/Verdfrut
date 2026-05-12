@@ -47,27 +47,52 @@ export function Modal({ open, onClose, title, description, children, footer, siz
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       onClick={onClose}
     >
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      {/* Overlay 0.55 + backdrop-blur — antes 0.4 mostraba demasiado contenido
+          detrás y daba ilusión de modal "transparente" combinado con el bug de
+          tokens fantasma (--vf-surface-1) que efectivamente lo dejaba sin fondo. */}
+      <div className="absolute inset-0 bg-black/55 backdrop-blur-sm" />
       <div
+        // Bug visual previo (2026-05-11): `bg-[var(--color-surface)]` resolvía
+        // a transparente en dark mode. La variable está declarada en `@theme`
+        // de Tailwind v4 referenciando `var(--vf-bg-elev)`; con el rebrand fase
+        // 2 (ADR-056) la indirección dejó de propagar el cambio de tema.
+        // Usamos directo el token `--vf-bg-elev` que SÍ cambia con [data-theme].
+        style={{
+          backgroundColor: 'var(--vf-bg-elev)',
+          color: 'var(--vf-text)',
+        }}
         className={cn(
-          'relative w-full rounded-[var(--radius-lg)] bg-[var(--color-surface)] shadow-[var(--shadow-lg)]',
+          'relative w-full rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)]',
           SIZES[size],
         )}
         onClick={(e) => e.stopPropagation()}
       >
         {(title || description) && (
-          <div className="border-b border-[var(--color-border)] px-6 py-4">
+          <div
+            className="px-6 py-4"
+            style={{ borderBottom: '1px solid var(--vf-line)' }}
+          >
             {title && (
-              <h2 className="text-base font-semibold text-[var(--color-text)]">{title}</h2>
+              <h2 className="text-base font-semibold" style={{ color: 'var(--vf-text)' }}>
+                {title}
+              </h2>
             )}
             {description && (
-              <p className="mt-1 text-sm text-[var(--color-text-muted)]">{description}</p>
+              <p className="mt-1 text-sm" style={{ color: 'var(--vf-text-mute)' }}>
+                {description}
+              </p>
             )}
           </div>
         )}
         <div className="px-6 py-5">{children}</div>
         {footer && (
-          <div className="flex items-center justify-end gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface-muted)] px-6 py-3 rounded-b-[var(--radius-lg)]">
+          <div
+            className="flex items-center justify-end gap-2 px-6 py-3 rounded-b-[var(--radius-lg)]"
+            style={{
+              borderTop: '1px solid var(--vf-line)',
+              backgroundColor: 'var(--vf-bg-sub)',
+            }}
+          >
             {footer}
           </div>
         )}

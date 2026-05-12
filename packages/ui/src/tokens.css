@@ -44,6 +44,17 @@
   --vf-bg-sub:    oklch(0.965 0.004 95);
   --vf-bg-side:   oklch(0.21 0.012 155);
   --vf-bg-side-elev: oklch(0.25 0.014 155);
+
+  /* Surface aliases — usados extensivamente en el código (122+ call sites al
+     2026-05-11). Antes estaban indefinidos → `var()` resolvía a `transparent`
+     y modales/cards aparecían translúcidos sobre el contenido (visible al
+     abrir "Nuevo tiro" en dark mode). Mapeo semántico:
+       surface-1  →  bg-elev (elevado: modal, popover, dropdown)
+       surface-2  →  bg-sub  (hundido dentro de card: input, row, item)
+       surface-3  →  hover step (un nivel adicional para estados :hover) */
+  --vf-surface-1: var(--vf-bg-elev);
+  --vf-surface-2: var(--vf-bg-sub);
+  --vf-surface-3: oklch(0.94 0.005 95);
   --vf-line:      oklch(0.92 0.005 95);
   --vf-line-soft: oklch(0.95 0.004 95);
   --vf-line-strong: oklch(0.86 0.006 95);
@@ -106,6 +117,10 @@
   --vf-bg-sub:    oklch(0.20 0.012 155);  /* #222a26 */
   --vf-bg-side:   oklch(0.14 0.010 155);  /* #171d1a — más oscuro que bg */
   --vf-bg-side-elev: oklch(0.18 0.012 155);  /* derivado: bg-side + step */
+  /* Surface aliases override para dark — surface-3 ahora un grey medio
+     visible como hover sobre fondos oscuros. surface-1/2 heredan via la
+     indirección var(--vf-bg-elev) / var(--vf-bg-sub) que cambian arriba. */
+  --vf-surface-3: oklch(0.26 0.014 155);
   --vf-line:      oklch(0.28 0.012 155);  /* #323a35 */
   --vf-line-soft: oklch(0.24 0.010 155);  /* #2a322e */
   --vf-line-strong: oklch(0.34 0.014 155);  /* #3e4640 */

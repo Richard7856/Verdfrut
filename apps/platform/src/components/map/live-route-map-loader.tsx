@@ -4,6 +4,7 @@
 // vía /api/routes/[id]/polyline y la pasa al mapa en vivo.
 
 import { useEffect, useState } from 'react';
+import { logger } from '@tripdrive/observability';
 import { LiveRouteMap } from './live-route-map';
 import type { RouteMapStop, RouteMapDepot } from './route-map';
 
@@ -27,7 +28,9 @@ export function LiveRouteMapLoader({ routeId, stops, depot, mapboxToken, driverN
         if (cancelled) return;
         if (data?.geometry) setGeometry(data.geometry);
       })
-      .catch((err) => console.error('[live-polyline.fetch]', err));
+      .catch((err) => {
+        void logger.error('[live-polyline.fetch] error', { err, routeId });
+      });
     return () => {
       cancelled = true;
     };

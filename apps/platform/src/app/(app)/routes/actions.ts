@@ -5,6 +5,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { localTimeToUnix } from '@tripdrive/utils';
+import { logger } from '@tripdrive/observability';
 import { requireRole } from '@/lib/auth';
 import {
   createDraftRoute,
@@ -14,6 +15,7 @@ import {
   publishRoute,
   cancelRoute,
   assignDriverToRoute,
+  reassignDriverPostPublish,
   assignDepotOverrideToRoute,
   recalculateRouteMetrics,
   resetRouteToDraft,
@@ -80,6 +82,10 @@ export async function createAndOptimizeRoute(
 ): Promise<CreateAndOptimizeResult> {
   const profile = await requireRole('admin', 'dispatcher');
   const createdRouteIds: string[] = [];
+  // #73 — Si auto-creamos el dispatch en este intento (no vino en input) y al
+  // final no quedan rutas creadas (optimizer no asignó nada, o error a mitad
+  // del loop), hay que borrarlo para no dejar tiros vacíos en /dispatches.
+  let autoCreatedDispatchId: string | null = null;
 
   try {
     if (input.vehicleIds.length === 0) throw new ValidationError('vehicleIds', 'Selecciona al menos un camión');
@@ -186,11 +192,13 @@ export async function createAndOptimizeRoute(
               .maybeSingle();
             if (!existing2) throw new Error(`[autoDispatch] ${ndErr.message}`);
             resolvedDispatchId = existing2.id as string;
+            // Reusamos uno existente — NO marcar como auto-creado (no lo borramos en rollback).
           } else {
             throw new Error(`[autoDispatch] ${ndErr?.message ?? 'fallo al auto-crear tiro'}`);
           }
         } else {
           resolvedDispatchId = newDispatch.id as string;
+          autoCreatedDispatchId = resolvedDispatchId;
         }
       }
     }
@@ -245,6 +253,30 @@ export async function createAndOptimizeRoute(
 
     const unassignedStoreIds = getUnassignedStoreIds(optResponse, stores);
 
+    // #73 — Si auto-creamos el dispatch y el optimizer no asignó NADA a ningún
+    // vehículo, no quedó ninguna ruta. Borramos el dispatch para no dejar tiros
+    // vacíos. Devolvemos un error claro al dispatcher con las tiendas sin asignar.
+    if (createdRouteIds.length === 0 && autoCreatedDispatchId) {
+      const supabase = await (await import('@tripdrive/supabase/server')).createServerClient();
+      const { error: delErr } = await supabase
+        .from('dispatches')
+        .delete()
+        .eq('id', autoCreatedDispatchId);
+      if (delErr) {
+        // No es fatal — el dispatch queda huérfano pero no rompe el flujo del user.
+        await logger.warn('[createAndOptimizeRoute] no se pudo borrar dispatch auto-creado vacío', {
+          dispatchId: autoCreatedDispatchId,
+          err: delErr.message,
+        });
+      }
+      return {
+        ok: false,
+        error:
+          'El optimizador no pudo asignar ninguna parada a ningún camión. Verifica capacidad vs demanda, o amplía la ventana del turno.',
+        unassignedStoreIds,
+      };
+    }
+
     revalidatePath('/routes');
     revalidatePath('/dispatches');
     revalidatePath(`/dispatches/${resolvedDispatchId}`);
@@ -256,13 +288,55 @@ export async function createAndOptimizeRoute(
       dispatchId: resolvedDispatchId,
     };
   } catch (err) {
-    // C3 — rollback manual: cancelar todas las rutas que alcanzamos a crear.
-    if (createdRouteIds.length > 0) {
-      console.error(
-        `[createAndOptimizeRoute] Rollback ${createdRouteIds.length} rutas por error:`,
-        err,
+    // C3 — rollback manual.
+    //
+    // Las rutas creadas en este intento están en DRAFT/OPTIMIZED (no PUBLISHED),
+    // no tienen valor histórico. Hacemos DELETE directo en vez de UPDATE status='CANCELLED':
+    //   - DELETE cascadea a stops/breadcrumbs/route_versions (todas las FKs hacia routes
+    //     son ON DELETE CASCADE — verificado al 2026-05-11).
+    //   - Si auto-creamos el dispatch, podemos borrarlo después sin chocar con
+    //     `routes.dispatch_id ON DELETE RESTRICT` (migr 028).
+    // Si solo cancelábamos (UPDATE), el dispatch quedaba bloqueado y huérfano.
+    if (createdRouteIds.length > 0 || autoCreatedDispatchId) {
+      await logger.error(
+        `[createAndOptimizeRoute] Rollback ${createdRouteIds.length} rutas por error`,
+        { err, dispatchId: autoCreatedDispatchId, routeIds: createdRouteIds },
       );
-      await Promise.allSettled(createdRouteIds.map((id) => cancelRoute(id)));
+    }
+    if (createdRouteIds.length > 0) {
+      try {
+        const supabase = await (await import('@tripdrive/supabase/server')).createServerClient();
+        const { error: delRoutesErr } = await supabase
+          .from('routes')
+          .delete()
+          .in('id', createdRouteIds);
+        if (delRoutesErr) {
+          // Fallback: si DELETE falla por algún motivo (RLS, FK inesperado), al
+          // menos cancelamos para que no aparezcan como vivas en la UI.
+          await logger.warn('[createAndOptimizeRoute] DELETE rutas falló, intentando cancel', {
+            err: delRoutesErr.message,
+            routeIds: createdRouteIds,
+          });
+          await Promise.allSettled(createdRouteIds.map((id) => cancelRoute(id)));
+        }
+      } catch (delErr) {
+        await Promise.allSettled(createdRouteIds.map((id) => cancelRoute(id)));
+        await logger.warn('[createAndOptimizeRoute] excepción en DELETE rutas', { err: delErr });
+      }
+    }
+
+    // Si auto-creamos el dispatch en este intento, también limpiarlo.
+    // Si reusamos uno existente, NO lo tocamos (puede tener otras rutas vivas).
+    if (autoCreatedDispatchId) {
+      try {
+        const supabase = await (await import('@tripdrive/supabase/server')).createServerClient();
+        await supabase.from('dispatches').delete().eq('id', autoCreatedDispatchId);
+      } catch (delErr) {
+        await logger.warn('[createAndOptimizeRoute] rollback dispatch auto-creado falló', {
+          dispatchId: autoCreatedDispatchId,
+          err: delErr,
+        });
+      }
     }
 
     if (err instanceof ValidationError) {
@@ -486,6 +560,77 @@ export async function assignDriverAction(routeId: string, driverId: string | nul
 }
 
 /**
+ * #35 — Reasigna chofer en una ruta PUBLISHED o IN_PROGRESS.
+ *
+ * Caso real: el chofer asignado se reporta enfermo a las 5am y la ruta ya
+ * fue publicada anoche. El dispatcher tiene que pasársela a otro chofer
+ * disponible sin pasar por "cancelar + re-crear". Audit + push al nuevo chofer.
+ *
+ * Reglas:
+ *  - Solo PUBLISHED / IN_PROGRESS.
+ *  - driverId no puede ser null (hay que haber alguien — si no, primero cancelar).
+ *  - Chofer nuevo debe ser de la misma zona y estar activo.
+ *  - Audit en route_versions con reason explícito.
+ *  - Push al nuevo chofer (reusa notifyDriverOfPublishedRoute).
+ *  - Si la ruta estaba IN_PROGRESS, el chofer original puede seguir viendo
+ *    su sesión hasta que recargue — aceptable (V1).
+ */
+export async function reassignDriverPostPublishAction(
+  routeId: string,
+  newDriverId: string,
+): Promise<ActionResult> {
+  const profile = await requireRole('admin', 'dispatcher');
+  return runAction(async () => {
+    const id = requireUuid('routeId', routeId);
+    requireUuid('driverId', newDriverId);
+
+    const route = await getRoute(id);
+    if (!route) throw new ValidationError('routeId', 'Ruta no existe');
+    if (!['PUBLISHED', 'IN_PROGRESS'].includes(route.status)) {
+      throw new ValidationError(
+        'status',
+        `Esta acción solo aplica a rutas publicadas o en curso (actual: ${route.status}). Para pre-publicación usa el selector normal.`,
+      );
+    }
+
+    // Validar que el chofer nuevo existe, es de la misma zona y está activo.
+    const [newDriver] = await getDriversByIds([newDriverId]);
+    if (!newDriver) throw new ValidationError('driverId', 'Chofer no encontrado');
+    if (newDriver.zoneId !== route.zoneId) {
+      throw new ValidationError(
+        'driverId',
+        'El chofer debe pertenecer a la misma zona que la ruta.',
+      );
+    }
+    if (route.driverId === newDriverId) {
+      throw new ValidationError('driverId', 'Ese chofer ya está asignado a esta ruta.');
+    }
+
+    await reassignDriverPostPublish(id, newDriverId);
+
+    // Audit + push. Si fallan, no revertir (el cambio principal ya quedó).
+    try {
+      await incrementRouteVersion(
+        id,
+        profile.id,
+        `Reasignación de chofer en ${route.status} (de ${route.driverId ?? 'sin chofer'} a ${newDriverId})`,
+      );
+      await notifyDriverOfPublishedRoute(id);
+    } catch (err) {
+      await logger.error('[reassignDriverPostPublishAction] audit/push falló', {
+        err,
+        routeId: id,
+        newDriverId,
+      });
+    }
+
+    revalidatePath(`/routes/${id}`);
+    revalidatePath('/routes');
+    if (route.dispatchId) revalidatePath(`/dispatches/${route.dispatchId}`);
+  });
+}
+
+/**
  * ADR-047: setea o limpia el override de depot de salida para una ruta.
  * Pasar null = vuelve al depot del vehículo. Tras cambiar, recalcula métricas
  * (km/ETAs) para reflejar el nuevo origen. La revalidación incluye el detalle
@@ -597,7 +742,10 @@ export async function reorderStopsAction(
         );
       } catch (err) {
         // No revertir el reorder si falla el audit/push — son secundarios.
-        console.error('[reorderStopsAction] post-publish audit/push falló:', err);
+        await logger.error('[reorderStopsAction] post-publish audit/push falló', {
+          err,
+          routeId: id,
+        });
       }
     } else {
       // PRE-PUBLISH — comportamiento previo (reorder libre de TODAS).

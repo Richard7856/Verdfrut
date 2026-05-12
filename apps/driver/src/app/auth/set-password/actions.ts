@@ -5,6 +5,7 @@
 
 import { redirect } from 'next/navigation';
 import { createServerClient } from '@tripdrive/supabase/server';
+import { logger } from '@tripdrive/observability';
 import { homeForDriverRole } from '@/lib/auth';
 import type { UserRole } from '@tripdrive/types';
 
@@ -45,7 +46,10 @@ export async function setPasswordAction(formData: FormData): Promise<{ error?: s
   if (profileErr) {
     // Password ya cambió pero el flag quedó. No es fatal — el chofer puede usar la app
     // pero seguirá viendo el redirect a set-password. Logueamos para observabilidad.
-    console.error('[set-password] No se pudo bajar must_reset_password:', profileErr);
+    await logger.error('[set-password] No se pudo bajar must_reset_password', {
+      err: profileErr,
+      userId: userData.user.id,
+    });
     return { error: 'Contraseña actualizada pero falló confirmar el flag. Contacta al admin.' };
   }
 

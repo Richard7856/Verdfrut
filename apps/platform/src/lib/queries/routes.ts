@@ -4,6 +4,7 @@
 
 import 'server-only';
 import { createServerClient } from '@tripdrive/supabase/server';
+import { logger } from '@tripdrive/observability';
 import type { Route, RouteStatus } from '@tripdrive/types';
 
 interface RouteRow {
@@ -330,7 +331,11 @@ export async function incrementRouteVersion(
     });
   if (auditErr) {
     // Audit failure NO debe romper la operación principal — solo loggear.
-    console.error('[routes.incrementVersion] audit failed:', auditErr);
+    await logger.error('[routes.incrementVersion] audit failed', {
+      err: auditErr,
+      routeId: id,
+      version: nextVersion,
+    });
   }
 
   return nextVersion;
@@ -353,6 +358,26 @@ export async function assignDriverToRoute(
     .in('status', ['DRAFT', 'OPTIMIZED', 'APPROVED']);
 
   if (error) throw new Error(`[routes.assignDriver] ${error.message}`);
+}
+
+/**
+ * #35 — Reasigna chofer en una ruta PUBLISHED o IN_PROGRESS. Caso real: el
+ * chofer original se reporta enfermo después de publicar, hay que pasarle la
+ * ruta a otro. NO permite desasignar (driverId null) — una ruta publicada
+ * tiene que tener chofer; si el nuevo "no hay quién", primero cancelar.
+ */
+export async function reassignDriverPostPublish(
+  id: string,
+  driverId: string,
+): Promise<void> {
+  const supabase = await createServerClient();
+  const { error } = await supabase
+    .from('routes')
+    .update({ driver_id: driverId, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .in('status', ['PUBLISHED', 'IN_PROGRESS']);
+
+  if (error) throw new Error(`[routes.reassignDriverPostPublish] ${error.message}`);
 }
 
 /**

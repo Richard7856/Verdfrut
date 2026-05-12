@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
 import { Button, Field, Input, Modal, Select, toast } from '@tripdrive/ui';
 import type { Depot, Zone } from '@tripdrive/types';
 import { createVehicleAction } from './actions';
@@ -17,6 +17,18 @@ export function CreateVehicleButton({ zones, depots }: { zones: Zone[]; depots: 
     () => depots.filter((d) => d.isActive && d.zoneId === zoneId),
     [depots, zoneId],
   );
+
+  // #27 — Auto-seleccionar el CEDIS si la zona tiene exactamente UNO activo.
+  // Cubre el 90% del caso real (la mayoría de zonas operativas tienen un solo
+  // CEDIS) sin necesidad de la columna `zones.default_depot_id`. Si hay varios,
+  // el admin elige (el caso "varios pero hay default" queda pendiente para una
+  // migración separada cuando aparezca un cliente con esa topología).
+  useEffect(() => {
+    if (!zoneId) return;
+    if (depotsForZone.length === 1) {
+      setDepotId(depotsForZone[0]!.id);
+    }
+  }, [zoneId, depotsForZone]);
 
   return (
     <>

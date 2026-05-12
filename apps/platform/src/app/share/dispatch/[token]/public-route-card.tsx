@@ -2,7 +2,7 @@
 // dropdowns, sin botones de mover. Solo info.
 
 import { Badge, Card, type BadgeTone } from '@tripdrive/ui';
-import { formatDuration } from '@tripdrive/utils';
+import { formatDuration, formatKilometers } from '@tripdrive/utils';
 import type { Route, RouteStatus, Stop, Store, Vehicle } from '@tripdrive/types';
 
 const STATUS: Record<RouteStatus, { text: string; tone: BadgeTone }> = {
@@ -57,9 +57,7 @@ export function PublicRouteCard({
           <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
             {vehicle?.alias ?? vehicle?.plate ?? '—'} · {stops.length} paradas
             {totalKg > 0 ? ` · ${totalKg} kg` : ''}
-            {route.totalDistanceMeters
-              ? ` · ${(route.totalDistanceMeters / 1000).toFixed(1)} km`
-              : ''}
+            {route.totalDistanceMeters ? ` · ${formatKilometers(route.totalDistanceMeters)}` : ''}
             {route.totalDurationSeconds
               ? ` · ${formatDuration(route.totalDurationSeconds)} manejo`
               : ''}

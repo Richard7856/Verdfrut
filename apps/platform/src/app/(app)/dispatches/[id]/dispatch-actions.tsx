@@ -1,11 +1,10 @@
 'use client';
 
-// Acciones del tiro: editar nombre/notas, eliminar.
-// Edición inline minimalista — un menú simple sin modal complicado.
+// Acciones del tiro: editar nombre/notas, eliminar/cancelar (#75 cascade).
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
-import { Button } from '@tripdrive/ui';
+import { Button, toast } from '@tripdrive/ui';
 import type { Dispatch } from '@tripdrive/types';
 import { updateDispatchAction, deleteDispatchAction } from '../actions';
 
@@ -34,15 +33,55 @@ export function DispatchActions({ dispatch }: Props) {
     });
   }
 
+  // #75 — Eliminar tiro completo en cascada. Dos pasos:
+  //  1. Primer click: el server detecta rutas PUBLISHED/IN_PROGRESS y nos pide
+  //     confirmación específica (devuelve activeRoutesCount).
+  //  2. Segundo confirm con el count: relanzamos con confirmActive=true.
+  //
+  // El server decide si el dispatch sobrevive (rutas históricas) o se elimina.
   function handleDelete() {
-    if (!confirm(`¿Eliminar el tiro "${dispatch.name}"?\n\nLas rutas vinculadas quedarán como "huérfanas" (sin tiro), no se borran.`)) return;
+    if (
+      !confirm(
+        `¿Eliminar el tiro "${dispatch.name}"?\n\n` +
+          `• Las rutas pre-publicación (borrador/optimizada/aprobada) se borran completas.\n` +
+          `• Las rutas publicadas/en curso se cancelan (chofer las verá como canceladas).\n` +
+          `• Si hay rutas históricas (completadas/canceladas) el tiro queda como contenedor.`,
+      )
+    )
+      return;
+    runDelete(false);
+  }
+
+  function runDelete(confirmActive: boolean) {
     startTransition(async () => {
-      const res = await deleteDispatchAction(dispatch.id);
+      const res = await deleteDispatchAction(dispatch.id, { confirmActive });
       if (!res.ok) {
+        // Si hay rutas activas y aún no confirmamos, pedimos confirm extra.
+        if (res.activeRoutesCount && res.activeRoutesCount > 0 && !confirmActive) {
+          const proceed = confirm(
+            `⚠️ Hay ${res.activeRoutesCount} ruta(s) PUBLICADA(S) o EN CURSO.\n\n` +
+              `Si continúas, esas rutas se cancelarán y el chofer dejará de verlas.\n` +
+              `Esta acción NO se puede deshacer.\n\n` +
+              `¿Continuar?`,
+          );
+          if (!proceed) return;
+          runDelete(true);
+          return;
+        }
         setError(res.error ?? 'Error');
+        toast.error('No se pudo eliminar', res.error);
         return;
       }
-      router.push('/dispatches');
+      if (res.dispatchKept) {
+        toast.success(
+          'Tiro cancelado',
+          'Las rutas fueron canceladas. El tiro queda visible como contenedor del histórico.',
+        );
+        router.refresh();
+      } else {
+        toast.success('Tiro eliminado');
+        router.push('/dispatches');
+      }
     });
   }
 

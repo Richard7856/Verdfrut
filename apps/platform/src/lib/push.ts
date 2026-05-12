@@ -13,6 +13,7 @@
 import 'server-only';
 import webpush from 'web-push';
 import { createServiceRoleClient } from '@tripdrive/supabase/server';
+import { logger } from '@tripdrive/observability';
 
 interface PushPayload {
   title: string;
@@ -60,7 +61,7 @@ export async function sendPushToUser(
     .eq('user_id', userId);
 
   if (error) {
-    console.error('[push] Error leyendo suscripciones:', error);
+    await logger.error('[push] Error leyendo suscripciones', { err: error, userId });
     return { sent: 0, failed: 0, pruned: 0 };
   }
 
@@ -103,7 +104,11 @@ export async function sendPushToUser(
         console.info(`[push] Suscripción ${sub.id} eliminada (statusCode=${statusCode})`);
       } else {
         failed++;
-        console.error('[push] Falló envío a', sub.endpoint.slice(0, 60), err);
+        await logger.error('[push] Falló envío', {
+          err,
+          endpointPrefix: sub.endpoint.slice(0, 60),
+          subscriptionId: sub.id,
+        });
       }
     }
   }
@@ -126,7 +131,7 @@ export async function notifyDriverOfPublishedRoute(routeId: string): Promise<voi
     .single();
 
   if (routeErr || !route) {
-    console.error('[push] No se pudo cargar ruta para notificar:', routeErr);
+    await logger.error('[push] No se pudo cargar ruta para notificar', { err: routeErr, routeId });
     return;
   }
 
@@ -170,7 +175,10 @@ export async function notifyDriverOfRouteChange(
     .eq('id', routeId)
     .single();
   if (routeErr || !route) {
-    console.error('[push] No se pudo cargar ruta para notificar cambio:', routeErr);
+    await logger.error('[push] No se pudo cargar ruta para notificar cambio', {
+      err: routeErr,
+      routeId,
+    });
     return;
   }
   const routeData = route as unknown as {

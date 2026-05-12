@@ -218,18 +218,119 @@ export async function moveStopToAnotherRouteAction(
 }
 
 /**
- * Elimina un tiro. Las rutas hijas quedan huérfanas (FK ON DELETE SET NULL).
+ * #75 — Eliminar/cancelar un tiro completo en cascada.
+ *
+ * Restricciones que enfrenta:
+ *  - `routes.dispatch_id` es NOT NULL (migr 028, ADR-040): toda ruta debe vivir
+ *    en un tiro → no se puede dejar rutas huérfanas.
+ *  - `routes.dispatch_id` FK ON DELETE RESTRICT: no se puede borrar un tiro
+ *    con rutas dentro.
+ *  - Las rutas pre-publish (DRAFT/OPTIMIZED/APPROVED) NO tienen valor
+ *    histórico — nunca llegaron al chofer; se pueden DELETE.
+ *  - Las rutas PUBLISHED/IN_PROGRESS sí tienen valor (chofer las recibió);
+ *    no se borran, se CANCELAN.
+ *  - Las históricas (CANCELLED/COMPLETED/INTERRUPTED) son inmutables.
+ *
+ * Comportamiento resultante:
+ *  - **Tiro 100% pre-publish:** DELETE rutas (cascade limpia stops, etc.) +
+ *    DELETE dispatch. Limpio.
+ *  - **Tiro con rutas activas + `confirmActive`:** cancela las activas, deja
+ *    el dispatch como histórico (NO se borra). UI debe reflejarlo.
+ *  - **Tiro con rutas activas sin `confirmActive`:** abortamos pidiendo confirm.
+ *  - **Tiro con histórico:** NO se borra (las rutas históricas se quedan), pero
+ *    cancelamos cualquier pre-publish/activa restante para que el tiro quede limpio.
  */
-export async function deleteDispatchAction(dispatchId: string): Promise<ActionResult> {
-  return runAction(async () => {
-    await requireRole('admin', 'dispatcher');
-    requireUuid('dispatchId', dispatchId);
+export async function deleteDispatchAction(
+  dispatchId: string,
+  opts?: { confirmActive?: boolean },
+): Promise<ActionResult & { activeRoutesCount?: number; dispatchKept?: boolean }> {
+  await requireRole('admin', 'dispatcher');
+  try {
+    const id = requireUuid('dispatchId', dispatchId);
+    const routes = await listRoutesByDispatch(id);
+
+    const PURGABLE = new Set(['DRAFT', 'OPTIMIZED', 'APPROVED']);
+    const ACTIVE = new Set(['PUBLISHED', 'IN_PROGRESS']);
+    const HISTORIC = new Set(['CANCELLED', 'COMPLETED', 'INTERRUPTED']);
+
+    const purgable = routes.filter((r) => PURGABLE.has(r.status));
+    const active = routes.filter((r) => ACTIVE.has(r.status));
+    const historic = routes.filter((r) => HISTORIC.has(r.status));
+
+    // Gate: si hay rutas activas, requerir confirmación explícita.
+    if (active.length > 0 && !opts?.confirmActive) {
+      return {
+        ok: false,
+        error: `Hay ${active.length} ruta(s) publicada(s) o en curso. Confirma para cancelarlas.`,
+        activeRoutesCount: active.length,
+      };
+    }
+
     const supabase = await createServerClient();
-    const { error } = await supabase.from('dispatches').delete().eq('id', dispatchId);
-    if (error) throw new Error(error.message);
+
+    // 1. DELETE rutas pre-publish (CASCADE limpia stops/breadcrumbs/etc).
+    if (purgable.length > 0) {
+      const { error: delRoutesErr } = await supabase
+        .from('routes')
+        .delete()
+        .in(
+          'id',
+          purgable.map((r) => r.id),
+        );
+      if (delRoutesErr) {
+        await logger.error('[deleteDispatchAction] falló DELETE rutas pre-publish', {
+          err: delRoutesErr,
+          dispatchId: id,
+          routeIds: purgable.map((r) => r.id),
+        });
+        throw new Error(`No se pudieron borrar las rutas pre-publish: ${delRoutesErr.message}`);
+      }
+    }
+
+    // 2. Cancelar rutas activas (UPDATE status='CANCELLED'). Histórico operativo.
+    if (active.length > 0) {
+      const { error: cancelErr } = await supabase
+        .from('routes')
+        .update({ status: 'CANCELLED' })
+        .in(
+          'id',
+          active.map((r) => r.id),
+        );
+      if (cancelErr) {
+        await logger.error('[deleteDispatchAction] falló cancelación rutas activas', {
+          err: cancelErr,
+          dispatchId: id,
+          routeIds: active.map((r) => r.id),
+        });
+        throw new Error(`No se pudieron cancelar las rutas activas: ${cancelErr.message}`);
+      }
+    }
+
+    // 3. DELETE dispatch SOLO si no quedan rutas (activas o históricas) que lo
+    //    referencien. Si hay histórico o se acaba de cancelar algo, el tiro
+    //    queda como contenedor del histórico (sin poder borrarse).
+    const dispatchKept = historic.length > 0 || active.length > 0;
+    if (!dispatchKept) {
+      const { error: delErr } = await supabase.from('dispatches').delete().eq('id', id);
+      if (delErr) {
+        await logger.error('[deleteDispatchAction] falló DELETE dispatch', {
+          err: delErr,
+          dispatchId: id,
+        });
+        throw new Error(delErr.message);
+      }
+    }
+
     revalidatePath('/dispatches');
     revalidatePath('/routes');
-  });
+    revalidatePath(`/dispatches/${id}`);
+    return { ok: true, dispatchKept };
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return { ok: false, error: err.message };
+    }
+    return { ok: false, error: err instanceof Error ? err.message : 'Error desconocido' };
+  }
 }
 
 /**

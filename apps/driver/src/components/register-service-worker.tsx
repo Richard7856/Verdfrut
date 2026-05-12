@@ -5,6 +5,7 @@
 // para no interferir con el HMR.
 
 import { useEffect } from 'react';
+import { logger } from '@tripdrive/observability';
 
 export function RegisterServiceWorker() {
   useEffect(() => {
@@ -19,7 +20,7 @@ export function RegisterServiceWorker() {
       })
       .catch((err) => {
         // No es fatal — la app sigue funcionando online.
-        console.error('[sw] Falló registro del service worker:', err);
+        void logger.error('[sw] Falló registro del service worker', { err });
       });
   }, []);
 

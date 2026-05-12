@@ -1,14 +1,18 @@
 'use client';
 
 // Selector inline para asignar/reasignar chofer a una ruta.
-// Solo editable si la ruta está en DRAFT/OPTIMIZED/APPROVED. Una vez PUBLISHED
-// el chofer ya recibió la notificación — cambiarlo requiere re-publicar (sprint futuro).
+//
+// Estados:
+//  - DRAFT/OPTIMIZED/APPROVED → edición libre con assignDriverAction.
+//  - PUBLISHED/IN_PROGRESS → reasignación con confirmación + reassignDriverPostPublishAction
+//    (#35: chofer enfermo o no disponible último momento; audit + push al nuevo).
+//  - COMPLETED/CANCELLED/INTERRUPTED → read-only.
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button, Select, toast } from '@tripdrive/ui';
 import type { Driver, Route, UserProfile } from '@tripdrive/types';
-import { assignDriverAction } from '../actions';
+import { assignDriverAction, reassignDriverPostPublishAction } from '../actions';
 
 interface DriverWithProfile {
   driver: Driver;
@@ -30,10 +34,44 @@ export function DriverAssignment({ route, currentDriver, availableDrivers }: Pro
   const [selectedId, setSelectedId] = useState(currentDriver?.driver.id ?? '');
 
   const editable = ['DRAFT', 'OPTIMIZED', 'APPROVED'].includes(route.status);
+  // #35 — En PUBLISHED/IN_PROGRESS permitimos reasignar (con confirm + audit + push).
+  const reassignable = ['PUBLISHED', 'IN_PROGRESS'].includes(route.status);
 
   function save() {
     startTransition(async () => {
       const newDriverId = selectedId === '' ? null : selectedId;
+
+      // Post-publish: exigir chofer (no permitir desasignar) y confirmar.
+      if (reassignable) {
+        if (!newDriverId) {
+          toast.error(
+            'Falta chofer',
+            'En rutas publicadas/en curso debes elegir un chofer — para "sin chofer" hay que cancelar la ruta.',
+          );
+          return;
+        }
+        const newName =
+          availableDrivers.find((d) => d.driver.id === newDriverId)?.profile.fullName ?? newDriverId;
+        const ok = confirm(
+          `Reasignar la ruta a ${newName}.\n\n` +
+            `• Se notificará al nuevo chofer por push.\n` +
+            `• Quedará registrado en el audit (route_versions).\n` +
+            `• El chofer anterior seguirá viendo la ruta hasta que recargue.\n\n` +
+            `¿Continuar?`,
+        );
+        if (!ok) return;
+
+        const res = await reassignDriverPostPublishAction(route.id, newDriverId);
+        if (res.ok) {
+          toast.success('Chofer reasignado', `Push enviado a ${newName}`);
+          setEditing(false);
+          router.refresh();
+        } else {
+          toast.error('Error al reasignar', res.error);
+        }
+        return;
+      }
+
       const res = await assignDriverAction(route.id, newDriverId);
       if (res.ok) {
         toast.success(newDriverId ? 'Chofer asignado' : 'Chofer removido');
@@ -50,8 +88,8 @@ export function DriverAssignment({ route, currentDriver, availableDrivers }: Pro
     setEditing(false);
   }
 
-  // Read-only: ruta publicada o sin permisos de edición.
-  if (!editable) {
+  // Read-only: estados terminales (COMPLETED/CANCELLED/INTERRUPTED) — sin "Cambiar".
+  if (!editable && !reassignable) {
     return (
       <div className="flex items-center justify-between text-sm">
         <dt className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
@@ -107,7 +145,10 @@ export function DriverAssignment({ route, currentDriver, availableDrivers }: Pro
         onChange={(e) => setSelectedId(e.target.value)}
         disabled={pending}
       >
-        <option value="">— Sin asignar —</option>
+        {/* En reasignación post-publish (#35) no permitimos desasignar — la ruta
+            necesita chofer; para "sin chofer" la opción correcta es cancelar la ruta. */}
+        {!reassignable && <option value="">— Sin asignar —</option>}
+        {reassignable && !selectedId && <option value="">— Selecciona chofer —</option>}
         {availableDrivers.map((d) => (
           <option key={d.driver.id} value={d.driver.id}>
             {d.profile.fullName}
@@ -115,6 +156,11 @@ export function DriverAssignment({ route, currentDriver, availableDrivers }: Pro
           </option>
         ))}
       </Select>
+      {reassignable && (
+        <p className="text-[11px]" style={{ color: 'var(--color-warning-fg)' }}>
+          ⚠️ Reasignación post-publish: el chofer nuevo recibirá push y queda registrado en el audit.
+        </p>
+      )}
       {availableDrivers.length === 0 && (
         <p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
           Sin choferes activos en esta zona. Crea uno en /settings/users.

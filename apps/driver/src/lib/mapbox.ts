@@ -3,6 +3,7 @@
 // El MAPBOX_DIRECTIONS_TOKEN NUNCA se expone al cliente.
 
 import 'server-only';
+import { logger } from '@tripdrive/observability';
 
 const DIRECTIONS_BASE = 'https://api.mapbox.com/directions/v5/mapbox';
 const PROFILE = 'driving-traffic';
@@ -127,7 +128,7 @@ export async function getMapboxDirections(
       steps,
     };
   } catch (err) {
-    console.error('[mapbox.directions] error:', err);
+    await logger.error('[mapbox.directions] error', { err });
     return null;
   }
 }

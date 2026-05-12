@@ -14,6 +14,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { mapboxgl, setMapboxToken } from '@tripdrive/maps';
 import { createBrowserClient } from '@tripdrive/supabase/browser';
+import { logger } from '@tripdrive/observability';
 import type { RouteMapStop, RouteMapDepot } from './route-map';
 
 interface DriverPosition {
@@ -60,7 +61,9 @@ export function LiveRouteMap({ routeId, stops, depot, geometry, mapboxToken, dri
         if (cancelled || !data?.breadcrumbs) return;
         setTrail(data.breadcrumbs.map((b) => [b.lng, b.lat] as [number, number]));
       })
-      .catch((err) => console.error('[breadcrumbs.fetch]', err));
+      .catch((err) => {
+        void logger.error('[breadcrumbs.fetch] error', { err, routeId });
+      });
     return () => {
       cancelled = true;
     };

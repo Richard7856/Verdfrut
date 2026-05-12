@@ -12,6 +12,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { haversineMeters } from '@tripdrive/utils';
+import { logger } from '@tripdrive/observability';
 import { useDriverPosition } from '@/lib/use-driver-position';
 import { useTurnByTurn } from '@/lib/use-turn-by-turn';
 import { useSpeech } from '@/lib/use-speech';
@@ -86,7 +87,9 @@ export function NavigationClient({ routeId, stops, depot, geometry: initialGeome
           }
         },
       )
-      .catch((err) => console.error('[dynamic-polyline]', err));
+      .catch((err) => {
+        void logger.error('[dynamic-polyline] error', { err });
+      });
   };
 
   // Disparar recalc según GPS + cambio de stop + movimiento >500m.

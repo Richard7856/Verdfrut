@@ -15,6 +15,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { mapboxgl, setMapboxToken } from '@tripdrive/maps';
+import { logger } from '@tripdrive/observability';
 
 export interface MultiRouteEntry {
   routeId: string;
@@ -218,7 +219,7 @@ export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
               layout: { 'line-cap': 'round', 'line-join': 'round' },
             });
           } catch (err) {
-            console.error('[multi-route-map.fetch]', err);
+            void logger.error('[multi-route-map.fetch] error', { err });
           }
         }),
       );

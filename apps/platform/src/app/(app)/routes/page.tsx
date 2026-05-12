@@ -4,6 +4,7 @@
 import Link from 'next/link';
 import { Badge, Button, DataTable, PageHeader, Select, type Column, type BadgeTone } from '@tripdrive/ui';
 import type { Route, RouteStatus, Zone } from '@tripdrive/types';
+import { formatKilometers } from '@tripdrive/utils';
 import { requireRole } from '@/lib/auth';
 import { listRoutes, countStopsForRoutes } from '@/lib/queries/routes';
 import { listZones } from '@/lib/queries/zones';
@@ -127,7 +128,7 @@ export default async function RoutesPage({ searchParams }: PageProps) {
       align: 'right',
       cell: (r) =>
         r.totalDistanceMeters
-          ? <span className="font-mono text-xs tabular-nums">{(r.totalDistanceMeters / 1000).toFixed(1)} km</span>
+          ? <span className="font-mono text-xs tabular-nums">{formatKilometers(r.totalDistanceMeters)}</span>
           : <span style={{ color: 'var(--vf-text-faint)' }}>—</span>,
     },
     {

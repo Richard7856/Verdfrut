@@ -14,6 +14,7 @@
 
 import { useEffect, useState } from 'react';
 import { Card } from '@tripdrive/ui';
+import { formatKilometers } from '@tripdrive/utils';
 
 export interface RestructureSnapshot {
   before: {
@@ -141,8 +142,8 @@ export function RestructureSnapshotBanner({ dispatchId, storesById }: Props) {
           <div className="grid grid-cols-3 gap-3 text-xs">
             <Metric
               label="Distancia"
-              before={`${(snapshot.before.totalDistanceMeters / 1000).toFixed(1)} km`}
-              after={`${(snapshot.after.totalDistanceMeters / 1000).toFixed(1)} km`}
+              before={formatKilometers(snapshot.before.totalDistanceMeters)}
+              after={formatKilometers(snapshot.after.totalDistanceMeters)}
               delta={`${dKm >= 0 ? '+' : ''}${dKm.toFixed(1)} km`}
               improved={dKm <= 0}
             />

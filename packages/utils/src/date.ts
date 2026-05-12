@@ -76,6 +76,28 @@ export function formatDuration(seconds: number): string {
   return `${h}h ${m}m`;
 }
 
+// Cache del formatter — Intl.NumberFormat es caro de instanciar; reusar.
+const KM_FORMATTER = new Intl.NumberFormat('es-MX', {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
+
+/**
+ * #9 — Formatea metros como kilómetros con separador de miles + 1 decimal.
+ *
+ * Ej: 1234567 → "1,234.6 km"
+ *     850     → "0.9 km"
+ *     0       → "0.0 km"
+ *
+ * Por qué un helper en vez de `(m/1000).toFixed(1)` inline: ese patrón perdía
+ * el separador de miles, y a 1,000+ km la cifra "1234.5 km" se lee mal en
+ * reportes y dashboards.
+ */
+export function formatKilometers(meters: number | null | undefined): string {
+  if (meters == null || !Number.isFinite(meters)) return '—';
+  return `${KM_FORMATTER.format(meters / 1000)} km`;
+}
+
 /**
  * Convierte una fecha (YYYY-MM-DD) + hora (HH:MM) interpretada como hora LOCAL
  * de la zona horaria dada, a unix seconds en UTC.

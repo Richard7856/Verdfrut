@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Badge, Button, Card, CardHeader, PageHeader, type BadgeTone } from '@tripdrive/ui';
 import type { RouteStatus, StopStatus } from '@tripdrive/types';
-import { formatDateTimeInZone, formatDuration } from '@tripdrive/utils';
+import { formatDateTimeInZone, formatDuration, formatKilometers } from '@tripdrive/utils';
 import { requireRole } from '@/lib/auth';
 import { getRoute } from '@/lib/queries/routes';
 import { listStopsForRoute } from '@/lib/queries/stops';
@@ -360,7 +360,7 @@ export default async function RouteDetailPage({ params }: PageProps) {
               <Metric label="Distancia total">
                 {route.totalDistanceMeters !== null && route.totalDistanceMeters !== undefined
                   ? route.totalDistanceMeters > 0
-                    ? `${(route.totalDistanceMeters / 1000).toFixed(1)} km`
+                    ? formatKilometers(route.totalDistanceMeters)
                     : <span className="text-[11px]" style={{ color: 'var(--vf-text-mute)' }}>0 km · re-optimizar</span>
                   : '—'}
               </Metric>

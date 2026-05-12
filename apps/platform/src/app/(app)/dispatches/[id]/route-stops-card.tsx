@@ -27,7 +27,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Badge, Card, Select, toast } from '@tripdrive/ui';
-import { formatDuration } from '@tripdrive/utils';
+import { formatDuration, formatKilometers } from '@tripdrive/utils';
 import type { Route, RouteStatus, Stop, Store, Vehicle } from '@tripdrive/types';
 import { moveStopToAnotherRouteAction } from '../actions';
 import { reorderStopsAction, assignDepotToRouteAction, deleteStopFromRouteAction } from '../../routes/actions';
@@ -273,9 +273,7 @@ export function RouteStopsCard({
               {usedCajas} paradas
             </span>
             {totalKg > 0 ? ` · ${totalKg} kg` : ''}
-            {route.totalDistanceMeters
-              ? ` · ${(route.totalDistanceMeters / 1000).toFixed(1)} km`
-              : ''}
+            {route.totalDistanceMeters ? ` · ${formatKilometers(route.totalDistanceMeters)}` : ''}
             {route.totalDurationSeconds
               ? ` · ${formatDuration(route.totalDurationSeconds)} manejo`
               : ''}
@@ -310,6 +308,21 @@ export function RouteStopsCard({
       {overCapacity && (
         <p className="mt-2 rounded border border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] px-2 py-1 text-xs text-[var(--color-warning-fg)]">
           ⚠️ La ruta excede la capacidad del vehículo. Re-optimiza o mueve paradas.
+        </p>
+      )}
+
+      {/* #85 — Banner ETAs obsoletas. Si la ruta está PUBLISHED/IN_PROGRESS y
+          su version > 1, hubo al menos un reorder post-publish. Las ETAs en BD
+          siguen siendo las del orden original — el chofer/admin verá horarios
+          que ya no se cumplirán. ADR-035 decidió NO recalcular automáticamente
+          para no romper confianza con el chofer. El banner avisa al dispatcher
+          para que tome decisión (re-optimizar si todavía hay margen). */}
+      {isPostPublish && route.version > 1 && (
+        <p
+          className="mt-2 rounded border border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] px-2 py-1 text-xs text-[var(--color-warning-fg)]"
+          role="status"
+        >
+          ⚠️ Las paradas se reordenaron después de publicar — las ETAs mostradas son del orden original y ya no se cumplirán.
         </p>
       )}
 
