@@ -27,18 +27,9 @@
         "android.permission.FOREGROUND_SERVICE_LOCATION",
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.ACCESS_BACKGROUND_LOCATION",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_LOCATION",
-        "android.permission.POST_NOTIFICATIONS",
-        "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ],
       "blockedPermissions": [
-        "android.permission.READ_PHONE_STATE",
         "android.permission.READ_PHONE_STATE"
       ],
       "config": {
@@ -65,12 +56,6 @@
     },
     "newArchEnabled": false,
     "owner": "tripdrive",
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
-    "updates": {
-      "url": "https://u.expo.dev/188d966d-7398-4c2f-afec-c2e538142a84"
-    },
     "ios": {}
   }
 }
