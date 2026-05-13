@@ -161,6 +161,84 @@ export type Database = {
         }
         Relationships: []
       }
+      customers: {
+        Row: {
+          id: string
+          slug: string
+          name: string
+          legal_name: string | null
+          rfc: string | null
+          status: Database["public"]["Enums"]["customer_status"]
+          tier: Database["public"]["Enums"]["customer_tier"]
+          timezone: string
+          bbox_lat_min: number | null
+          bbox_lat_max: number | null
+          bbox_lng_min: number | null
+          bbox_lng_max: number | null
+          brand_color_primary: string | null
+          brand_logo_url: string | null
+          flow_engine_overrides: Json | null
+          monthly_fee_mxn: number | null
+          per_driver_fee_mxn: number | null
+          contract_started_at: string | null
+          contract_ends_at: string | null
+          notes: string | null
+          metadata: Json
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          slug: string
+          name: string
+          legal_name?: string | null
+          rfc?: string | null
+          status?: Database["public"]["Enums"]["customer_status"]
+          tier?: Database["public"]["Enums"]["customer_tier"]
+          timezone?: string
+          bbox_lat_min?: number | null
+          bbox_lat_max?: number | null
+          bbox_lng_min?: number | null
+          bbox_lng_max?: number | null
+          brand_color_primary?: string | null
+          brand_logo_url?: string | null
+          flow_engine_overrides?: Json | null
+          monthly_fee_mxn?: number | null
+          per_driver_fee_mxn?: number | null
+          contract_started_at?: string | null
+          contract_ends_at?: string | null
+          notes?: string | null
+          metadata?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          slug?: string
+          name?: string
+          legal_name?: string | null
+          rfc?: string | null
+          status?: Database["public"]["Enums"]["customer_status"]
+          tier?: Database["public"]["Enums"]["customer_tier"]
+          timezone?: string
+          bbox_lat_min?: number | null
+          bbox_lat_max?: number | null
+          bbox_lng_min?: number | null
+          bbox_lng_max?: number | null
+          brand_color_primary?: string | null
+          brand_logo_url?: string | null
+          flow_engine_overrides?: Json | null
+          monthly_fee_mxn?: number | null
+          per_driver_fee_mxn?: number | null
+          contract_started_at?: string | null
+          contract_ends_at?: string | null
+          notes?: string | null
+          metadata?: Json
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       depots: {
         Row: {
           address: string
@@ -168,6 +246,7 @@ export type Database = {
           contact_name: string | null
           contact_phone: string | null
           created_at: string
+          customer_id: string
           id: string
           is_active: boolean
           lat: number
@@ -182,6 +261,7 @@ export type Database = {
           contact_name?: string | null
           contact_phone?: string | null
           created_at?: string
+          customer_id?: string
           id?: string
           is_active?: boolean
           lat: number
@@ -196,6 +276,7 @@ export type Database = {
           contact_name?: string | null
           contact_phone?: string | null
           created_at?: string
+          customer_id?: string
           id?: string
           is_active?: boolean
           lat?: number
@@ -212,6 +293,7 @@ export type Database = {
           name: string
           date: string
           zone_id: string
+          customer_id: string
           status: string
           notes: string | null
           created_by: string
@@ -224,6 +306,7 @@ export type Database = {
           name: string
           date: string
           zone_id: string
+          customer_id?: string
           status?: string
           notes?: string | null
           created_by: string
@@ -236,6 +319,7 @@ export type Database = {
           name?: string
           date?: string
           zone_id?: string
+          customer_id?: string
           status?: string
           notes?: string | null
           created_by?: string
@@ -248,6 +332,7 @@ export type Database = {
       drivers: {
         Row: {
           created_at: string
+          customer_id: string
           id: string
           is_active: boolean
           license_expires_at: string | null
@@ -257,6 +342,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          customer_id?: string
           id?: string
           is_active?: boolean
           license_expires_at?: string | null
@@ -266,6 +352,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          customer_id?: string
           id?: string
           is_active?: boolean
           license_expires_at?: string | null
@@ -490,6 +577,7 @@ export type Database = {
           approved_by: string | null
           created_at: string
           created_by: string
+          customer_id: string
           date: string
           depot_override_id: string | null
           driver_id: string | null
@@ -516,6 +604,7 @@ export type Database = {
           approved_by?: string | null
           created_at?: string
           created_by: string
+          customer_id?: string
           date: string
           depot_override_id?: string | null
           driver_id?: string | null
@@ -542,6 +631,7 @@ export type Database = {
           approved_by?: string | null
           created_at?: string
           created_by?: string
+          customer_id?: string
           date?: string
           depot_override_id?: string | null
           driver_id?: string | null
@@ -624,6 +714,7 @@ export type Database = {
           contact_phone: string | null
           coord_verified: boolean
           created_at: string
+          customer_id: string
           demand: number[]
           id: string
           is_active: boolean
@@ -642,6 +733,7 @@ export type Database = {
           contact_phone?: string | null
           coord_verified?: boolean
           created_at?: string
+          customer_id?: string
           demand?: number[]
           id?: string
           is_active?: boolean
@@ -660,6 +752,7 @@ export type Database = {
           contact_phone?: string | null
           coord_verified?: boolean
           created_at?: string
+          customer_id?: string
           demand?: number[]
           id?: string
           is_active?: boolean
@@ -676,6 +769,7 @@ export type Database = {
       user_profiles: {
         Row: {
           created_at: string
+          customer_id: string
           email: string
           full_name: string
           id: string
@@ -687,6 +781,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          customer_id?: string
           email: string
           full_name: string
           id: string
@@ -698,6 +793,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          customer_id?: string
           email?: string
           full_name?: string
           id?: string
@@ -714,6 +810,7 @@ export type Database = {
           alias: string | null
           capacity: number[]
           created_at: string
+          customer_id: string
           depot_id: string | null
           depot_lat: number | null
           depot_lng: number | null
@@ -727,6 +824,7 @@ export type Database = {
           alias?: string | null
           capacity?: number[]
           created_at?: string
+          customer_id?: string
           depot_id?: string | null
           depot_lat?: number | null
           depot_lng?: number | null
@@ -740,6 +838,7 @@ export type Database = {
           alias?: string | null
           capacity?: number[]
           created_at?: string
+          customer_id?: string
           depot_id?: string | null
           depot_lat?: number | null
           depot_lng?: number | null
@@ -755,6 +854,7 @@ export type Database = {
         Row: {
           code: string
           created_at: string
+          customer_id: string
           id: string
           is_active: boolean
           name: string
@@ -762,6 +862,7 @@ export type Database = {
         Insert: {
           code: string
           created_at?: string
+          customer_id?: string
           id?: string
           is_active?: boolean
           name: string
@@ -769,6 +870,7 @@ export type Database = {
         Update: {
           code?: string
           created_at?: string
+          customer_id?: string
           id?: string
           is_active?: boolean
           name?: string
@@ -903,8 +1005,14 @@ export type Database = {
         Args: { p_route_id: string; p_reason: string }
         Returns: number
       }
+      current_customer_id: {
+        Args: never
+        Returns: string
+      }
     }
     Enums: {
+      customer_status: "active" | "paused" | "churned" | "demo"
+      customer_tier: "starter" | "pro" | "enterprise"
       message_sender: "driver" | "zone_manager" | "system"
       report_status:
         | "draft"

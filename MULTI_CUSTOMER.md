@@ -375,10 +375,17 @@ Puede ver TODOS los customers vía un service role + queries por
 
 ## 7. Rollout plan por fases
 
-### Fase A1 — Schema + Migration sin breaking (1 sprint)
-- Migration SQL (#035 + #036).
-- Backfill VerdFrut como único customer.
-- Apps siguen funcionando idénticas — no cambian queries.
+### Fase A1 — Schema + Migration sin breaking (1 sprint) — ✅ schema landed 2026-05-14
+
+- Migration SQL **037** (renumerada del 035+036 original). Hace todo en
+  una transacción: tabla `customers` + ENUMs + seed VerdFrut +
+  `customer_id` NOT NULL en 8 tablas operativas + trigger
+  `auto_set_customer_id` (compat con queries pre-Stream A) + helper
+  `current_customer_id()` SECURITY DEFINER.
+- Apps siguen funcionando idénticas — no cambian queries (el trigger
+  llena `customer_id` desde la sesión del caller en cada INSERT).
+- **Pendiente**: aplicar migration 037 en prod + migration 038 (RLS
+  rewrite) en branch Supabase para test antes de merge.
 
 ### Fase A2 — Control Plane UI (2 sprints)
 - Lista de customers + detail page.
@@ -416,14 +423,27 @@ Puede ver TODOS los customers vía un service role + queries por
 
 ## 8. Migraciones SQL planeadas
 
+**Renumerado 2026-05-14**: las migrations 035 y 036 ya fueron usadas para
+`stops_arrival_audit` y `bump_route_version_rpc` (ADR-084 y ADR-085).
+Stream A arranca en 037:
+
 ```
-035_multi_customer_schema.sql       # customers table + FKs NULLABLE
-036_multi_customer_backfill.sql     # backfill VerdFrut + NOT NULL
-037_multi_customer_rls.sql          # rewrite policies por customer_id
-038_customer_flow_steps.sql         # customer_flow_steps + customer_store_fields
-039_customer_invoices.sql           # billing
-040_user_role_customer_admin.sql    # enum extension
+037_multi_customer_schema.sql       # ✅ ADR-086 — customers + FK NOT NULL + trigger auto-set + helper
+038_multi_customer_rls.sql          # ⏳ rewrite de policies con current_customer_id() (branch Supabase first)
+039_customer_flow_steps.sql         # ⏳ customer_flow_steps + customer_store_fields (A3 + A5)
+040_customer_invoices.sql           # ⏳ billing (A6)
+041_user_role_customer_admin.sql    # ⏳ enum extension (A2)
 ```
+
+**Decisión de packaging para A1**: schema + backfill + NOT NULL + trigger +
+helper en UNA sola migration (037) en lugar de dos (035 + 036 del plan
+original). Razón: la migration corre en una transacción atómica
+(`BEGIN/COMMIT`); si falla cualquier paso, rollback completo deja el
+schema intacto. Separar en dos no añade seguridad y duplica risk windows.
+
+La migration de RLS rewrite se mantiene aparte (038) porque ese sí es
+high-blast-radius — testear en branch Supabase con cuenta real antes de
+merge.
 
 ---
 

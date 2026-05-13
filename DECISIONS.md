@@ -3794,3 +3794,129 @@ el inventario crezca silenciosamente durante el desarrollo de Stream A.
 
 
 
+## [2026-05-14] ADR-086: Stream A / Fase A1 — Schema multi-customer sin breaking (migration 037)
+
+**Contexto:**
+Con las pre-condiciones técnicas cerradas (ADR-085), el siguiente paso del
+roadmap es la Fase A1 de Stream A: introducir el modelo multi-customer en
+el schema SIN romper las apps actuales. El plan en `MULTI_CUSTOMER.md`
+contemplaba dos migrations separadas (035 schema NULLABLE + 036 backfill
+NOT NULL), pero esas dos numeraciones ya las consumieron ADR-084
+(stops_arrival_audit) y ADR-085 (bump_route_version_rpc). Se renumera a
+037 y se consolida en una sola migration transaccional.
+
+Crítico: las apps pre-Stream A NO pasan `customer_id` en sus INSERTs.
+Con `NOT NULL` sin default, todos los INSERTs romperían en prod
+post-migration. Necesitamos un mecanismo para auto-poblar `customer_id`
+desde la sesión del caller sin tocar el código de las apps.
+
+**Decisión:**
+
+Migration `00000000000037_multi_customer_schema.sql` en UNA transacción
+atómica con 7 secciones:
+
+1. **ENUMs `customer_status` + `customer_tier`** (`active|paused|churned|demo`,
+   `starter|pro|enterprise`).
+2. **Tabla `customers`** con 23 columnas: identidad (`slug`, `name`,
+   `legal_name`, `rfc`), comercial (`status`, `tier`, `monthly_fee_mxn`,
+   `per_driver_fee_mxn`, `contract_*`), operación (`timezone`, `bbox_*`),
+   branding (`brand_color_primary`, `brand_logo_url`,
+   `flow_engine_overrides`), audit (`metadata`, `notes`, `created_at`,
+   `updated_at`). RLS activado con policy `customers_select` que solo deja
+   leer SU propio customer.
+3. **Seed VerdFrut**: `INSERT ... ON CONFLICT (slug) DO NOTHING` con
+   datos iniciales (`status='active'`, `tier='pro'`, contract_started_at
+   2026-01-01). El slug `verdfrut` es deliberado — VerdFrut como cliente
+   comercial agregador de la operación NETO; si NETO entra directo en el
+   futuro, será un customer separado.
+4. **FK `customer_id` NOT NULL en 8 tablas operativas** (zones,
+   user_profiles, stores, vehicles, drivers, depots, routes, dispatches)
+   vía bucle `DO $$ ... FOREACH`. Cada iteración: `ADD COLUMN IF NOT
+   EXISTS` + `UPDATE ... WHERE customer_id IS NULL` + `SET NOT NULL` +
+   `CREATE INDEX`. La migration es idempotente (se puede re-correr).
+5. **Trigger `auto_set_customer_id` BEFORE INSERT** en las 8 tablas. La
+   función `auto_set_customer_id()` lee `current_customer_id` desde
+   `user_profiles` del caller y llena `NEW.customer_id` si es NULL. Si no
+   hay sesión authenticated, RAISE EXCEPTION (correcto: crons que escriben
+   deben pasar customer_id explícito).
+6. **Helper `current_customer_id()`** SECURITY DEFINER STABLE — usado por
+   las policies de la futura migration 038.
+7. **Policy `customers_select`** — authenticated lee solo SU customer.
+   Inserción/update/delete reservadas a service_role (Control Plane).
+
+**Adicionalmente:** `packages/supabase/src/database.ts` actualizado con la
+tabla `customers` completa, `customer_id: string` (NOT NULL) en las 8
+tablas existentes, RPC `current_customer_id`, enums nuevos. Insert/Update
+de las 8 tablas tienen `customer_id?: string` (opcional) — el trigger lo
+llena, así que el código actual sigue compilando sin cambios.
+
+**Alternativas consideradas:**
+
+- **`customer_id DEFAULT (current_customer_id())` en el ALTER COLUMN** en
+  lugar de trigger. Rechazado porque PostgreSQL evalúa el default al
+  parse time (no en runtime para cada INSERT en el caso de SECURITY
+  DEFINER context). El trigger es la idiomática para esta lógica
+  dependiente del caller.
+- **Refactor todas las queries de INSERT en apps/* para pasar
+  `customer_id` explícito**. Estimé ~40 sitios a tocar — mucho riesgo
+  para una migration que debe ser zero-impact. Postergado a Fase A3+
+  cuando el código toque flows multi-customer reales.
+- **Hacer `customer_id` NULLABLE permanente y filtrar en queries**.
+  Rechazado porque rompe el invariante de multi-tenancy: filas
+  huérfanas (customer_id NULL) serían visibles cross-customer.
+- **Dos migrations separadas (NULLABLE → backfill → NOT NULL)**. El plan
+  original lo contemplaba para evitar locks largos en BDs grandes. En la
+  nuestra (decenas de filas por tabla) el ALTER COLUMN es <1s. Una sola
+  migration en una transacción simplifica el rollback (todo o nada).
+
+**Riesgos / Limitaciones:**
+
+- **Migration 037 NO aplicada en prod aún**. El MCP rechaza la apply
+  por ser prod compartido sin permission rule explícita. Hay que correr
+  `supabase db push` desde shell del user O autorizar el MCP. Hasta
+  entonces el schema local diverge del de prod.
+- **Trigger `auto_set_customer_id` confía en `auth.uid()`**. Crons y
+  workers sin sesión (los 6 endpoints `/api/cron/*`) NO pueden INSERT en
+  estas tablas — RAISE EXCEPTION. En la práctica los crons actuales solo
+  hacen DELETE/UPDATE (cleanup/timeouts), no INSERT. Si en el futuro un
+  cron necesita insertar, debe pasar `customer_id` explícito.
+- **Helper `current_customer_id()` es SECURITY DEFINER**: por diseño
+  bypassea RLS de `user_profiles`. Esto es necesario porque la policy
+  de `user_profiles` post-migration 038 va a depender de
+  `current_customer_id()` — sin SECURITY DEFINER habría recursión.
+- **Trigger overhead** en cada INSERT: ~1 SELECT extra por fila a
+  `user_profiles`. Negligible para volúmenes actuales (decenas de
+  inserts/día). Si se vuelve relevante, hay caching en la JWT custom
+  claim (issue #229).
+- **Single-customer assumption**: el seed asume que TODA la data actual
+  pertenece a VerdFrut. Si hubiera data residual de pruebas anteriores
+  con otros owners conceptuales, queda asignada a verdfrut también.
+  Mitigación: la BD actual solo tiene data de NETO operada por VerdFrut
+  (confirmado en project-state.md).
+
+**Oportunidades de mejora futuras:**
+
+- **#229** — mover `customer_id` a custom JWT claim para evitar el SELECT
+  a `user_profiles` por cada policy/trigger. Requiere hook de auth.
+- **Migration 038** — rewrite de policies con `customer_id =
+  current_customer_id()`. Cada tabla operativa pierde su filter por
+  `zone_id`/`auth.uid()` y gana el filter por customer. Va en branch
+  Supabase para test con cuenta real antes de merge.
+- **#230** — UI de Control Plane (Fase A2) que liste customers y permita
+  onboardear un nuevo customer en <2 hrs.
+- **#231** — Métricas: dashboard de uso por customer (data points / mes,
+  active drivers, etc.) — útil para billing real cuando llegue Fase A6.
+
+**Status al cierre de ADR-086:**
+
+- Migration 037 **escrita y commiteable** — NO aplicada en prod.
+- `database.ts` actualizado con shape multi-customer.
+- Type-check 12/12 verde.
+- `check-service-role` estable (16 archivos, sin drift).
+- Apps siguen compilando sin tocar queries. Tras aplicar la migration,
+  TODA la data existente queda asociada a customer `verdfrut`.
+- Próximos pasos de Stream A: A1 deploy → testing en branch → A2
+  Control Plane UI → A3 flow data-driven.
+
+
+
