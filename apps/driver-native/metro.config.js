@@ -25,4 +25,11 @@ config.resolver.nodeModulesPaths = [
 //    de packages internos.
 config.resolver.disableHierarchicalLookup = true;
 
+// 4. Enable symlinks resolution — pnpm con node-linker=isolated crea symlinks
+//    para casi todo. Sin este flag, Metro NO sigue los symlinks correctamente
+//    y falla resolviendo deps anidadas (expo-modules-core, etc.).
+//    Documentación: https://reactnative.dev/blog/2023/06/21/0.72-metro-package-exports-symlinks
+config.resolver.unstable_enableSymlinks = true;
+config.resolver.unstable_enablePackageExports = true;
+
 module.exports = config;
