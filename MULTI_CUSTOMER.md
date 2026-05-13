@@ -405,9 +405,15 @@ Puede ver TODOS los customers vía un service role + queries por
 - Native driver: si entra wizard custom, agregar `/evidence/wizard` que renderee dinámico.
 - Seed flow standard para VerdFrut.
 
-### Fase A4 — Branding customizable (1 sprint)
-- Color primario + logo aplicado en native + web.
-- CSS vars dinámicas leídas de `customer.brand_color_primary`.
+### Fase A4 — Branding customizable (1 sprint) — A4.1 ✅ plumbing landed 2026-05-14
+
+- ✅ A4.1: helpers `getCurrentCustomerBranding()` en platform + driver +
+  inyección de `--customer-brand-primary` en root layouts. Cero impacto
+  visual. Commit `7fd8871`.
+- ⏳ A4.2: refactor de componentes clave (Button primary, badges, sidebar
+  accents) para consumir `--customer-brand-primary` con fallback. Hacer
+  cuando entre 2do customer demo para validar el approach.
+- ⏳ A4.3: branding en native via Context provider (RN sin CSS).
 
 ### Fase A5 — Per-customer custom fields (2 sprints)
 - UI para definir custom fields en stores.
