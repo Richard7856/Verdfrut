@@ -87,11 +87,12 @@ agregar filter implícito por `customer_id` no aplica — el token mismo es
 incluirlo en el SELECT para que la share page renderice branding del
 customer correcto. Issue #225 para esa adaptación.
 
-### ✅ Legítimo: Control Plane (1 call-site)
+### ✅ Legítimo: Control Plane (2 call-sites)
 
 | Archivo | Justificación |
 |---|---|
 | `apps/control-plane/src/lib/cp-client.ts:14` | CP usa schema `control_plane` cross-customer — sin user normal. |
+| `apps/control-plane/src/lib/queries/customers.ts` | Fase A2 / ADR-086: CP lista y administra customers del tenant compartido (schema public) cross-customer. La RLS `customers_select` restringe a "tu propio customer"; super-admin necesita bypass. |
 
 **Stream A impact:** Sin cambios. CP es super-admin TripDrive.
 

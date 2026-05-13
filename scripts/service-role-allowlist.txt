@@ -5,6 +5,7 @@
 # Regenerar con: ./scripts/check-service-role.sh --refresh > scripts/service-role-allowlist.txt
 
 apps/control-plane/src/lib/cp-client.ts
+apps/control-plane/src/lib/queries/customers.ts
 apps/driver/src/app/route/stop/[id]/chat/actions.ts
 apps/driver/src/lib/push-fanout.ts
 apps/driver/src/lib/rate-limit.ts
