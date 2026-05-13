@@ -1,7 +1,8 @@
 'use client';
 
 // Client component del chat con el orquestador.
-// Maneja state local de mensajes, stream SSE, y modal de confirmación.
+// Maneja state local de mensajes, stream SSE, modal de confirmación, y
+// upload de adjuntos (xlsx/csv/imagen) — 2.8.
 
 import { useEffect, useRef, useState } from 'react';
 import { Card, Button, Textarea, Badge } from '@tripdrive/ui';
@@ -27,6 +28,15 @@ interface ConfirmationRequest {
   summary: string;
 }
 
+interface UploadedAttachment {
+  attachment_id: string;
+  filename: string;
+  kind: string;
+  size_bytes: number;
+  parsed_ok: boolean;
+  parse_error: string | null;
+}
+
 export function OrchestratorChat() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -35,21 +45,81 @@ export function OrchestratorChat() {
   const [pendingConfirmation, setPendingConfirmation] =
     useState<ConfirmationRequest | null>(null);
   const [usage, setUsage] = useState<{ tokensIn: number; tokensOut: number } | null>(null);
+  const [pendingAttachments, setPendingAttachments] = useState<UploadedAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const dropRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [turns]);
 
+  async function uploadFiles(files: FileList | File[]) {
+    if (!files || files.length === 0) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      for (const file of Array.from(files)) {
+        const fd = new FormData();
+        fd.append('file', file);
+        if (sessionId) fd.append('session_id', sessionId);
+        const res = await fetch('/api/orchestrator/upload', { method: 'POST', body: fd });
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({ error: 'desconocido' }));
+          setUploadError(`Upload "${file.name}" falló: ${errBody.error}`);
+          continue;
+        }
+        const att = (await res.json()) as UploadedAttachment;
+        setPendingAttachments((prev) => [...prev, att]);
+      }
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      void uploadFiles(e.dataTransfer.files);
+    }
+  }
+
+  function removeAttachment(attachmentId: string) {
+    setPendingAttachments((prev) => prev.filter((a) => a.attachment_id !== attachmentId));
+  }
+
   async function send(message?: string, confirmation?: { tool_use_id: string; approved: boolean }) {
     if (streaming) return;
-    const text = (message ?? input).trim();
-    if (!text && !confirmation) return;
+    let text = (message ?? input).trim();
+    if (!text && !confirmation && pendingAttachments.length === 0) return;
 
-    if (text) {
-      setTurns((prev) => [...prev, { id: crypto.randomUUID(), role: 'user', text }]);
+    // Si hay attachments pendientes, los inyectamos al mensaje del usuario para
+    // que el modelo conozca los attachment_ids y pueda usar parse_xlsx_attachment.
+    if (pendingAttachments.length > 0 && !confirmation) {
+      const refs = pendingAttachments
+        .map((a) => `- ${a.filename} (${a.kind}) → attachment_id: ${a.attachment_id}`)
+        .join('\n');
+      text = text
+        ? `${text}\n\n[Archivos adjuntos disponibles para usar con parse_xlsx_attachment]\n${refs}`
+        : `Procesa estos archivos:\n${refs}`;
+    }
+
+    if (text && !confirmation) {
+      setTurns((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: 'user',
+          text,
+        },
+      ]);
     }
     setInput('');
+    setPendingAttachments([]);
     setStreaming(true);
     setPendingConfirmation(null);
 
@@ -195,14 +265,32 @@ export function OrchestratorChat() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-200px)] flex-col gap-3">
+    <div
+      ref={dropRef}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setIsDragging(true);
+      }}
+      onDragLeave={() => setIsDragging(false)}
+      onDrop={handleDrop}
+      className="relative flex h-[calc(100vh-200px)] flex-col gap-3"
+    >
+      {isDragging && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[var(--radius-md)] border-2 border-dashed border-[var(--vf-green-500,#16a34a)] bg-[var(--vf-green-100,#dcfce7)]/60">
+          <p className="text-sm font-medium text-[var(--vf-green-700,#15803d)]">
+            Suelta el archivo (xlsx, csv) para adjuntarlo
+          </p>
+        </div>
+      )}
+
       <div className="flex-1 overflow-y-auto">
         {turns.length === 0 && (
           <Card>
             <p className="text-sm text-[var(--color-text-muted)]">
               Empieza con algo como: <em>“Muéstrame los tiros de hoy”</em>,{' '}
-              <em>“Busca la tienda TOL-1422”</em> o{' '}
-              <em>“Qué choferes tengo libres mañana”</em>.
+              <em>“Busca la tienda TOL-1422”</em>,{' '}
+              <em>“Geocodifica Av Constituyentes 1234 Toluca”</em>,
+              o arrastra un XLSX y pídele <em>“Crea las tiendas de este sheet”</em>.
             </p>
           </Card>
         )}
@@ -222,7 +310,62 @@ export function OrchestratorChat() {
         />
       )}
 
+      {pendingAttachments.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {pendingAttachments.map((a) => (
+            <span
+              key={a.attachment_id}
+              className="inline-flex items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--color-border)] bg-[var(--color-surface-1)] px-2 py-1 text-xs"
+            >
+              <Badge tone={a.parsed_ok ? 'success' : 'warning'}>{a.kind}</Badge>
+              <span className="font-medium">{a.filename}</span>
+              <span className="text-[var(--color-text-muted)]">
+                ({Math.round(a.size_bytes / 1024)} KB)
+              </span>
+              {!a.parsed_ok && (
+                <span className="text-[var(--vf-warn,#d97706)]" title={a.parse_error ?? ''}>
+                  no parseado
+                </span>
+              )}
+              <button
+                type="button"
+                onClick={() => removeAttachment(a.attachment_id)}
+                className="ml-1 text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                aria-label="quitar"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {uploadError && (
+        <p className="text-xs text-[var(--vf-crit,#dc2626)]" role="alert">
+          {uploadError}
+        </p>
+      )}
+
       <div className="flex gap-2">
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept=".xlsx,.csv,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+          className="hidden"
+          onChange={(e) => {
+            if (e.target.files) void uploadFiles(e.target.files);
+            e.target.value = '';
+          }}
+        />
+        <Button
+          variant="outline"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={streaming || uploading}
+          title="Adjuntar XLSX o CSV"
+        >
+          {uploading ? '⏳' : '📎'}
+        </Button>
         <Textarea
           rows={2}
           value={input}
@@ -233,12 +376,16 @@ export function OrchestratorChat() {
               void send();
             }
           }}
-          placeholder="Pregunta o pide una acción (Enter para enviar, Shift+Enter para nueva línea)"
+          placeholder="Pregunta, pide una acción, o arrastra un sheet (Enter para enviar)"
           disabled={streaming || pendingConfirmation !== null}
         />
         <Button
           onClick={() => void send()}
-          disabled={streaming || !input.trim() || pendingConfirmation !== null}
+          disabled={
+            streaming ||
+            pendingConfirmation !== null ||
+            (!input.trim() && pendingAttachments.length === 0)
+          }
         >
           {streaming ? 'Pensando…' : 'Enviar'}
         </Button>

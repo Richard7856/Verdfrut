@@ -4612,6 +4612,165 @@ Claude a veces decidía otra cosa.
 
 
 
+## [2026-05-13] ADR-092: Ola 2 / 2.7+2.8 — Capabilities "como Claude"
+
+**Contexto:**
+El user pidió que el agente alcance el nivel de capabilities que tiene
+Claude (yo) en este chat: procesar XLSX adjuntados, buscar tiendas en
+Google Maps por dirección o nombre, crear tiendas conversacionalmente
+desde sheets o desde texto. Estas son las capabilities que diferencian
+un agente "demo" de uno realmente útil para ops cotidiana.
+
+**Decisión: 2 sub-bloques en un solo commit lógico**
+
+### 2.7 — Google Places + Geocoding (3 tools)
+
+`packages/orchestrator/src/tools/places.ts`:
+
+| Tool | is_write | confirm | API |
+|---|---|---|---|
+| `geocode_address(address, region?)` | false | — | Geocoding API |
+| `search_place(query, near_lat?, near_lng?, radius_meters?)` | false | — | Places Text Search |
+| `create_store(code, name, address, lat, lng, zone_id, ...)` | true | ✓ | INSERT stores |
+
+El system prompt del agente lo guía a: 1) buscar/geocodificar primero,
+2) confirmar con el usuario qué candidato usar, 3) llamar create_store
+con lat/lng resueltas (NUNCA inventadas).
+
+Reusa la misma `GOOGLE_GEOCODING_API_KEY` que ya tenían los scripts
+`geocode-stores.mjs` y `import-stores-v2-places.mjs`. Lógica de los
+scripts probados se mapeó 1:1 a las tools.
+
+### 2.8 — XLSX/CSV adjunto (2 tools + endpoint + UI)
+
+**Migration 041** (`orchestrator_attachments`):
+- `id, customer_id, session_id, user_id, kind, filename, mime_type, size_bytes, content_base64, parsed_data, parse_error, created_at`
+- CHECK `size_bytes <= 6MB` (≈5MB binario en base64).
+- Trigger `auto_set_customer_id` + RLS (user ve los suyos, admin ve todos del customer).
+- Solo INSERT vía service_role (endpoint /upload).
+
+**Endpoint `POST /api/orchestrator/upload`** (multipart):
+- `requireAdminOrDispatcher` + valida session ownership.
+- Lee file → buffer → procesa con `exceljs` si es XLSX o parser propio
+  si es CSV → guarda content_base64 + parsed_data en BD → retorna
+  attachment_id + parsed_ok.
+- Hard cap 500 rows por hoja en parsed_data para no explotar JSONB.
+
+**Tools en `tools/xlsx.ts`:**
+
+| Tool | is_write | confirm | Notas |
+|---|---|---|---|
+| `parse_xlsx_attachment(attachment_id, sheet_name?, preview_rows?)` | false | — | Lee parsed_data ya procesado; retorna headers + N filas preview |
+| `bulk_create_stores(stores[], dry_run?)` | true | ✓ | Máx 100/op. Valida + check duplicados. dry_run=true para preview sin escribir. |
+
+**UI** (`chat-client.tsx`):
+- Drag-and-drop directo en el área del chat (overlay verde con texto).
+- Botón 📎 para file picker tradicional.
+- Pills de attachments pendientes con nombre + kind + tamaño + parsed_ok
+  indicator + botón "×" para remover.
+- Al enviar, los attachment_ids se inyectan al mensaje como bloque markdown:
+  `[Archivos adjuntos disponibles para usar con parse_xlsx_attachment]\n- foo.xlsx (xlsx) → attachment_id: uuid`.
+  El system prompt sabe que esa convención significa que el agente puede
+  llamar `parse_xlsx_attachment` directo con esos IDs.
+
+**Flow end-to-end**:
+```
+1. User arrastra "Tiendas Toluca expansión.xlsx" al chat.
+2. UI sube → /api/orchestrator/upload → BD parsea + guarda.
+3. UI muestra pill con attachment_id.
+4. User: "Crea las tiendas de este sheet"
+5. UI envía mensaje + reference de attachment_id.
+6. Agente llama parse_xlsx_attachment → ve headers/preview.
+7. Agente entiende estructura (Code, Name, Address, ...).
+8. Para cada row: si lat/lng faltan, agente llama geocode_address.
+9. Agente llama bulk_create_stores con dry_run=true → ve count + dupes.
+10. UI muestra confirmation_required → user aprueba.
+11. Agente vuelve a llamar bulk_create_stores con dry_run=false.
+12. Tiendas creadas. Agente responde con resumen.
+```
+
+**Alternativas consideradas:**
+
+- **Anthropic Files API** (subir directo a Anthropic): rechazado porque
+  el modelo no podría usar tools custom sobre los datos del file sin
+  re-procesar server-side. Mejor server-side parse + tools que leen del
+  parsed_data.
+- **Storage en Supabase Storage** (no inline en `content_base64`):
+  rechazado para V1 — los attachments del orquestador son efímeros
+  (días/semanas), inline simplifica. Si volumen crece, mover a Storage
+  en 2.6 (issue #249).
+- **Parser de XLSX en una tool del orquestador** (parseo on-demand):
+  rechazado — re-parsear en cada turn duplica costo CPU y el modelo
+  vería los datos crudos del XLSX. Mejor pre-procesar al upload y dar
+  al agente un shape estructurado.
+- **Solo Geocoding (no Places)**: rechazado — Places Text Search es
+  mucho más útil cuando el user dice "NETO Toluca" en lugar de la
+  dirección postal. Las 2 tools son complementarias.
+
+**Riesgos / Limitaciones:**
+
+- **`content_base64` en BD ocupa espacio**: si user sube 100 archivos
+  de 5MB c/u → 500MB en una tabla. Mitigación: cron de cleanup de
+  attachments >30 días sin uso (issue #250). Por ahora cap por CHECK
+  evita una sola fila gigante.
+- **Google Maps API tiene rate limit + costo por call**: $5 por 1000
+  Geocoding requests + $32 por 1000 Places Text Search. Sin rate limit
+  per-customer todavía. Issue #251 — rate limit + count en
+  orchestrator_actions (las tools de Places ya quedan en audit).
+- **`bulk_create_stores` no rolea atómicamente**: si el INSERT batch
+  falla a la mitad, las primeras N filas quedan. Mitigación V1: BD lo
+  rechaza por completo si hay constraint violation (UNIQUE code). Si en
+  el futuro hay validaciones más blandas, envolver en transacción
+  explícita (issue #252).
+- **El modelo puede confundir attachment_id**: si user sube 3 sheets,
+  el agente debe usar el correcto. Mitigación: el bloque markdown del
+  mensaje siempre incluye filename + kind para que el modelo elija con
+  contexto.
+- **`parsed_data` JSONB con 500 rows × ~10 cols = ~50KB**: tamaño OK
+  para Postgres; el round-trip al agente cuesta tokens. Mitigación:
+  `parse_xlsx_attachment` retorna SOLO preview (5 rows default); para
+  el bulk insert, el agente puede pedir filas específicas o pasar todas
+  via tool args.
+
+**Oportunidades de mejora futuras:**
+
+- **#249** — mover attachments grandes a Supabase Storage.
+- **#250** — cron cleanup de attachments >30d sin referenciar.
+- **#251** — rate limit + cost tracking por customer para Places API.
+- **#252** — bulk_create_stores en transacción atómica.
+- **#253** — soportar imágenes (POST upload ya las acepta) con tool
+  `read_image_attachment` que pase la imagen a Claude Vision para OCR
+  o análisis visual (ej. el user sube foto de un mapa marcado y el
+  agente extrae direcciones).
+- **#254** — bulk import de tiros + rutas (no solo stores). El XLSX
+  puede tener una hoja "Tiros" con date, zone, name + hoja "Rutas"
+  con dispatch_name, vehicle_plate, driver_name, store_codes[].
+- **#255** — Places API con `placeId` lookup directo para mejor
+  precisión (cuando el agente ya tiene un place_id de un search previo).
+- **#256** — geocoding batch (Google permite hasta 50 addresses por
+  request en algunas regiones).
+
+**Status al cierre de ADR-092 / Ola 2 capabilities:**
+
+- **Total tools del agente: 18** (5 reads + 8 writes + 3 places + 2 xlsx).
+- El agente ya puede:
+  - Listar tiros/rutas/tiendas/choferes/vehículos.
+  - Crear/modificar/publicar/cancelar tiros + reasignar choferes.
+  - Geocodificar direcciones y buscar lugares en Maps.
+  - Crear tiendas individualmente con lat/lng validadas.
+  - Procesar XLSX/CSV adjuntos.
+  - Crear tiendas en bulk desde sheets con dry-run preview.
+- Type-check 13/13 verde. check-service-role 19 archivos sin drift.
+- Próximo: 2.3 (UX polish: previews enriquecidos, streaming real,
+  sesiones laterales, fix colores dark mode) o 2.5 (gating + quotas
+  + UI de control).
+
+
+
+
+
+
+
 
 
 

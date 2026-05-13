@@ -392,6 +392,51 @@ export type Database = {
         }
         Relationships: []
       }
+      orchestrator_attachments: {
+        Row: {
+          id: string
+          customer_id: string
+          session_id: string | null
+          user_id: string
+          kind: Database["public"]["Enums"]["orchestrator_attachment_kind"]
+          filename: string
+          mime_type: string
+          size_bytes: number
+          content_base64: string | null
+          parsed_data: Json | null
+          parse_error: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          customer_id?: string
+          session_id?: string | null
+          user_id: string
+          kind: Database["public"]["Enums"]["orchestrator_attachment_kind"]
+          filename: string
+          mime_type: string
+          size_bytes: number
+          content_base64?: string | null
+          parsed_data?: Json | null
+          parse_error?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          customer_id?: string
+          session_id?: string | null
+          user_id?: string
+          kind?: Database["public"]["Enums"]["orchestrator_attachment_kind"]
+          filename?: string
+          mime_type?: string
+          size_bytes?: number
+          content_base64?: string | null
+          parsed_data?: Json | null
+          parse_error?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
       orchestrator_sessions: {
         Row: {
           id: string
@@ -1159,6 +1204,7 @@ export type Database = {
       customer_tier: "starter" | "pro" | "enterprise"
       orchestrator_session_state: "open" | "closed" | "archived"
       orchestrator_message_role: "user" | "assistant" | "tool_result" | "system_note"
+      orchestrator_attachment_kind: "xlsx" | "csv" | "image" | "other"
       orchestrator_action_status:
         | "success"
         | "error"
