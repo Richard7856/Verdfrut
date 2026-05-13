@@ -8,8 +8,13 @@ import { PageHeader, Card, Badge } from '@tripdrive/ui';
 import {
   getCustomerBySlug,
   getCustomerOpsCounts,
+  getCustomerOpsToday,
+  listActiveRoutesForCustomer,
+  listPendingDispatchesForCustomer,
   type CustomerStatus,
   type CustomerTier,
+  type ActiveRouteRow,
+  type PendingDispatchRow,
 } from '@/lib/queries/customers';
 
 export const dynamic = 'force-dynamic';
@@ -58,7 +63,13 @@ export default async function CustomerDetailPage({ params }: PageProps) {
   const customer = await getCustomerBySlug(slug);
   if (!customer) notFound();
 
-  const ops = await getCustomerOpsCounts(customer.id);
+  // Ola 1 / A3-ops: vista de operación del customer hoy.
+  const [ops, opsToday, activeRoutes, pendingDispatches] = await Promise.all([
+    getCustomerOpsCounts(customer.id),
+    getCustomerOpsToday(customer.id, customer.timezone),
+    listActiveRoutesForCustomer(customer.id, customer.timezone),
+    listPendingDispatchesForCustomer(customer.id, customer.timezone),
+  ]);
 
   const opsKpis = [
     { label: 'Zonas', value: fmtInt.format(ops.zones) },
@@ -162,8 +173,73 @@ export default async function CustomerDetailPage({ params }: PageProps) {
         </Card>
       </div>
 
+      {/* Ola 1 / A3-ops: vista de operación HOY del customer. */}
+      <h2 className="mb-2 flex items-baseline justify-between text-sm font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+        <span>Operación hoy</span>
+        <span className="text-[10px] font-normal normal-case tracking-normal text-[var(--color-text-muted)]">
+          {fmtDate(opsToday.date)} · tz {customer.timezone}
+        </span>
+      </h2>
+      <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {[
+          { label: 'Rutas activas', value: fmtInt.format(opsToday.activeRoutesToday) },
+          { label: 'Choferes en ruta', value: fmtInt.format(opsToday.driversInRouteToday) },
+          { label: 'Paradas completadas', value: fmtInt.format(opsToday.stopsCompletedToday) },
+          { label: 'Paradas pendientes', value: fmtInt.format(opsToday.stopsPendingToday) },
+          {
+            label: 'Incidencias abiertas',
+            value: fmtInt.format(opsToday.openIncidentsToday),
+            tone: opsToday.openIncidentsToday > 0 ? 'warn' : undefined,
+          },
+          { label: 'Tiros por publicar', value: fmtInt.format(opsToday.pendingDispatches) },
+        ].map((k) => (
+          <Card key={k.label}>
+            <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
+              {k.label}
+            </p>
+            <p
+              className="mt-2 text-2xl font-semibold tabular-nums"
+              style={{
+                color:
+                  k.tone === 'warn'
+                    ? 'var(--vf-warn, #d97706)'
+                    : 'var(--color-text)',
+              }}
+            >
+              {k.value}
+            </p>
+          </Card>
+        ))}
+      </div>
+
       <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-        KPIs operativos
+        Rutas activas
+      </h2>
+      <Card className="mb-6">
+        {activeRoutes.length === 0 ? (
+          <p className="py-4 text-center text-sm text-[var(--color-text-muted)]">
+            Sin rutas activas hoy.
+          </p>
+        ) : (
+          <ActiveRoutesTable rows={activeRoutes} customerSlug={customer.slug} />
+        )}
+      </Card>
+
+      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+        Tiros por publicar (próximos)
+      </h2>
+      <Card className="mb-6">
+        {pendingDispatches.length === 0 ? (
+          <p className="py-4 text-center text-sm text-[var(--color-text-muted)]">
+            Sin tiros pendientes.
+          </p>
+        ) : (
+          <PendingDispatchesTable rows={pendingDispatches} />
+        )}
+      </Card>
+
+      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+        Inventario operativo
       </h2>
       <div className="mb-6 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {opsKpis.map((k) => (
@@ -194,6 +270,121 @@ export default async function CustomerDetailPage({ params }: PageProps) {
         />
       </Card>
     </>
+  );
+}
+
+function ActiveRoutesTable({ rows, customerSlug }: {
+  rows: ActiveRouteRow[];
+  customerSlug: string;
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-[var(--color-border)] text-left text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
+            <th className="py-2 pr-3 font-medium">Ruta</th>
+            <th className="py-2 pr-3 font-medium">Chofer</th>
+            <th className="py-2 pr-3 font-medium">Vehículo</th>
+            <th className="py-2 pr-3 font-medium">Estado</th>
+            <th className="py-2 pr-3 text-right font-medium">Progreso</th>
+            <th className="py-2 pr-3 text-right font-medium">Incidencias</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const pct = r.totalStops > 0
+              ? Math.round((r.completedStops / r.totalStops) * 100)
+              : 0;
+            return (
+              <tr
+                key={r.id}
+                className="border-b border-[var(--color-border)] last:border-b-0 hover:bg-[var(--color-surface-hover,transparent)]"
+              >
+                <td className="py-2 pr-3">
+                  <Link
+                    href={`/customers/${customerSlug}/routes/${r.id}`}
+                    className="font-medium text-[var(--color-text)] hover:text-[var(--vf-green-600,#15803d)]"
+                  >
+                    {r.name}
+                  </Link>
+                </td>
+                <td className="py-2 pr-3 text-[var(--color-text-muted)]">
+                  {r.driverName ?? '—'}
+                </td>
+                <td className="py-2 pr-3 text-[var(--color-text-muted)]">
+                  {r.vehiclePlate ? <code className="font-mono">{r.vehiclePlate}</code> : '—'}
+                </td>
+                <td className="py-2 pr-3">
+                  <Badge tone={r.status === 'IN_PROGRESS' ? 'success' : 'warning'}>
+                    {r.status === 'IN_PROGRESS' ? 'En ruta' : 'Publicada'}
+                  </Badge>
+                </td>
+                <td className="py-2 pr-3 text-right tabular-nums">
+                  <span>
+                    {r.completedStops}/{r.totalStops}
+                  </span>
+                  <span className="ml-2 text-xs text-[var(--color-text-muted)]">
+                    ({pct}%)
+                  </span>
+                  {r.arrivedStops > 0 && (
+                    <span className="ml-2 text-xs text-[var(--vf-warn,#d97706)]">
+                      {r.arrivedStops} en parada
+                    </span>
+                  )}
+                </td>
+                <td className="py-2 pr-3 text-right tabular-nums">
+                  {r.openIncidents > 0 ? (
+                    <Badge tone="danger">{r.openIncidents}</Badge>
+                  ) : (
+                    <span className="text-[var(--color-text-muted)]">—</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PendingDispatchesTable({ rows }: { rows: PendingDispatchRow[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-[var(--color-border)] text-left text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
+            <th className="py-2 pr-3 font-medium">Tiro</th>
+            <th className="py-2 pr-3 font-medium">Fecha</th>
+            <th className="py-2 pr-3 text-right font-medium">Rutas</th>
+            <th className="py-2 pr-3 text-right font-medium">Paradas</th>
+            <th className="py-2 pr-3 font-medium">Notas</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((d) => (
+            <tr
+              key={d.id}
+              className="border-b border-[var(--color-border)] last:border-b-0"
+            >
+              <td className="py-2 pr-3 font-medium text-[var(--color-text)]">{d.name}</td>
+              <td className="py-2 pr-3 text-[var(--color-text-muted)] tabular-nums">
+                {fmtDate(d.date)}
+              </td>
+              <td className="py-2 pr-3 text-right tabular-nums">{d.routeCount}</td>
+              <td className="py-2 pr-3 text-right tabular-nums">{d.storeCount}</td>
+              <td className="py-2 pr-3 text-[var(--color-text-muted)]">
+                {d.notes ? (
+                  <span title={d.notes}>{d.notes.slice(0, 60)}{d.notes.length > 60 ? '…' : ''}</span>
+                ) : (
+                  '—'
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

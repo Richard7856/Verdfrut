@@ -157,6 +157,268 @@ export async function getCustomerOpsCounts(customerId: string): Promise<Customer
   };
 }
 
+// ============================================================================
+// Ola 1 / A3-ops — Vista operativa del customer.
+//
+// El super-admin TripDrive (CP) ve qué hacen los choferes de cada customer
+// hoy desde `/customers/[slug]`: rutas activas, choferes en ruta, paradas
+// completadas/pendientes, tiros pendientes de publicar.
+// ============================================================================
+
+import { todayInZone } from '@tripdrive/utils';
+
+export interface CustomerOpsToday {
+  date: string;
+  activeRoutesToday: number;
+  driversInRouteToday: number;
+  stopsCompletedToday: number;
+  stopsPendingToday: number;
+  openIncidentsToday: number;
+  pendingDispatches: number;
+}
+
+export async function getCustomerOpsToday(
+  customerId: string,
+  timezone: string,
+): Promise<CustomerOpsToday> {
+  const sb = createServiceRoleClient();
+  const today = todayInZone(timezone);
+
+  // routes activas hoy del customer
+  const { data: routesToday } = await sb
+    .from('routes')
+    .select('id, driver_id, status')
+    .eq('customer_id', customerId)
+    .eq('date', today)
+    .in('status', ['PUBLISHED', 'IN_PROGRESS']);
+
+  const routeIds = (routesToday ?? []).map((r) => r.id as string);
+  const driverIds = new Set(
+    (routesToday ?? [])
+      .map((r) => r.driver_id as string | null)
+      .filter((v): v is string => v !== null),
+  );
+
+  // stops counts: pending + completed dentro de las rutas activas hoy
+  let stopsCompletedToday = 0;
+  let stopsPendingToday = 0;
+  if (routeIds.length > 0) {
+    const [completed, pending] = await Promise.all([
+      sb.from('stops').select('id', { count: 'exact', head: true })
+        .in('route_id', routeIds)
+        .in('status', ['completed', 'skipped']),
+      sb.from('stops').select('id', { count: 'exact', head: true })
+        .in('route_id', routeIds)
+        .eq('status', 'pending'),
+    ]);
+    stopsCompletedToday = completed.count ?? 0;
+    stopsPendingToday = pending.count ?? 0;
+  }
+
+  // incidencias abiertas hoy (delivery_reports con chat_status='open' de rutas activas)
+  let openIncidentsToday = 0;
+  if (routeIds.length > 0) {
+    const { count } = await sb
+      .from('delivery_reports')
+      .select('id', { count: 'exact', head: true })
+      .in('route_id', routeIds)
+      .eq('chat_status', 'open');
+    openIncidentsToday = count ?? 0;
+  }
+
+  // tiros pendientes de publicar (status='planning') a partir de hoy
+  const { count: pendingDispatchesCount } = await sb
+    .from('dispatches')
+    .select('id', { count: 'exact', head: true })
+    .eq('customer_id', customerId)
+    .eq('status', 'planning')
+    .gte('date', today);
+
+  return {
+    date: today,
+    activeRoutesToday: routesToday?.length ?? 0,
+    driversInRouteToday: driverIds.size,
+    stopsCompletedToday,
+    stopsPendingToday,
+    openIncidentsToday,
+    pendingDispatches: pendingDispatchesCount ?? 0,
+  };
+}
+
+export interface ActiveRouteRow {
+  id: string;
+  name: string;
+  status: 'PUBLISHED' | 'IN_PROGRESS';
+  date: string;
+  driverName: string | null;
+  vehiclePlate: string | null;
+  totalStops: number;
+  completedStops: number;
+  arrivedStops: number;
+  pendingStops: number;
+  openIncidents: number;
+}
+
+export async function listActiveRoutesForCustomer(
+  customerId: string,
+  timezone: string,
+): Promise<ActiveRouteRow[]> {
+  const sb = createServiceRoleClient();
+  const today = todayInZone(timezone);
+
+  const { data: routes, error } = await sb
+    .from('routes')
+    .select(`
+      id, name, status, date, driver_id, vehicle_id,
+      drivers:driver_id ( id, user_id, user_profiles:user_id ( full_name ) ),
+      vehicles:vehicle_id ( id, plate )
+    `)
+    .eq('customer_id', customerId)
+    .eq('date', today)
+    .in('status', ['PUBLISHED', 'IN_PROGRESS'])
+    .order('name');
+
+  if (error) throw new Error(`[cp.customers.activeRoutes] ${error.message}`);
+  const list = (routes ?? []) as unknown as Array<{
+    id: string;
+    name: string;
+    status: 'PUBLISHED' | 'IN_PROGRESS';
+    date: string;
+    drivers: { user_profiles: { full_name: string } | null } | null;
+    vehicles: { plate: string } | null;
+  }>;
+
+  if (list.length === 0) return [];
+
+  // Cargar todas las stops de estas rutas en una sola query y agregamos por route_id.
+  const routeIds = list.map((r) => r.id);
+  const { data: stops } = await sb
+    .from('stops')
+    .select('route_id, status')
+    .in('route_id', routeIds);
+
+  const stopsByRoute = new Map<string, { total: number; done: number; arrived: number; pending: number }>();
+  for (const s of stops ?? []) {
+    const rid = s.route_id as string;
+    const slot = stopsByRoute.get(rid) ?? { total: 0, done: 0, arrived: 0, pending: 0 };
+    slot.total++;
+    if (s.status === 'completed' || s.status === 'skipped') slot.done++;
+    else if (s.status === 'arrived') slot.arrived++;
+    else if (s.status === 'pending') slot.pending++;
+    stopsByRoute.set(rid, slot);
+  }
+
+  // Incidencias abiertas por ruta.
+  const { data: incidents } = await sb
+    .from('delivery_reports')
+    .select('route_id')
+    .in('route_id', routeIds)
+    .eq('chat_status', 'open');
+  const incidentsByRoute = new Map<string, number>();
+  for (const inc of incidents ?? []) {
+    const rid = inc.route_id as string;
+    incidentsByRoute.set(rid, (incidentsByRoute.get(rid) ?? 0) + 1);
+  }
+
+  return list.map((r) => {
+    const stopStats = stopsByRoute.get(r.id) ?? { total: 0, done: 0, arrived: 0, pending: 0 };
+    return {
+      id: r.id,
+      name: r.name,
+      status: r.status,
+      date: r.date,
+      driverName: r.drivers?.user_profiles?.full_name ?? null,
+      vehiclePlate: r.vehicles?.plate ?? null,
+      totalStops: stopStats.total,
+      completedStops: stopStats.done,
+      arrivedStops: stopStats.arrived,
+      pendingStops: stopStats.pending,
+      openIncidents: incidentsByRoute.get(r.id) ?? 0,
+    };
+  });
+}
+
+export interface PendingDispatchRow {
+  id: string;
+  name: string;
+  date: string;
+  status: 'planning' | 'dispatched' | 'completed' | 'cancelled';
+  notes: string | null;
+  routeCount: number;
+  storeCount: number;
+}
+
+export async function listPendingDispatchesForCustomer(
+  customerId: string,
+  timezone: string,
+): Promise<PendingDispatchRow[]> {
+  const sb = createServiceRoleClient();
+  const today = todayInZone(timezone);
+
+  const { data: dispatches, error } = await sb
+    .from('dispatches')
+    .select('id, name, date, status, notes')
+    .eq('customer_id', customerId)
+    .eq('status', 'planning')
+    .gte('date', today)
+    .order('date', { ascending: true })
+    .limit(20);
+
+  if (error) throw new Error(`[cp.customers.pendingDispatches] ${error.message}`);
+  const list = (dispatches ?? []) as Array<{
+    id: string;
+    name: string;
+    date: string;
+    status: 'planning';
+    notes: string | null;
+  }>;
+
+  if (list.length === 0) return [];
+
+  const dispatchIds = list.map((d) => d.id);
+  const { data: routes } = await sb
+    .from('routes')
+    .select('id, dispatch_id')
+    .in('dispatch_id', dispatchIds);
+  const routesByDispatch = new Map<string, string[]>();
+  for (const r of routes ?? []) {
+    const did = r.dispatch_id as string;
+    const arr = routesByDispatch.get(did) ?? [];
+    arr.push(r.id as string);
+    routesByDispatch.set(did, arr);
+  }
+
+  const allRouteIds = (routes ?? []).map((r) => r.id as string);
+  let stopsByRoute = new Map<string, number>();
+  if (allRouteIds.length > 0) {
+    const { data: stops } = await sb
+      .from('stops')
+      .select('route_id')
+      .in('route_id', allRouteIds);
+    for (const s of stops ?? []) {
+      const rid = s.route_id as string;
+      stopsByRoute.set(rid, (stopsByRoute.get(rid) ?? 0) + 1);
+    }
+  }
+
+  return list.map((d) => {
+    const dRouteIds = routesByDispatch.get(d.id) ?? [];
+    const storeCount = dRouteIds.reduce(
+      (sum, rid) => sum + (stopsByRoute.get(rid) ?? 0),
+      0,
+    );
+    return {
+      id: d.id,
+      name: d.name,
+      date: d.date,
+      status: d.status,
+      notes: d.notes,
+      routeCount: dRouteIds.length,
+      storeCount,
+    };
+  });
+}
+
 // Mutaciones — todas via service_role (CP es super-admin cross-customer).
 // Validaciones de input duras: el slug es el subdomain, no permite cambios
 // libres una vez creado (issue #232 si queremos rename con redirect).
