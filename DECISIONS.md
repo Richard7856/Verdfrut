@@ -4094,3 +4094,140 @@ un admin de A intenta `INSERT ... customer_id = B`, falla con
 
 
 
+## [2026-05-14] ADR-088: Stream A — Cerrar issues P2 del service role audit (#215, #216, #217)
+
+**Contexto:**
+ADR-084 abrió 3 issues P2 en `SERVICE_ROLE_AUDIT.md` para asegurar que
+los call-sites de `createServiceRoleClient()` no introducen leaks
+cross-customer post-multi-tenancy. Con la migration 039 aplicada (ADR-087)
+y la RLS filtrando por customer_id, es momento de revisar cada uno.
+
+- **#215** — crons (6 endpoints en `apps/platform/src/app/api/cron/*`)
+  ¿necesitan filter por customer_id?
+- **#216** — push fanout (`driver/lib/push-fanout.ts`, `platform/lib/push.ts`)
+  ¿pueden filtrar correctamente al destinatario correcto?
+- **#217** — AI mediator (`driver/.../chat/actions.ts`) ¿necesita
+  customer_id check al insertar messages/chat_ai_decisions?
+
+**Decisión:**
+
+Revisión exhaustiva determinó que **solo 1 de los 3 issues requiere
+cambios de código**:
+
+### #215 — crons: NO requieren cambios
+
+Los 6 crons hacen cleanup global por threshold de tiempo. Inspección de
+las RPCs subyacentes confirma:
+- `archive_old_breadcrumbs(retention_days)` → DELETE FROM
+  `route_breadcrumbs` WHERE `recorded_at < NOW() - interval`. Cleanup
+  por edad, idéntico cross-customer.
+- `mark_timed_out_chats()` → UPDATE `delivery_reports` SET
+  `chat_status='timed_out'` WHERE `timeout_at < NOW()`. Threshold
+  uniforme cross-customer.
+- `rate_limit_buckets` no tiene customer_id (tabla global de rate
+  limiting per-IP/per-user-id).
+- `reconcile-orphan-users` borra auth.users sin profile — un orphan lo
+  es absolutamente, no per-customer.
+- `chat-decisions-cleanup` + `push-subs-cleanup` scoped por
+  `report_id` / `user_id` (UUIDs únicos) + threshold de tiempo.
+
+Cerrado como "no-change" documentado en SERVICE_ROLE_AUDIT.md.
+Excepción futura: si Enterprise pide retention distinta, entra en
+Fase A6 (billing tiers).
+
+### #216 — push fanout: SOLO `driver/lib/push-fanout.ts` requiere fix
+
+Fix aplicado en `sendChatPushToZoneManagers`:
+
+```ts
+// 1. Derivar customer_id de la zona del chat.
+const { data: zoneRow } = await supabase
+  .from('zones').select('customer_id').eq('id', zoneId).maybeSingle();
+
+// 2. Resolver user_ids del customer que deben recibir noti.
+const { data: users } = await supabase
+  .from('user_profiles').select('id, role, zone_id')
+  .eq('customer_id', zoneRow.customer_id)
+  .or(`role.eq.admin,role.eq.dispatcher,
+       and(role.eq.zone_manager,zone_id.eq.${zoneId})`);
+
+// 3. Filtrar subs por user_ids encontrados.
+const { data: subs } = await supabase
+  .from('push_subscriptions').select(...).in('user_id', userIds);
+```
+
+Sin el fix, un push de customer A llegaba a admins de customer B porque
+el filter `role = 'admin'` no contemplaba multi-tenancy. Costo: 2
+queries extra; negligible para frecuencia de fanout (~10/día).
+
+`platform/lib/push.ts` NO requiere cambios: sus 3 funciones operan por
+UUIDs únicos cross-customer (user_id, route_id ya resueltos por el
+caller; el service_role bypassea RLS solo para leer subs específicas).
+
+### #217 — AI mediator: NO requiere customer_id check
+
+Los 2 inserts (`messages` con `sender='system'` y `chat_ai_decisions`)
+son scoped por `report_id` (UUID único). El caller `mediateChatMessage`
+pasa report_id ya resuelto por la action chat del driver con sesión
+authenticated; report_id no es manipulable arbitrariamente. Las tablas
+heredan customer via FK report_id → delivery_reports → routes →
+customer_id. La inserción NO puede contaminar otro customer.
+
+Cerrado como "no-change". Excepción futura: cuando el AI mediator entre
+a Fase A3 (flow data-driven) y lea prompts custom per-customer, sí
+necesitará resolver customer_id desde report_id antes de invocar al
+modelo (issue separado #237).
+
+**Alternativas consideradas:**
+
+- **Mover #217 a Edge Function ahora**: rechazado por YAGNI. El inserto
+  actual no tiene riesgo cross-customer y la Edge Function agrega
+  latencia + complejidad sin valor inmediato.
+- **Agregar `customer_id` a `push_subscriptions` (mig 040+)**: más limpio
+  que JOIN con user_profiles cada vez, pero require backfill +
+  trigger + RLS rewrite. Postergado: el JOIN actual es trivial para
+  volumen actual y el SELECT con `.in('user_id', userIds)` usa el index
+  ya existente. Si el push fanout se vuelve hot path, evaluamos.
+- **Agregar `customer_id` a queries de crons preventivamente**: rechazado.
+  Hacerlo sin razón funcional contamina el código con filters sin sentido
+  semántico ("cleanup per-customer" es diferente a "cleanup global con
+  WHERE customer_id = X" cuando los thresholds son iguales).
+
+**Riesgos / Limitaciones:**
+
+- **Fix de #216 agrega 2 queries** en cada fanout de chat (zone lookup +
+  user_profiles lookup). Para volúmenes actuales (~10 chats/día) es
+  irrelevante; para 1000+ chats/día convendría cachear customer_id de
+  zones (~5 zones por customer, perfecto para in-memory cache TTL 10min).
+  Issue #238 si llega ese volumen.
+- **Asume `push_subscriptions.user_id` siempre matches `user_profiles.id`**.
+  Hoy es así por construcción (sub se crea solo si el user_profile ya
+  existe), pero no hay FK explícita ni constraint. Si una sub queda
+  huérfana (user_profile borrado), el JOIN la filtra fuera —
+  comportamiento deseado.
+- **Documentación del audit asume Stream A en marcha**: si en el futuro
+  alguien lee SERVICE_ROLE_AUDIT.md sin contexto, las decisiones "no
+  requiere cambios" podrían parecer descuido. Mitigación: cada entrada
+  cita ADR-088 explícitamente.
+
+**Oportunidades de mejora futuras:**
+
+- **#237** — AI mediator con prompts custom-per-customer (Fase A3).
+- **#238** — caché en memoria de zone→customer mapping si push fanout
+  se vuelve hot path.
+- **#239** — FK explícita `push_subscriptions.user_id REFERENCES
+  user_profiles(id) ON DELETE CASCADE` + columna `customer_id`
+  denormalizada con trigger. Refactor de mantenimiento, no urgente.
+
+**Status al cierre de ADR-088:**
+
+- 3 issues P2 cerrados (1 con cambio de código, 2 "no action needed"
+  documentados).
+- `SERVICE_ROLE_AUDIT.md` actualizado: tabla resumen + secciones por
+  categoría reflejan estado real.
+- `check-service-role` sigue estable (17 archivos).
+- Stream A status: A1 ✅ + A2 ✅ + A3.0 ✅ + P2 hardening ✅. Próximo:
+  A4 branding customizable o A3 flow data-driven.
+
+
+

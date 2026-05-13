@@ -62,17 +62,51 @@ interface PushSubRow {
 export async function sendChatPushToZoneManagers(params: ChatPushParams): Promise<void> {
   const supabase = createServiceRoleClient();
 
-  // V2: fanout amplio — envía a TODOS los que pueden actuar sobre el reporte:
+  // Issue #216 (ADR-088): derivar customer_id de la zone y filtrar destinatarios
+  // por el mismo customer. Sin esto, un push de customer A llegaría a admins de
+  // customer B porque el role-based filter no contempla multi-tenancy.
+  const { data: zoneRow, error: zoneErr } = await supabase
+    .from('zones')
+    .select('customer_id')
+    .eq('id', params.zoneId)
+    .maybeSingle();
+
+  if (zoneErr || !zoneRow?.customer_id) {
+    await logger.error('chat.push: zone sin customer_id', {
+      zoneId: params.zoneId,
+      err: zoneErr,
+    });
+    return;
+  }
+  const customerId = zoneRow.customer_id;
+
+  // Resolver user_ids dentro del customer que deben recibir la noti:
   //   - zone_managers de la zona específica
-  //   - admin (sin filtro de zona — admin global ve todo)
-  //   - dispatcher (sin filtro de zona — operación full)
-  // RLS bypaseada con service role.
+  //   - admin / dispatcher del customer (sin filtro de zona)
+  const { data: users, error: usersErr } = await supabase
+    .from('user_profiles')
+    .select('id, role, zone_id')
+    .eq('customer_id', customerId)
+    .or(
+      `role.eq.admin,role.eq.dispatcher,and(role.eq.zone_manager,zone_id.eq.${params.zoneId})`,
+    );
+
+  if (usersErr) {
+    await logger.error('chat.push error resolviendo users del customer', {
+      customerId, zoneId: params.zoneId, err: usersErr,
+    });
+    return;
+  }
+  const userIds = (users ?? []).map((u) => u.id as string);
+  if (userIds.length === 0) {
+    await logger.warn('chat.push sin destinatarios del customer', { customerId });
+    return;
+  }
+
   const { data: subs, error } = await supabase
     .from('push_subscriptions')
     .select('id, platform, endpoint, p256dh, auth, expo_token, role, zone_id')
-    .or(
-      `and(role.eq.zone_manager,zone_id.eq.${params.zoneId}),role.eq.admin,role.eq.dispatcher`,
-    );
+    .in('user_id', userIds);
 
   if (error) {
     await logger.error('chat.push error leyendo subscriptions', { zoneId: params.zoneId, err: error });

@@ -35,8 +35,25 @@
 | `apps/platform/src/app/api/cron/chat-decisions-cleanup/route.ts:32` | (nuevo, este commit) limpia chat_ai_decisions viejos. |
 | `apps/platform/src/app/api/cron/push-subs-cleanup/route.ts:35` | (nuevo, este commit) limpia push subs inactivas. |
 
-**Stream A impact:** Crons siguen necesitando service role. Pero deben filtrar
-por `customer_id` cuando aplica (ej. cleanup per-customer). Issue #215.
+**Stream A impact (issue #215 — 2026-05-14):** Revisión confirma que los 6
+crons NO requieren filter por customer_id. Cada uno hace cleanup global por
+threshold de tiempo:
+- `rate-limit-cleanup` → tabla `rate_limit_buckets` global, sin customer_id.
+- `archive-breadcrumbs` → RPC `archive_old_breadcrumbs(retention_days)`
+  borra breadcrumbs por fecha; un breadcrumb viejo es viejo independiente
+  del customer.
+- `mark-timed-out-chats` → RPC `mark_timed_out_chats()` cierra chats por
+  `timeout_at < NOW()`; threshold idéntico cross-customer.
+- `reconcile-orphan-users` → borra auth.users sin user_profile; operación
+  cross-customer correcta (un user huérfano lo es absolutamente).
+- `chat-decisions-cleanup` → `DELETE FROM chat_ai_decisions` por fecha;
+  tabla sin customer_id, scoped por report_id (UUID único).
+- `push-subs-cleanup` → `DELETE FROM push_subscriptions` por last_seen;
+  cleanup técnico, scoped por user_id (UUID único).
+
+Excepción futura: si un customer Enterprise pide retention distinta
+(ej. 365d vs 90d), se introduce per-customer config en Fase A6 (billing
+tiers).
 
 ### ✅ Legítimo: push fanout (5 call-sites)
 
@@ -45,10 +62,21 @@ por `customer_id` cuando aplica (ej. cleanup per-customer). Issue #215.
 | `apps/driver/src/lib/push-fanout.ts:63, 119, 154` | Lee push_subscriptions de TODOS los zone_managers de una zona, NO solo del chofer que envía. Requiere cross-user read. |
 | `apps/platform/src/lib/push.ts:57, 124, 171` | Push fanout del platform (cuando admin/dispatcher envía push al chofer). |
 
-**Stream A impact:** Push fanout debe filtrar por `customer_id` igualmente.
-RLS post-Stream A bloquearía el cross-user read si fuera sesión normal — service
-role sigue siendo apropiado pero el QUERY agrega `WHERE customer_id = ?`.
-Issue #216.
+**Stream A impact (issue #216 — ADR-088 / 2026-05-14):**
+- **`driver/lib/push-fanout.ts`** — FIXEADO. `sendChatPushToZoneManagers`
+  ahora deriva `customer_id` de la zone (`SELECT customer_id FROM zones`),
+  resuelve user_ids dentro del customer (admins, dispatchers, zone_managers
+  matching), y filtra subs por `user_id IN (...)`. Sin esto, un push de
+  customer A llegaba a admins de customer B porque `role = 'admin'` no
+  contemplaba multi-tenancy.
+- **`platform/lib/push.ts`** — NO requiere cambios. Sus 3 funciones operan
+  por UUIDs únicos cross-customer:
+  - `sendPushToUser(userId, ...)` → user_id es PK de auth.users.
+  - `notifyDriverOfPublishedRoute(routeId)` → resuelve user_id desde
+    routes.driver_id.user_id internamente.
+  - `notifyDriverOfRouteChange(routeId)` → idem.
+  El service_role bypassea RLS solo para leer subs específicas ya
+  resueltas por ID; sin riesgo de fanout cross-customer.
 
 ### ✅ Legítimo: AI mediator inserta como sender='system' (2 call-sites)
 
@@ -57,9 +85,19 @@ Issue #216.
 | `apps/driver/src/app/route/stop/[id]/chat/actions.ts:156` | Persiste audit en `chat_ai_decisions` (RLS no permite a chofer insert ahí). |
 | `apps/driver/src/app/route/stop/[id]/chat/actions.ts:192` | Inserta `messages` con `sender='system'` (RLS solo permite driver/zone_manager). |
 
-**Stream A impact:** Mover a Edge Function que valida customer_id antes
-de insertar. Mientras tanto, agregar customer_id check en el código TS.
-Issue #217.
+**Stream A impact (issue #217 — 2026-05-14):** Revisión confirma que NO
+requiere customer_id check. Los 2 inserts son scoped por `report_id`
+(UUID único cross-customer) y `message_id` (también único). El caller
+`mediateChatMessage` ya pasa report_id resuelto por la action chat del
+driver con sesión authenticated; el report_id no es manipulable
+arbitrariamente. Tabla `chat_ai_decisions` y `messages` no tienen
+`customer_id` direct — heredan via FK report_id → delivery_reports →
+routes → customer_id.
+
+Excepción futura: si el AI mediator empieza a leer prompt/contexto
+custom-per-customer (Fase A3 flow data-driven), entonces sí necesitará
+resolver customer_id desde el report_id antes de invocar al modelo.
+Issue separado #237 si llega ese requerimiento.
 
 ### ✅ Legítimo: user management (auth.users admin API) (3 call-sites)
 
@@ -149,9 +187,9 @@ PUBLISHED/IN_PROGRESS antes de bump. Issue #63 cerrado.
 | P1 | #63 / AV-#2 | Refactor `route/actions.ts` con RPC SECURITY DEFINER | M | ✅ ADR-085 |
 | P1 | #218 | Investigar `dispatches.ts:145` / `actions.ts:549` | S | ✅ ambos legítimos |
 | P1 | #221 | ESLint rule contra `createServiceRoleClient` fuera del allow-list | S | ✅ implementada |
-| P2 | #215 | Agregar `customer_id` filter en queries de crons | S | abierto |
-| P2 | #216 | Agregar `customer_id` filter en push fanout | S | abierto |
-| P2 | #217 | Mover AI mediator a Edge Function con customer_id check | M | abierto |
+| P2 | #215 | Agregar `customer_id` filter en queries de crons | S | ✅ no-change (cleanup global por threshold de tiempo) |
+| P2 | #216 | Agregar `customer_id` filter en push fanout | S | ✅ ADR-088 — driver/lib/push-fanout.ts deriva customer_id de zone |
+| P2 | #217 | Mover AI mediator a Edge Function con customer_id check | M | ✅ no-change (inserts scoped por report_id UUID único) |
 | P2 | #226 | Reabrir `tripdrive_restructure_dispatch` a authenticated (eval) | M | abierto |
 | P3 | #220 | Filtrar audit page por customer_id | XS | abierto |
 | P3 | #219 | Refactor rate-limit a sesión normal (SECURITY DEFINER ya cubre) | S | abierto |
