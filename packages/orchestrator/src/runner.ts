@@ -9,6 +9,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { SYSTEM_PROMPT } from './prompts/system';
 import { getTool, listToolsForCustomer } from './tools/registry';
+import { enrichPreviewForTool, type EnrichedPreview } from './previews';
 import type { ToolContext, ToolDefinition, ToolResult } from './types';
 
 const MODEL = 'claude-sonnet-4-6';
@@ -36,6 +37,7 @@ export type RunnerEvent =
       tool_name: string;
       args: Record<string, unknown>;
       summary: string;
+      preview: EnrichedPreview;
     }
   | {
       type: 'message_end';
@@ -237,12 +239,19 @@ export async function runOrchestrator(input: RunnerInput): Promise<{
           // viejo (re-emit por el modelo) sirve como fallback degraded.
         }
 
+        const enriched = await enrichPreviewForTool(
+          tool.name,
+          block.input as Record<string, unknown>,
+          input.toolContext,
+        );
+
         await input.emit({
           type: 'confirmation_required',
           tool_use_id: block.id,
           tool_name: tool.name,
           args: block.input as Record<string, unknown>,
-          summary: summarizeForPreview(tool, block.input as Record<string, unknown>),
+          summary: enriched.headline,
+          preview: enriched,
         });
         pausedForConfirmation = true;
         break; // No procesamos más tool_use blocks en este turno.

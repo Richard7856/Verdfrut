@@ -26,6 +26,12 @@ interface ConfirmationRequest {
   tool_name: string;
   args: Record<string, unknown>;
   summary: string;
+  preview?: {
+    headline: string;
+    bullets: string[];
+    warnings: string[];
+    args: Record<string, unknown>;
+  };
 }
 
 interface UploadedAttachment {
@@ -224,6 +230,7 @@ export function OrchestratorChat() {
               tool_name: String(evt.tool_name),
               args: evt.args as Record<string, unknown>,
               summary: String(evt.summary),
+              preview: evt.preview as ConfirmationRequest['preview'],
             });
           } else if (evt.type === 'message_end') {
             const u = evt.usage as { input_tokens: number; output_tokens: number };
@@ -541,20 +548,52 @@ function ConfirmationCard({
   confirmation: ConfirmationRequest;
   onConfirm: (approved: boolean) => void;
 }) {
+  const p = confirmation.preview;
   return (
     <Card>
       <div className="flex items-start gap-3">
         <Badge tone="warning">Confirmación requerida</Badge>
-        <div className="flex-1">
-          <p className="text-sm font-medium text-[var(--color-text)]">
-            El agente quiere ejecutar: <code>{confirmation.tool_name}</code>
-          </p>
-          <pre className="mt-2 overflow-x-auto rounded-[var(--radius-sm)] bg-[var(--color-surface-2,#f5f5f5)] p-2 font-mono text-[11px]">
-            {confirmation.summary}
-          </pre>
+        <div className="flex-1 min-w-0">
+          {p ? (
+            <>
+              <p className="text-base font-semibold text-[var(--color-text)]">
+                {p.headline}
+              </p>
+              {p.bullets.length > 0 && (
+                <ul className="mt-2 space-y-1 text-sm text-[var(--color-text)]">
+                  {p.bullets.map((b, i) => (
+                    <li key={i} className="flex gap-2">
+                      <span className="text-[var(--color-text-muted)]">·</span>
+                      <span>{b}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {p.warnings.length > 0 && (
+                <div className="mt-3 space-y-1">
+                  {p.warnings.map((w, i) => (
+                    <p key={i} className="text-sm text-[var(--vf-warn,#d97706)]">
+                      {w}
+                    </p>
+                  ))}
+                </div>
+              )}
+              <p className="mt-3 text-[11px] text-[var(--color-text-muted)]">
+                Tool: <code>{confirmation.tool_name}</code>
+              </p>
+            </>
+          ) : (
+            <p className="text-sm font-medium text-[var(--color-text)]">
+              El agente quiere ejecutar: <code>{confirmation.tool_name}</code>
+              <br />
+              <span className="text-xs text-[var(--color-text-muted)]">
+                {confirmation.summary}
+              </span>
+            </p>
+          )}
         </div>
       </div>
-      <div className="mt-3 flex justify-end gap-2">
+      <div className="mt-4 flex justify-end gap-2">
         <Button variant="ghost" onClick={() => onConfirm(false)}>
           Rechazar
         </Button>
