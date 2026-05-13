@@ -68,7 +68,15 @@ const PALETTE = [
 export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
+  // Refs de markers por ruta — para poder ocultar/mostrar selectivamente
+  // sin recrear el mapa entero al toggle.
+  const markersByRouteRef = useRef<Map<string, mapboxgl.Marker[]>>(new Map());
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  // Rutas ocultas (toggle de visibilidad por checkbox en la leyenda).
+  // Polyline → setLayoutProperty('visibility', 'none'). Markers → .remove() /
+  // .addTo(). Decisión es manual del operador (no preserve entre re-renders
+  // de routes prop porque viene server-fresh).
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set());
   // ADR-043: fullscreen toggle. En fullscreen, el wrapper queda position:fixed
   // ocupando viewport. Necesitamos resize del map al cambiar para que el canvas
   // se reajuste correctamente.
@@ -145,6 +153,8 @@ export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
       await Promise.all(
         routes.map(async (r) => {
           const color = colorByRoute.get(r.routeId)!;
+          // Track markers de esta ruta para poder hide/show selectivo.
+          const routeMarkers: mapboxgl.Marker[] = [];
 
           // Markers numerados con el color de la ruta.
           for (const s of r.stops) {
@@ -183,11 +193,13 @@ export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
                 `</div>` +
                 `<a href="/routes/${r.routeId}" style="display:inline-block;margin-top:8px;padding:5px 10px;background:#15803d;color:white;border-radius:4px;text-decoration:none;font-size:11px;font-weight:600">Ver ruta →</a>` +
               `</div>`;
-            new mapboxgl.Marker({ element: el, anchor: 'center' })
+            const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
               .setLngLat([s.lng, s.lat])
               .setPopup(new mapboxgl.Popup({ offset: 14, maxWidth: '300px' }).setHTML(popupHTML))
               .addTo(map);
+            routeMarkers.push(marker);
           }
+          markersByRouteRef.current.set(r.routeId, routeMarkers);
 
           // Polyline real desde Directions API. cacheKey = route.updatedAt → cuando
           // el dispatcher cambia depot u ordena paradas (que actualiza el row), la
@@ -231,8 +243,32 @@ export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
     return () => {
       map.remove();
       mapRef.current = null;
+      markersByRouteRef.current.clear();
     };
   }, [routes, mapboxToken, colorByRoute]);
+
+  // Aplicar hidden state: ocultar/mostrar markers + polyline por ruta.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    for (const r of routes) {
+      const isHidden = hiddenIds.has(r.routeId);
+      const layerId = `route-${r.routeId}`;
+      // Polyline (layer) — solo si ya cargó.
+      if (map.getLayer(layerId)) {
+        map.setLayoutProperty(layerId, 'visibility', isHidden ? 'none' : 'visible');
+      }
+      // Markers (stops) — agregar o quitar del mapa.
+      const markers = markersByRouteRef.current.get(r.routeId) ?? [];
+      for (const m of markers) {
+        if (isHidden) {
+          m.remove();
+        } else if (!m.getElement().parentNode) {
+          m.addTo(map);
+        }
+      }
+    }
+  }, [hiddenIds, routes]);
 
   // Resaltar/atenuar layers cuando se hace click en la leyenda.
   useEffect(() => {
@@ -301,38 +337,79 @@ export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
 
       {/* Leyenda */}
       <div className="rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--vf-surface-1)] p-3">
-        <p className="mb-2 text-xs font-semibold text-[var(--color-text-muted)]">
-          {routes.length} ruta(s)
-        </p>
+        <div className="mb-2 flex items-center justify-between">
+          <p className="text-xs font-semibold text-[var(--color-text-muted)]">
+            {routes.length - hiddenIds.size} / {routes.length} ruta(s) visible(s)
+          </p>
+          <div className="flex gap-1.5 text-[10px]">
+            <button
+              type="button"
+              onClick={() => setHiddenIds(new Set())}
+              disabled={hiddenIds.size === 0}
+              className="rounded px-1.5 py-0.5 hover:bg-[var(--vf-surface-2)] disabled:opacity-40"
+              style={{ color: 'var(--vf-text-mute)' }}
+            >
+              Todas
+            </button>
+            <button
+              type="button"
+              onClick={() => setHiddenIds(new Set(routes.map((r) => r.routeId)))}
+              disabled={hiddenIds.size === routes.length}
+              className="rounded px-1.5 py-0.5 hover:bg-[var(--vf-surface-2)] disabled:opacity-40"
+              style={{ color: 'var(--vf-text-mute)' }}
+            >
+              Ninguna
+            </button>
+          </div>
+        </div>
         <ul className="flex flex-col gap-1">
           {routes.map((r) => {
             const color = colorByRoute.get(r.routeId)!;
             const isActive = highlightedId === r.routeId;
+            const isHidden = hiddenIds.has(r.routeId);
             return (
               <li key={r.routeId}>
-                <button
-                  type="button"
-                  onMouseEnter={() => setHighlightedId(r.routeId)}
-                  onMouseLeave={() => setHighlightedId(null)}
-                  className={`flex w-full items-center gap-2 rounded-[var(--radius-md)] px-2 py-1.5 text-left text-xs transition-colors ${
-                    isActive
-                      ? 'bg-[var(--vf-surface-2)]'
-                      : 'hover:bg-[var(--vf-surface-2)]'
+                <div
+                  className={`flex items-center gap-2 rounded-[var(--radius-md)] px-2 py-1.5 text-xs transition-colors ${
+                    isActive ? 'bg-[var(--vf-surface-2)]' : 'hover:bg-[var(--vf-surface-2)]'
                   }`}
+                  style={{ opacity: isHidden ? 0.55 : 1 }}
                 >
-                  <span
-                    className="h-3 w-3 shrink-0 rounded-full"
-                    style={{ background: color }}
+                  <input
+                    type="checkbox"
+                    checked={!isHidden}
+                    onChange={(e) => {
+                      setHiddenIds((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.delete(r.routeId);
+                        else next.add(r.routeId);
+                        return next;
+                      });
+                    }}
+                    aria-label={isHidden ? `Mostrar ${r.routeName}` : `Ocultar ${r.routeName}`}
+                    className="h-3.5 w-3.5 cursor-pointer"
+                    style={{ accentColor: color }}
                   />
-                  <span className="min-w-0 flex-1 truncate">
-                    <strong className="block truncate text-[var(--color-text)]">
-                      {r.routeName}
-                    </strong>
-                    <span className="block truncate text-[var(--color-text-muted)]">
-                      {r.vehicleLabel} · {r.stops.length} paradas
+                  <button
+                    type="button"
+                    onMouseEnter={() => setHighlightedId(r.routeId)}
+                    onMouseLeave={() => setHighlightedId(null)}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                  >
+                    <span
+                      className="h-3 w-3 shrink-0 rounded-full"
+                      style={{ background: color }}
+                    />
+                    <span className="min-w-0 flex-1 truncate">
+                      <strong className="block truncate text-[var(--color-text)]">
+                        {r.routeName}
+                      </strong>
+                      <span className="block truncate text-[var(--color-text-muted)]">
+                        {r.vehicleLabel} · {r.stops.length} paradas
+                      </span>
                     </span>
-                  </span>
-                </button>
+                  </button>
+                </div>
               </li>
             );
           })}
