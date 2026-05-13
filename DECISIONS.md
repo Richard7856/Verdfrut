@@ -3918,5 +3918,46 @@ llena, así que el código actual sigue compilando sin cambios.
 - Próximos pasos de Stream A: A1 deploy → testing en branch → A2
   Control Plane UI → A3 flow data-driven.
 
+---
+
+### Follow-up 2026-05-14 — A1 hardening post-aplicación
+
+Migraciones 036, 037 y **038** aplicadas en prod (project_ref
+`hidlxgajcjbtlwyxerhy`) vía MCP `apply_migration`. Smoke test confirmó:
+- `customers` row única (`verdfrut`).
+- `customer_id NOT NULL` con backfill 100% en 8 tablas (zones=1,
+  user_profiles=4, stores=83, vehicles=4, drivers=2, depots=2,
+  routes=18, dispatches=12; cero NULL).
+- Trigger `trg_auto_customer_id` instalado en las 8 tablas.
+- Helpers `auto_set_customer_id`, `current_customer_id`,
+  `bump_route_version_by_driver`, `tripdrive_restructure_dispatch`
+  (con fix 038) presentes.
+
+**Auditoría de INSERTs** identificó 12 puntos que escriben en las 8
+tablas operativas. Dos rompían con el trigger:
+
+1. **`apps/platform/src/lib/queries/users.ts:196` (`inviteUser`)** — el
+   insert va vía `service_role` (admin client). Fix: leer
+   `customer_id` del invitador via `createServerClient()` y pasarlo
+   explícito al insert. El nuevo user hereda el customer del que lo
+   invita.
+2. **RPC `tripdrive_restructure_dispatch`** — SECURITY DEFINER invocada
+   vía service_role; el trigger no podía inferir `customer_id`. Fix
+   (migration 038): agregar `customer_id` al INSERT INTO routes
+   leyendo el valor de `v_dispatch_record.customer_id` (el dispatch ya
+   lo tiene NOT NULL post-037). Cero cambios en el caller TS.
+
+**No rompen:** 10 inserts restantes usan `createServerClient` (sesión
+normal authenticated), el trigger los resuelve automáticamente —
+`dispatches/actions.ts:61`, `transfer-action.ts:80,140`,
+`routes/actions.ts:176`, `queries/{vehicles,zones,depots,routes,drivers,stores}.ts`.
+
+**Scripts mass-import** (`scripts/*.mjs`) usan service_role. NO son
+productivos; documentados en KNOWN_ISSUES como rotos post-037. Si se
+necesitan re-correr, deben pasar `customer_id` explícito como input.
+
+**Smoke test final**: type-check 12/12 + `check-service-role` estable
+(sigue 16 archivos sin drift — `users.ts` ya estaba en el allow-list).
+
 
 

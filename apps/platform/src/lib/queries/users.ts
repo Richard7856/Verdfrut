@@ -182,6 +182,27 @@ export async function inviteUser(input: InviteUserInput): Promise<InviteUserResu
   const admin = createServiceRoleClient();
   const redirectTo = inviteRedirectFor(input.role);
 
+  // ADR-086: el insert va vía service_role (no hay auth.uid() en ese cliente),
+  // entonces el trigger auto_set_customer_id no puede inferir el customer.
+  // Leemos el customer_id del admin invitador desde su sesión normal y lo
+  // pasamos explícito. El nuevo user hereda el customer del que lo invita.
+  const sessionClient = await createServerClient();
+  const { data: { user: inviter } } = await sessionClient.auth.getUser();
+  if (!inviter) {
+    throw new Error('[users.invite] No hay sesión del invitador');
+  }
+  const { data: inviterProfile, error: inviterErr } = await sessionClient
+    .from('user_profiles')
+    .select('customer_id')
+    .eq('id', inviter.id)
+    .single();
+  if (inviterErr || !inviterProfile?.customer_id) {
+    throw new Error(
+      `[users.invite] No se pudo leer customer_id del invitador: ${inviterErr?.message ?? 'sin customer_id'}`,
+    );
+  }
+  const inviterCustomerId = inviterProfile.customer_id as string;
+
   // 1. Crear auth user con invite (envía email).
   const { data: invited, error: inviteError } = await admin.auth.admin.inviteUserByEmail(input.email, {
     data: { full_name: input.fullName },
@@ -195,6 +216,7 @@ export async function inviteUser(input: InviteUserInput): Promise<InviteUserResu
   // 2. Insertar profile con must_reset_password=true (debe establecer password al entrar).
   const { error: profileError } = await admin.from('user_profiles').insert({
     id: userId,
+    customer_id: inviterCustomerId,
     email: input.email,
     full_name: input.fullName,
     role: input.role,
