@@ -56,6 +56,12 @@
     },
     "newArchEnabled": false,
     "owner": "tripdrive",
-    "ios": {}
+    "ios": {},
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/188d966d-7398-4c2f-afec-c2e538142a84"
+    }
   }
 }
