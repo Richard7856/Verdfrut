@@ -17,6 +17,7 @@ apps/platform/src/app/api/cron/mark-timed-out-chats/route.ts
 apps/platform/src/app/api/cron/push-subs-cleanup/route.ts
 apps/platform/src/app/api/cron/rate-limit-cleanup/route.ts
 apps/platform/src/app/api/cron/reconcile-orphan-users/route.ts
+apps/platform/src/app/api/orchestrator/chat/route.ts
 apps/platform/src/lib/push.ts
 apps/platform/src/lib/queries/dispatches.ts
 apps/platform/src/lib/queries/users.ts

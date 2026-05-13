@@ -33,6 +33,7 @@ const NAV_ITEMS: NavItem[] = [
   // Admin / dispatcher — supervisión global
   { href: '/dashboard', label: 'Overview', roles: ['admin', 'dispatcher'], group: 'GENERAL' },
   { href: '/map', label: 'Mapa en vivo', roles: ['admin', 'dispatcher'], group: 'GENERAL' },
+  { href: '/orchestrator', label: 'Asistente AI', roles: ['admin', 'dispatcher'], group: 'GENERAL', badge: 'Beta' },
 
   // CLIENTES — shell del feature multi-cliente (en desarrollo). Mientras es
   // shell-only, todo NETO opera con el modelo actual; la sección sirve para

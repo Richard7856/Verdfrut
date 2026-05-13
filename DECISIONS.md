@@ -4343,3 +4343,138 @@ idéntico (sus `--vf-green-*` no se tocan).
 
 
 
+## [2026-05-13] ADR-090: Ola 2 / Sub-bloque 2.1 — Orquestador AI foundations
+
+**Contexto:**
+El cliente piloto pidió orquestar tiros conversacionalmente: "crear el
+tiro de mañana con estas 12 tiendas", "mover la tienda X al final",
+"publica lo que esté listo". La operación logística pre-Stream-A obligaba
+al dispatcher a tocar 5-7 pantallas para armar un tiro completo;
+conversacional reduce a 1-3 turnos.
+
+El user reportó experiencia previa fallida con agentes: scope creep del
+prompt, errores en cascada, acciones destructivas sin confirmar, costo
+de tokens explosivo. El diseño de Ola 2 ataca esos 7 modos de falla
+explícitamente.
+
+**Decisión: Sub-bloque 2.1 — Foundations (4 commits):**
+
+1. **Migration 040** (`76957cc`): 3 tablas + 3 enums + 3 triggers
+   auto-customer + 5 RLS policies. `orchestrator_sessions` (hilo),
+   `orchestrator_messages` (raw API Anthropic JSONB), `orchestrator_actions`
+   (audit + billing). Schema permite quota check sin scan de messages
+   (index parcial `idx_orch_actions_writes_month`).
+
+2. **Package `@tripdrive/orchestrator`** (`223caf8`):
+   - `types.ts`: ToolDefinition con `is_write`, `requires_confirmation`,
+     `allowed_roles`, JSON Schema input. ToolResult shape uniforme
+     `{ok, data|error}` — handlers nunca tiran excepción al runner.
+   - `runner.ts`: loop con Claude Sonnet 4.6 + extended thinking (budget
+     4000 tokens) + prompt caching `cache_control: ephemeral` en system
+     + tools. MAX_LOOP_ITERATIONS=12 anti-runaway. Detecta
+     `requires_confirmation` y pausa con evento
+     `confirmation_required` hasta input del user via endpoint /confirm.
+   - `prompts/system.ts`: prompt v1 con principios "plan-then-act, no
+     inventar IDs, fechas hoy+7d, respuestas breves español MX, sin
+     mundo-conocimiento externo".
+   - Bump `@anthropic-ai/sdk` de ^0.32 a ^0.65 para soporte oficial de
+     extended thinking + cache_control.
+
+3. **5 tools de lectura** (`5f971d1`): `list_dispatches_today`,
+   `list_routes`, `search_stores`, `list_available_drivers`,
+   `list_available_vehicles`. `is_write=false` (no cuentan quota).
+   Customer_id filter en todas las queries (defensa en profundidad).
+   Cada tool retorna `summary` humano para que el agente tenga contexto
+   rápido.
+
+4. **Endpoint SSE + UI minimal** (`<pendiente>`):
+   - `POST /api/orchestrator/chat` con `runtime='nodejs'` + streaming
+     SSE. Recibe `{sessionId?, message, confirmation?}`. Carga historial
+     de orchestrator_messages (filtra solo roles válidos para Anthropic
+     API), corre runner, emite eventos al cliente, persiste turn al
+     final.
+   - `/orchestrator` page (admin + dispatcher solo). Client component
+     `OrchestratorChat` con stream reader, mensajes de assistant con
+     thinking expandible (details), tool calls como cards con args +
+     result en `<details>`, modal de confirmación para destructivas.
+
+**Mitigaciones contra las 7 fallas comunes de agentes:**
+
+| Falla | Mitigación |
+|---|---|
+| Alucinación de IDs | input_schema con `format: uuid`; IDs solo desde reads previos |
+| Cascada de errores | ToolResult uniforme `{ok, error}` — runner nunca recibe excepción; `stop_reason='tool_use'` controla flow |
+| Acciones destructivas sin confirmar | `requires_confirmation: true` pausa el loop hasta input explícito |
+| Scope creep | System prompt corto + tools curadas con `description` específico + no world-knowledge |
+| Latencia | SSE streaming + prompt caching (system + tools cached con TTL 5min) |
+| Costo de tokens | Caché reduce ~90% en hits; `total_tokens_in/out` en sessions; cap mensual lista en 2.5 |
+| Pérdida de contexto | Historial persistido en `orchestrator_messages`; al iniciar turno se hidrata desde BD |
+
+**Alternativas consideradas:**
+
+- **Streaming verdadero con `.stream()` de Anthropic**: 2.1.d usa
+  `create()` simple y emite text completo al final (no token-by-token).
+  Cambiar a streaming real es mejora 2.6 (UX más vivo); para foundations,
+  `create()` simplifica debug y testing.
+- **Tools como Edge Functions separadas en Supabase**: rechazado por
+  latencia adicional + complejidad. Server Actions del platform tienen
+  toda la lógica ya escrita; las tools wrappean esas.
+- **Modelo Opus 4.7 por default**: rechazado por costo. Sonnet 4.6 con
+  thinking cubre 95% de tareas. Opus se ofrece como upgrade Enterprise
+  tier futuro.
+- **Permitir zone_manager**: rechazado. Su flow es chat ops con su
+  zona, no orquestar tiros cross-zone. Mantener scope cerrado.
+
+**Riesgos / Limitaciones:**
+
+- **`runtime='nodejs'` no Edge**: necesario para `@anthropic-ai/sdk` que
+  usa node:crypto y otras APIs no Edge-compatible. Latencia de cold
+  start mayor. Aceptable para V1 — endpoint solo lo usan admin/dispatch.
+- **El historial puede crecer**: 50+ mensajes con tool_results JSONB
+  voluminosos suben el input_tokens del próximo turno. Mitigación
+  futura (2.6): truncar/resumir historial >20 turns.
+- **El `pendingConfirmation` re-emite la tool**: cuando el user aprueba,
+  inyectamos en el historial un tool_result que le dice al agente
+  "AWAITING_EXECUTION: re-emite la herramienta". Eso obliga a Claude a
+  duplicar el tool_use block. Más limpio sería ejecutar directo desde
+  el endpoint /confirm sin re-llamar al modelo, pero rompe el patrón
+  "agente decide". Refactor en 2.3 cuando entren las writes.
+- **Tools de escritura aún no existen** (2.2): hoy solo lees. La UI
+  de confirmación está plumbed pero ninguna read tool la dispara.
+
+**Oportunidades de mejora futuras:**
+
+- **2.2**: agregar `create_dispatch`, `add_route_to_dispatch`,
+  `add_stop_to_route`, `move_stop`, `remove_stop` con
+  `requires_confirmation` desde el inicio (decisión del user 2026-05-13).
+- **2.3**: refinar UI de confirmación con preview enriquecido
+  ("Publicar tiro X afecta a 5 rutas, 23 paradas").
+- **2.4**: tool `optimize_dispatch` que invoca FastAPI optimizer
+  existente.
+- **2.5**: gating per-customer en `customers.flow_engine_overrides`:
+  `ai_enabled_users[]`, `ai_actions_quota_monthly`, `ai_tools_allowlist[]`.
+  UI en CP `/customers/[slug]` pestaña "AI Agent" con uso histórico +
+  toggle por user.
+- **2.6**: streaming token-by-token, eval set automatizado, lista de
+  sesiones lateral, chat flotante embebido (opción b del user 2026-05-13).
+- Issue #244: capturar tokens del runner y escribirlos a
+  `orchestrator_sessions.total_tokens_*` en cada turno (hoy solo se
+  emiten al cliente pero no persisten — gap a cerrar en 2.5).
+- Issue #245: agregar `Sentry` instrumentation al runner para crashes.
+
+**Status al cierre de ADR-090 / 2.1:**
+
+- Schema + package + 5 reads + endpoint + UI minimal funcional.
+- Type-check 13/13 verde. check-service-role 18 archivos (nuevo legítimo
+  documentado: el endpoint usa service_role para escribir messages tras
+  validar auth con `requireAdminOrDispatcher`).
+- ANTHROPIC_API_KEY ya configurada en platform (existente de OCR).
+- Listo para 2.2 (writes con confirmaciones) — el plumbing ya espera
+  por el flag `requires_confirmation: true` en cada tool nueva.
+
+
+
+
+
+
+

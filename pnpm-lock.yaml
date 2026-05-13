@@ -302,6 +302,9 @@ importers:
       '@tripdrive/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@tripdrive/orchestrator':
+        specifier: workspace:*
+        version: link:../../packages/orchestrator
       '@tripdrive/supabase':
         specifier: workspace:*
         version: link:../../packages/supabase

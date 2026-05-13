@@ -13,6 +13,7 @@ const nextConfig: NextConfig = {
     '@tripdrive/ai',
     '@tripdrive/maps',
     '@tripdrive/observability',
+    '@tripdrive/orchestrator',
     '@tripdrive/supabase',
     '@tripdrive/types',
     '@tripdrive/ui',

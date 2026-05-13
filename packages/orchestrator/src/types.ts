@@ -12,7 +12,12 @@
 //     SIEMPRE recibe un tool_result, nunca una excepción no manejada.
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type Anthropic from '@anthropic-ai/sdk';
 import type { Database } from '@tripdrive/supabase';
+
+// Re-export para consumidores externos (apps/platform) que no tienen
+// @anthropic-ai/sdk como dep directa.
+export type AnthropicMessageParam = Anthropic.MessageParam;
 
 /** JSON schema simplificado para parámetros de tool (subset de Anthropic API). */
 export interface ToolParamSchema {

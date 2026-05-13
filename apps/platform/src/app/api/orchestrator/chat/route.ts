@@ -1,0 +1,236 @@
+// Endpoint del orquestador AI — POST con streaming SSE.
+//
+// Recibe: { sessionId?, message, confirmation? }
+//   - Si !sessionId → crea nueva sesión.
+//   - Si confirmation → resume loop con la decisión del usuario.
+//   - Si message → user input nuevo.
+//
+// Streamea eventos del runner directo al cliente. Al terminar, persiste el
+// turno completo a orchestrator_messages + agrega contadores agregados.
+
+import 'server-only';
+import { requireAdminOrDispatcher } from '@/lib/auth';
+import { createServerClient, createServiceRoleClient } from '@tripdrive/supabase/server';
+import {
+  runOrchestrator,
+  type RunnerEvent,
+  type ToolContext,
+  type AnthropicMessageParam,
+} from '@tripdrive/orchestrator';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+interface ChatPayload {
+  sessionId?: string;
+  message?: string;
+  confirmation?: {
+    tool_use_id: string;
+    approved: boolean;
+  };
+}
+
+export async function POST(req: Request) {
+  const profile = await requireAdminOrDispatcher();
+
+  if (!process.env.ANTHROPIC_API_KEY) {
+    return Response.json(
+      { error: 'ANTHROPIC_API_KEY no configurada en el servidor.' },
+      { status: 503 },
+    );
+  }
+
+  let payload: ChatPayload;
+  try {
+    payload = (await req.json()) as ChatPayload;
+  } catch {
+    return Response.json({ error: 'Body inválido.' }, { status: 400 });
+  }
+
+  if (!payload.message && !payload.confirmation) {
+    return Response.json(
+      { error: 'Debe incluir `message` o `confirmation`.' },
+      { status: 400 },
+    );
+  }
+
+  // Sesión: usa la del request (RLS validará dueño) para reads y la admin para writes.
+  const sessionClient = await createServerClient();
+  const admin = createServiceRoleClient();
+
+  // Resolver customer_id + timezone del caller.
+  const { data: callerProfile } = await sessionClient
+    .from('user_profiles')
+    .select('customer_id, customers:customer_id ( timezone )')
+    .eq('id', profile.id)
+    .single();
+
+  const callerRow = callerProfile as unknown as {
+    customer_id: string;
+    customers: { timezone: string } | null;
+  } | null;
+  if (!callerRow?.customer_id) {
+    return Response.json(
+      { error: 'No se pudo resolver el customer del usuario.' },
+      { status: 500 },
+    );
+  }
+
+  const customerId = callerRow.customer_id;
+  const timezone = callerRow.customers?.timezone ?? 'America/Mexico_City';
+
+  // Resolver / crear sesión.
+  let sessionId = payload.sessionId;
+  if (!sessionId) {
+    const { data: newSession, error: insErr } = await sessionClient
+      .from('orchestrator_sessions')
+      .insert({
+        user_id: profile.id,
+        title: payload.message?.slice(0, 80) ?? 'Nueva conversación',
+      })
+      .select('id')
+      .single();
+    if (insErr || !newSession) {
+      return Response.json(
+        { error: `No se pudo crear la sesión: ${insErr?.message ?? 'desconocido'}` },
+        { status: 500 },
+      );
+    }
+    sessionId = newSession.id as string;
+  } else {
+    // Validar ownership.
+    const { data: existing } = await sessionClient
+      .from('orchestrator_sessions')
+      .select('id, user_id, state')
+      .eq('id', sessionId)
+      .maybeSingle();
+    if (!existing) {
+      return Response.json({ error: 'Sesión no encontrada.' }, { status: 404 });
+    }
+    if (existing.state !== 'open') {
+      return Response.json({ error: 'Sesión cerrada o archivada.' }, { status: 409 });
+    }
+  }
+
+  // Cargar historial de mensajes para reconstruir contexto de Anthropic.
+  // Las filas en orchestrator_messages tienen `content` JSONB con el shape
+  // del API de Anthropic (text, tool_use, tool_result blocks).
+  const { data: priorMessages } = await admin
+    .from('orchestrator_messages')
+    .select('role, content')
+    .eq('session_id', sessionId)
+    .order('sequence', { ascending: true });
+
+  const history: AnthropicMessageParam[] = ((priorMessages ?? []) as Array<{
+    role: 'user' | 'assistant' | 'tool_result' | 'system_note';
+    content: unknown;
+  }>)
+    .filter((m) => m.role === 'user' || m.role === 'assistant' || m.role === 'tool_result')
+    .map((m) => ({
+      role: m.role === 'tool_result' ? 'user' : (m.role as 'user' | 'assistant'),
+      content: m.content as AnthropicMessageParam['content'],
+    }));
+
+  // SSE encoder.
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const emit = async (event: RunnerEvent) => {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+      };
+
+      // Anuncia sessionId al cliente antes de empezar el loop.
+      await emit({
+        type: 'message_start',
+        sequence: 0,
+      });
+      controller.enqueue(
+        encoder.encode(`data: ${JSON.stringify({ type: 'session', sessionId })}\n\n`),
+      );
+
+      const toolContext: ToolContext = {
+        customerId,
+        userId: profile.id,
+        sessionId: sessionId as string,
+        supabase: admin,
+        timezone,
+      };
+
+      try {
+        const { finalHistory, pendingConfirmation } = await runOrchestrator({
+          history,
+          userMessage: payload.message ?? '',
+          confirmation: payload.confirmation,
+          callerRole: profile.role as 'admin' | 'dispatcher',
+          toolContext,
+          emit,
+        });
+
+        // Persistir mensajes nuevos del turno a BD.
+        // Solo escribimos los que NO estaban en el historial original
+        // (finalHistory tiene history + nuevos).
+        const startIdx = history.length;
+        const newMessages = finalHistory.slice(startIdx);
+
+        const lastSeqResult = await admin
+          .from('orchestrator_messages')
+          .select('sequence')
+          .eq('session_id', sessionId)
+          .order('sequence', { ascending: false })
+          .limit(1);
+        const lastSeq = (lastSeqResult.data?.[0]?.sequence as number | undefined) ?? -1;
+
+        for (let i = 0; i < newMessages.length; i++) {
+          const msg = newMessages[i]!;
+          const role: 'user' | 'assistant' | 'tool_result' =
+            msg.role === 'user'
+              ? // Si el content del user message tiene tool_result blocks, marcarlo como tool_result.
+                Array.isArray(msg.content) &&
+                msg.content.some((c) => typeof c === 'object' && c.type === 'tool_result')
+                ? 'tool_result'
+                : 'user'
+              : 'assistant';
+
+          await admin.from('orchestrator_messages').insert({
+            customer_id: customerId,
+            session_id: sessionId,
+            sequence: lastSeq + 1 + i,
+            role,
+            content: msg.content as unknown as never,
+          });
+        }
+
+        // Actualizar last_message_at + state si quedó pendiente confirmación.
+        await admin
+          .from('orchestrator_sessions')
+          .update({
+            last_message_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', sessionId);
+
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({ type: 'done', pendingConfirmation })}\n\n`,
+          ),
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Error desconocido';
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: 'error', message })}\n\n`),
+        );
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
+  });
+}

@@ -78,6 +78,12 @@ tiers).
   El service_role bypassea RLS solo para leer subs específicas ya
   resueltas por ID; sin riesgo de fanout cross-customer.
 
+### ✅ Legítimo: Orquestador AI endpoint (1 call-site)
+
+| Archivo | Justificación |
+|---|---|
+| `apps/platform/src/app/api/orchestrator/chat/route.ts` | ADR-090 / Ola 2. El endpoint usa la sesión del caller (`createServerClient`) para validar ownership de la session y crear nuevas. Luego usa `createServiceRoleClient` para: (a) leer historial de `orchestrator_messages` cross-session si el caller es admin del customer (audit), (b) pasar el cliente service_role al `ToolContext` que cada tool handler usa para reads/writes con bypass de RLS controlado por customer_id explícito + ownership check en cada tool, (c) escribir mensajes nuevos del turno con shape JSONB sin tener que pasar por la columna `customer_id` (lo llena el trigger). La auth real ya pasó por `requireAdminOrDispatcher` antes; el service_role solo se usa una vez la action ya está autorizada. |
+
 ### ✅ Legítimo: AI mediator inserta como sender='system' (2 call-sites)
 
 | Archivo | Justificación |

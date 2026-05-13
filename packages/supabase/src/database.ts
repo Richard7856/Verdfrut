@@ -392,6 +392,150 @@ export type Database = {
         }
         Relationships: []
       }
+      orchestrator_sessions: {
+        Row: {
+          id: string
+          customer_id: string
+          user_id: string
+          title: string | null
+          state: Database["public"]["Enums"]["orchestrator_session_state"]
+          last_message_at: string | null
+          total_tokens_in: number
+          total_tokens_out: number
+          total_actions: number
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          customer_id?: string
+          user_id: string
+          title?: string | null
+          state?: Database["public"]["Enums"]["orchestrator_session_state"]
+          last_message_at?: string | null
+          total_tokens_in?: number
+          total_tokens_out?: number
+          total_actions?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          customer_id?: string
+          user_id?: string
+          title?: string | null
+          state?: Database["public"]["Enums"]["orchestrator_session_state"]
+          last_message_at?: string | null
+          total_tokens_in?: number
+          total_tokens_out?: number
+          total_actions?: number
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      orchestrator_messages: {
+        Row: {
+          id: string
+          customer_id: string
+          session_id: string
+          sequence: number
+          role: Database["public"]["Enums"]["orchestrator_message_role"]
+          content: Json
+          tokens_in: number | null
+          tokens_out: number | null
+          cache_creation_tokens: number | null
+          cache_read_tokens: number | null
+          stop_reason: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          customer_id?: string
+          session_id: string
+          sequence: number
+          role: Database["public"]["Enums"]["orchestrator_message_role"]
+          content: Json
+          tokens_in?: number | null
+          tokens_out?: number | null
+          cache_creation_tokens?: number | null
+          cache_read_tokens?: number | null
+          stop_reason?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          customer_id?: string
+          session_id?: string
+          sequence?: number
+          role?: Database["public"]["Enums"]["orchestrator_message_role"]
+          content?: Json
+          tokens_in?: number | null
+          tokens_out?: number | null
+          cache_creation_tokens?: number | null
+          cache_read_tokens?: number | null
+          stop_reason?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
+      orchestrator_actions: {
+        Row: {
+          id: string
+          customer_id: string
+          session_id: string
+          user_id: string
+          tool_name: string
+          is_write: boolean
+          requires_confirmation: boolean
+          args: Json
+          status: Database["public"]["Enums"]["orchestrator_action_status"]
+          result: Json | null
+          error_message: string | null
+          tokens_in: number | null
+          tokens_out: number | null
+          duration_ms: number | null
+          confirmed_at: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          customer_id?: string
+          session_id: string
+          user_id: string
+          tool_name: string
+          is_write?: boolean
+          requires_confirmation?: boolean
+          args: Json
+          status: Database["public"]["Enums"]["orchestrator_action_status"]
+          result?: Json | null
+          error_message?: string | null
+          tokens_in?: number | null
+          tokens_out?: number | null
+          duration_ms?: number | null
+          confirmed_at?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          customer_id?: string
+          session_id?: string
+          user_id?: string
+          tool_name?: string
+          is_write?: boolean
+          requires_confirmation?: boolean
+          args?: Json
+          status?: Database["public"]["Enums"]["orchestrator_action_status"]
+          result?: Json | null
+          error_message?: string | null
+          tokens_in?: number | null
+          tokens_out?: number | null
+          duration_ms?: number | null
+          confirmed_at?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
       push_subscriptions: {
         Row: {
           auth: string | null
@@ -1013,6 +1157,14 @@ export type Database = {
     Enums: {
       customer_status: "active" | "paused" | "churned" | "demo"
       customer_tier: "starter" | "pro" | "enterprise"
+      orchestrator_session_state: "open" | "closed" | "archived"
+      orchestrator_message_role: "user" | "assistant" | "tool_result" | "system_note"
+      orchestrator_action_status:
+        | "success"
+        | "error"
+        | "rejected_by_user"
+        | "pending_confirmation"
+        | "auto_rejected_quota"
       message_sender: "driver" | "zone_manager" | "system"
       report_status:
         | "draft"

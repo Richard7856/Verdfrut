@@ -18,6 +18,7 @@
     "@tripdrive/ai": "workspace:*",
     "@tripdrive/maps": "workspace:*",
     "@tripdrive/observability": "workspace:*",
+    "@tripdrive/orchestrator": "workspace:*",
     "@tripdrive/supabase": "workspace:*",
     "@tripdrive/types": "workspace:*",
     "@tripdrive/ui": "workspace:*",
