@@ -387,10 +387,17 @@ Puede ver TODOS los customers vía un service role + queries por
 - **Pendiente**: aplicar migration 037 en prod + migration 038 (RLS
   rewrite) en branch Supabase para test antes de merge.
 
-### Fase A2 — Control Plane UI (2 sprints)
-- Lista de customers + detail page.
-- Onboarding wizard end-to-end.
-- Test con cuenta de demo customer.
+### Fase A2 — Control Plane UI (2 sprints) — ✅ CRUD landed 2026-05-14
+
+- ✅ Lista de customers en `/customers` con KPIs (commit `5b6269e`).
+- ✅ Detail page `/customers/[slug]` con KPIs operativos del customer
+  (commit `1038fd8`).
+- ✅ Forms crear/editar con validación slug + status changes (commit
+  `c535b7e`).
+- ⏳ Onboarding wizard end-to-end — diferido a Fase A7 (también crea
+  zone inicial + admin user del customer en un mismo flow).
+- ⏳ Test con cuenta de demo customer — esperable cuando salga la
+  migration 038 de RLS rewrite.
 
 ### Fase A3 — Flow engine data-driven (2 sprints)
 - Library v2 + factory.
