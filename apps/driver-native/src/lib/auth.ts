@@ -27,11 +27,21 @@ export function useAuth(): AuthState {
     let mounted = true;
 
     // 1. Cargar sesión inicial (cache de AsyncStorage).
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      setSession(data.session);
-      setIsLoading(false);
-    });
+    // .catch evita spinner forever si Supabase init falla (ej. env vars
+    // missing en build EAS, network offline). El usuario al menos verá la
+    // pantalla de login en lugar de bloqueo silencioso.
+    supabase.auth.getSession()
+      .then(({ data }) => {
+        if (!mounted) return;
+        setSession(data.session);
+        setIsLoading(false);
+      })
+      .catch((err) => {
+        console.error('[auth] getSession falló — desbloqueando AuthGate sin sesión:', err);
+        if (!mounted) return;
+        setSession(null);
+        setIsLoading(false);
+      });
 
     // 2. Suscribirse a cambios (login, logout, token refresh).
     const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
