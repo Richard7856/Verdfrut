@@ -789,3 +789,108 @@ ADRs nuevos en este ciclo: ADR-046 a ADR-056 (11 ADRs).
 - ⏳ Smoke tests post-deploy — pendiente.
 
 Sprint H7 (pruebas con cliente real) **bloqueado** hasta que cierre lo anterior.
+
+---
+
+## 📍 Actualización 2026-05-13 — post Stream B completo + Sprint H8
+
+### Issues nuevos del ciclo Stream B (N1-N5) + Sprint H8
+
+#### Stream B N2 — Mapa + cache offline (ADR-076)
+- #173 — Botón "Más info" en StopCard con bottom-sheet
+- #174 — Clustering de pines cuando N>30 stops en mismo bounds
+- #175 — Pull-to-refresh con feedback háptico
+- #176 — Snapshot test del RouteMap con datos sintéticos
+- #177 — Invalidar cache al recibir push del dispatcher (N5)
+- #178 — Migrar `@tripdrive/queries` cuando N5 cierre
+
+#### Stream B N3 — Detalle + GPS background (ADR-077, ADR-078)
+- #179 — Edge Function de Supabase para `markArrived` server-side (AV-#8)
+- #180 — Realtime broadcast sobre breadcrumbs para live view supervisor
+- #181 — Auto-detección de llegada por geofencing (radius 50m)
+- #182 — Doc por marca de cómo deshabilitar battery optimization (Xiaomi/Huawei/Samsung)
+- #183 — Indicador "última posición enviada hace Xs" cuando lag reportado
+- #184 — Caching defensivo del `getStopContext`
+- #185 — Pre-fetch del detalle de la próxima parada
+- #186 — Telemetría de deeplinks: % Waze vs geo: picker vs HTTP fallback
+
+#### Stream B N4 — Cámara + OCR + outbox (ADR-079, ADR-080)
+- #187 — Telemetría de OCR confidence por chofer/tienda
+- #188 — Cache OCR por imageUrl hash (no re-OCR en retry)
+- #189 — Streaming responses para mostrar campos OCR a medida que extraen
+- #190 — `type='tienda_cerrada'` + `type='bascula'` en native (deferred de N4)
+- #191 — `incident_cart` con chat al supervisor antes de continuar
+- #192 — UI para `IncidentDetail[]` por SKU (rechazo/faltante/sobrante)
+- #193 — Edit-after-submit (re-abrir outbox item o PATCH supervisor)
+- #194 — Compresión defensiva con timeout 5s (devices viejos)
+- #195 — Notificar supervisor cuando item lleva >2h `failed` permanente
+- #196 — Sweep al worker start que borre `outbox/*/` huérfanos
+
+#### Stream B N5 — Chat realtime + push (ADR-081, ADR-082)
+- #197 — AI mediator desde native via proxy endpoint platform
+- #198 — Push fanout cuando native envía mensaje (al supervisor)
+- #199 — Imagen en chat (reusar evidence capture)
+- #200 — Banner persistente en RouteHeader si push registration falló
+- #201 — Push handler deeplink — tap notif → abre `/stop/<stopId>/chat`
+- #202 — Push del supervisor → chofer native (hoy solo va en otro sentido)
+- #203 — Tipos de push (chat_new, route_updated, etc) con routing distinto
+- #204 — Outbox para mensajes de chat (si falla insert, encolar)
+- #205 — Indicador de typing del supervisor (Realtime presence)
+- #206 — Marcar chat como `driver_resolved` desde native
+
+#### Sprint H8 — Hardening + audit (ADR-083, ADR-084)
+- #207 — Rate limit en `reorderStopsAction` native (extension AV-#1)
+- #208 — ✅ **DONE** — Persistir `mocked` flag en `stops.arrival_was_mocked` (AV-#7)
+- #209 — Doc minSdkVersion=30 + scoped storage check (AV-#9)
+- #210 — TTL en push_subscriptions inactivas >90d (cron creado, falta schedule)
+- #211 — Dashboard de métricas de fraude (mock %, distancia checkin)
+- #212 — WAF Cloudflare al frente cuando entren bots/abuse
+- #213 — Pentest profesional antes de cliente Enterprise
+- #214 — Rotación automática de Service Role Key vía Vault
+- #215 — Cron queries con `customer_id` filter (Stream A prep)
+- #216 — Push fanout con `customer_id` filter (Stream A prep)
+- #217 — AI mediator a Edge Function con customer_id check
+- #218 — Investigar `dispatches.ts:545` service_role usage (sospechoso)
+- #219 — Refactor rate-limit a sesión normal (SECURITY DEFINER ya cubre)
+- #220 — Filtrar audit page por customer_id
+- #221 — ESLint rule contra `createServiceRoleClient()` fuera del allow-list
+- #222 — Auto-apply migrations en branches Supabase (no manual via MCP)
+- #223 — Tests integration que validan `arrival_was_mocked` propagación
+- #224 — Dashboard `/admin/fraud-radar` con métricas de detección
+
+### Resueltos en este ciclo (Stream B + H8)
+
+- ✅ **Stream B N1-N5 completos** — código de app native 100% terminado.
+- ✅ #L4 (mitigation) — botón "Re-calcular ETAs sin re-optimizar" en admin.
+- ✅ #208 — mock location persistido en `stops.arrival_was_mocked`.
+- ✅ TOL-1422 — geo-corregida via Google Geocoding desde dirección.
+- ✅ Rate limit en `sendMessage` native (mitiga AV-#1/AV-#5).
+- ✅ Migración 030 `dispatch_public_share` aplicada (estaba pendiente).
+- ✅ Migración 034 `push_subscriptions_expo` (soporte tokens Expo native).
+- ✅ Migración 035 `stops_arrival_audit` (mock-location + GPS quality).
+- ✅ EAS Build APK preview funcional tras 10 iteraciones de fixes.
+
+### Total issues abiertos al cierre
+
+| Categoría | Abiertos antes | Cerrados | Abiertos al cierre |
+|---|---|---|---|
+| Críticos | 0 | 0 | 0 |
+| Importantes | 12 | 2 (#L4 mitigation, TOL-1422) | 10 |
+| Cosméticos / N5-bis | ~18 | 5 (varios) | ~13 + 30 nuevos Stream B (#173-#206) |
+| Security (AV) | 6 | 1 (AV-#1 parcial mitigado) | 5 + 4 nuevos (AV-#7..#10) |
+| Sprint H8 hardening | — | 2 (#208, parcial #L4) | 24 nuevos (#207-#224) abiertos |
+
+### Estado de bloqueantes operativos del user (post-Stream-B)
+
+#### Bloqueantes para piloto N6
+- ✅ APK preview descargable de EAS — instalable en device del chofer NETO.
+- ⏳ `ANTHROPIC_API_KEY` en Vercel platform — sin esto OCR del ticket NO funciona (degrada a entrada manual).
+- ⏳ Maps SDK for Android habilitado en GCP API key — sin esto el mapa renderiza gris (pines OK).
+- ⏳ Publicar tiro Toluca 14/05 desde admin web (status OPTIMIZED → PUBLISHED) para que aparezca al chofer.
+- ⏳ 4 schedules de Vercel Cron (chat-decisions-cleanup, push-subs-cleanup, archive-breadcrumbs, rate-limit-cleanup) — usar Vercel Cron en lugar de n8n.
+
+#### Bloqueantes para Stream A
+- #63 — eliminar service_role bypass en driver/route/actions.ts (AV-#2).
+- #218 — investigar dispatches.ts:545 service_role usage.
+- 1 mes de operación estable post-N6.
+

@@ -1,10 +1,10 @@
 # TripDrive — Roadmap (post Sprint H6)
 
-> Actualizado el 2026-05-12 (post N5). La plataforma se llama **TripDrive** (dominio `tripdrive.xyz` comprado en Hostinger, nameservers en Vercel). Primer cliente productivo: **VerdFrut**, alias operativo de su contrato con NETO Tiendas en CDMX y Toluca.
+> Actualizado el 2026-05-13 (post Stream B + Sprint H8 hardening). La plataforma se llama **TripDrive** (dominio `tripdrive.xyz` comprado en Hostinger, nameservers en Vercel). Primer cliente productivo: **VerdFrut**, alias operativo de su contrato con NETO Tiendas en CDMX y Toluca. **APK preview funcional** — listo para piloto N6.
 
 ---
 
-## ✅ Estado cerrado al 2026-05-11
+## ✅ Estado cerrado al 2026-05-13
 
 ```
 ✅ Fase 0  — Fundación (monorepo, schema, Docker)
@@ -14,20 +14,32 @@
 ✅ Sprint 17 — Control Plane foundation
 ✅ DEPLOY  — Producción Vercel + Railway
 ✅ Sprint 18 — Estabilizar field-test (ADRs 023-032)
-✅ Sprint 18 bonus — ADRs 033-048 (reorder, dnd-kit, dispatch_id NOT NULL,
-                     APK TWA, geocoding Places, enlace público, depot
-                     override, agregar/quitar camionetas, dedupe cross-ruta)
+✅ Sprint 18 bonus — ADRs 033-048
 ✅ Rebrand → TripDrive (ADR-049)
 ✅ Sprint hardening P0/P1 (ADR-050)
-✅ Sprint H1 — Observability + Sentry (ADR-051)
-✅ Sprint H2 — ETAs reales + crons + APK TWA + banner ETA demo (ADR-052)
-✅ Sprint H3 — Robustez del split/merge (ADR-053)
-✅ Sprint H4 — Performance + escala (ADR-054)
-✅ Sprint H5 — Reportería + audit chat + UX pulida (ADR-055)
-✅ Sprint H6 — Custom domains doc + rebrand interno fase 2 (ADR-056)
+✅ Sprint H1-H6 — Observability + ETAs + Robustez + Performance + Reportería + Domains (ADR-051..056)
+✅ Sprint H7-pre — UI shell multi-cliente + import 40 tiendas + logo/favicon + react-doctor (commits 19e8b9a, b8d21f5, cac4672, etc.)
+✅ Stream C / Fase O1 — Re-optimización en vivo con Google Routes (ADR-074)
+✅ Stream B completo — App nativa Android con 5 fases:
+   ✅ N1 — Scaffold Expo + login + placeholder (ADR-075)
+   ✅ N2 — Mi ruta del día: mapa nativo + cache offline (ADR-076)
+   ✅ N3 — Detalle parada + Navegar (Waze/Maps) + GPS background (ADR-077, ADR-078)
+   ✅ N4 — Evidencia: cámara + OCR proxy + outbox SQLite (ADR-079, ADR-080)
+   ✅ N5 — Chat realtime + push tokens Expo (ADR-081, ADR-082)
+✅ Sprint H8 — Hardening + plan Stream A:
+   - Mock-location anti-fraude flag (migration 035)
+   - Recalc-ETAs button (Bug-#L4 mitigation)
+   - TTL crons: chat_ai_decisions + push_subscriptions
+   - SERVICE_ROLE_AUDIT.md (24 call-sites catalogados)
+   - MULTI_CUSTOMER.md (640 líneas, plan Stream A completo)
+   ADR-083, ADR-084
+✅ EAS Build APK preview funcional — 10 iteraciones de fixes (peer deps,
+   isolated/hoisted, expo-updates compat, babel-preset-expo, template gradle).
+   Stack final: SDK 54-style (RN 0.79.6 + expo-router 5.x).
 ```
 
-**56 ADRs documentados. 33 migraciones tenant + 1 control plane.**
+**84 ADRs documentados. 35 migraciones tenant + 1 control plane.**
+**Stream B 100% en código. Listo para piloto operacional N6 con 1 chofer.**
 
 ---
 

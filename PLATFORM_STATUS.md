@@ -4,7 +4,7 @@
 > debe actualizar la sección correspondiente. Fuente de verdad para "¿cómo
 > está el producto hoy?".
 >
-> **Última actualización**: 2026-05-12 (post N5).
+> **Última actualización**: 2026-05-13 (post Stream B completo + Sprint H8 hardening).
 > **Owner**: Richard.
 
 ---
@@ -318,7 +318,9 @@ Reemplaza el PWA driver actual por app React Native nativa.
 | N3 ✅ | Detalle parada + deeplink Waze/Maps + GPS bg | **DONE 2026-05-12** — detalle parada + marcar llegada con geo + GPS background con foreground service + indicador en header. ADR-077, ADR-078. |
 | N4 ✅ | Evidencia: cámara + OCR + offline queue | **DONE 2026-05-12** — single-screen entrega + OCR vía proxy platform + outbox SQLite con retry exponencial + indicador en header. ADR-079, ADR-080. |
 | N5 ✅ | Chat + push notifs nativas | **DONE 2026-05-12** — chat realtime estilo WhatsApp + push tokens Expo + fanout extendido. Pendiente: deeplink en tap, mediator AI desde native, push inverso supervisor→chofer (N5-bis). ADR-081, ADR-082. |
-| N6 | Beta interna con 1 chofer | 1 chofer operando 1 semana sin issues |
+| Sprint H8 ✅ | Hardening + bugs + plan Stream A | **DONE 2026-05-13** — mock-location anti-fraude flag, recalc-ETAs button, TTL crons, service role audit, MULTI_CUSTOMER.md plan completo. ADR-083, ADR-084. |
+| **EAS Build #10 ✅** | **APK preview funcional** | **DONE 2026-05-13** — 10 iteraciones de fixes (pnpm peer deps, isolated/hoisted, expo-updates compat, babel-preset-expo, template gradle). Stack final: Expo SDK 53 → upgrade a 54-style (RN 0.79.6 + expo-router 5.x + expo-updates 0.28.18). APK descargable vía link/QR de EAS. |
+| **N6** ⏳ | **Beta interna con 1 chofer** | 1 chofer operando 1 semana sin issues. **APK listo para sideload**. |
 | N7 | TestFlight + Play Internal Testing | Build de release firmado en ambas stores |
 | N8 | Publish stores | App descargable desde App Store + Play Store |
 | N9 | Cutover + deprecar PWA | `apps/driver` eliminado del repo |
@@ -331,10 +333,21 @@ Reemplaza el PWA driver actual por app React Native nativa.
 | O3 | Predicción ETAs por hora del día | Planning del día sugiere shift óptimo |
 | O4 | ML-learned service time por tienda | `service_time_seconds` calculado de histórico |
 
-### Stream A — Multi-Customer real ⚪ POSPUESTO
-Pospuesto hasta después del cutover de native app + 1 mes de operación estable.
+### Stream A — Multi-Customer real 🟡 PLANEADO — esperando piloto N6
+Pospuesto hasta después de validar N6 piloto con NETO (1 chofer 1 semana).
 
-Plan completo conservado en `MULTI_CUSTOMER.md` (a crear cuando arranque).
+**Plan completo documentado** en [`MULTI_CUSTOMER.md`](MULTI_CUSTOMER.md) (creado 2026-05-13):
+- Arquitectura híbrida (RLS + project-per-tenant opcional Enterprise)
+- Schema: `customers` table + FK en 8 tablas operativas (migration 035-040)
+- Flow engine data-driven con `customer_flow_steps`
+- Control Plane UI: 6 pantallas + onboarding wizard
+- Pricing matrix Starter/Pro/Enterprise + add-ons
+- 7 fases (A1-A7) con ~3 meses para A1-A6
+
+**Pre-requisitos antes de arrancar A1** (audit en `SERVICE_ROLE_AUDIT.md`):
+- Issue #63 — eliminar service_role bypass en driver/route/actions.ts (AV-#2)
+- Issue #218 — investigar dispatches.ts:545 service_role usage
+- Stream B N6 — 1 chofer real 1 semana en operación estable
 
 ### Otros (no en stream activo)
 - **Landing pública** — armada en paralelo por user con Claude Design.
