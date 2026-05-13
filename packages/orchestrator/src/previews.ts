@@ -45,6 +45,8 @@ export async function enrichPreviewForTool(
         return await enrichBulkCreateStores(args);
       case 'create_store':
         return await enrichCreateStore(args, ctx);
+      case 'optimize_dispatch':
+        return await enrichOptimizeDispatch(args, ctx);
       default:
         return fallbackPreview(toolName, args);
     }
@@ -424,6 +426,98 @@ async function enrichBulkCreateStores(
       : [
           '⚠ Modo COMMIT — las tiendas se crearán permanentemente. Considera dry_run=true primero.',
         ],
+    args,
+  };
+}
+
+// ============================================================================
+// optimize_dispatch
+// ============================================================================
+async function enrichOptimizeDispatch(
+  args: Record<string, unknown>,
+  ctx: ToolContext,
+): Promise<EnrichedPreview> {
+  const dispatchId = String(args.dispatch_id ?? '');
+  const apply = args.apply === true;
+  const vehicleIds = Array.isArray(args.vehicle_ids)
+    ? (args.vehicle_ids as string[])
+    : [];
+
+  const { data: dispatch } = await ctx.supabase
+    .from('dispatches')
+    .select('name, date, status, zones:zone_id ( name )')
+    .eq('id', dispatchId)
+    .eq('customer_id', ctx.customerId)
+    .maybeSingle();
+
+  const dispatchData = dispatch as unknown as {
+    name: string;
+    date: string;
+    status: string;
+    zones: { name: string } | null;
+  } | null;
+
+  const { data: routes } = await ctx.supabase
+    .from('routes')
+    .select('id, name, status, total_distance_meters, total_duration_seconds')
+    .eq('customer_id', ctx.customerId)
+    .eq('dispatch_id', dispatchId)
+    .not('status', 'in', '(CANCELLED)');
+
+  const routesData = (routes ?? []) as Array<{
+    id: string;
+    name: string;
+    status: string;
+    total_distance_meters: number | null;
+    total_duration_seconds: number | null;
+  }>;
+
+  const routeIds = routesData.map((r) => r.id);
+  const { count: stopsCount } = await ctx.supabase
+    .from('stops')
+    .select('id', { count: 'exact', head: true })
+    .in('route_id', routeIds);
+
+  const totalKm = (
+    routesData.reduce((s, r) => s + (r.total_distance_meters ?? 0), 0) / 1000
+  ).toFixed(1);
+  const totalMin = Math.round(
+    routesData.reduce((s, r) => s + (r.total_duration_seconds ?? 0), 0) / 60,
+  );
+
+  const warnings: string[] = [];
+  const liveStatuses = routesData.filter((r) =>
+    ['PUBLISHED', 'IN_PROGRESS', 'INTERRUPTED', 'COMPLETED'].includes(r.status),
+  );
+  if (liveStatuses.length > 0) {
+    warnings.push(
+      `🚨 ${liveStatuses.length} ruta(s) ya publicadas/en curso (${liveStatuses.map((r) => r.name).join(', ')}). No se puede optimizar — cancélalas primero.`,
+    );
+  }
+  if (apply) {
+    warnings.push(
+      `⚠ apply=true: las ${routesData.length} ruta(s) actuales se CANCELARÁN y se crearán nuevas con el plan optimizado. Operación atómica.`,
+    );
+  } else {
+    warnings.push(
+      `ℹ️ apply=false (dry-run): solo se calculará el plan, no se aplicará. El operador puede aprobar después con apply=true.`,
+    );
+  }
+
+  return {
+    headline: apply
+      ? `Re-rutear "${dispatchData?.name ?? dispatchId}" (${dispatchData?.date ?? '—'}) — APLICAR`
+      : `Calcular plan optimizado para "${dispatchData?.name ?? dispatchId}" — DRY-RUN`,
+    bullets: [
+      `Zona: ${dispatchData?.zones?.name ?? '—'}`,
+      `Estado actual del tiro: ${dispatchData?.status ?? '—'}`,
+      `Plan actual: ${routesData.length} ruta(s), ${stopsCount ?? 0} parada(s).`,
+      `Métricas actuales: ${totalKm} km · ${totalMin} min totales.`,
+      vehicleIds.length > 0
+        ? `Vehículos especificados: ${vehicleIds.length}`
+        : 'Vehículos: los mismos del tiro actual.',
+    ],
+    warnings,
     args,
   };
 }

@@ -4919,6 +4919,156 @@ Publicar "TOL Mañana" (2026-05-14)
 
 
 
+## [2026-05-13] ADR-094: Ola 2 / 2.4 — Tool optimize_dispatch (VROOM + Google Routes)
+
+**Contexto:**
+La pieza más impactante del agente para una demo a NETO: "optimiza el
+tiro de mañana" → en 5 segundos reordena tiendas entre camionetas con
+VROOM + traffic real de Google Routes. El user va a capacitar al
+equipo hoy y necesita esta capability funcionando para que NO digan
+"esto no sirve" al verlo después.
+
+**Decisión:**
+
+Tool `optimize_dispatch` en `packages/orchestrator/src/tools/optimize.ts`
+que invoca el optimizer pipeline existente via un endpoint interno del
+platform.
+
+### Por qué endpoint interno (no import directo)
+
+- `apps/platform/src/lib/optimizer-pipeline.ts` importa decenas de
+  módulos del platform (queries, mapbox client, optimizer client).
+- Mover toda esa lógica al package `@tripdrive/orchestrator` duplica
+  cientos de líneas + acopla el package a infra del platform.
+- Solución: endpoint interno `POST /api/orchestrator/_internal/optimize`
+  que envuelve `computeOptimizationPlan` + RPC. El tool del package
+  hace fetch local con header `x-internal-agent-token` compartido.
+- Trade-off: 1 HTTP request extra (~10ms en localhost, ~50ms en Vercel
+  same-region). Aceptable para una operación que ya tarda 3-15s.
+
+### Tool API
+
+```ts
+optimize_dispatch({
+  dispatch_id: string,
+  vehicle_ids?: string[],
+  driver_ids?: (string|null)[],
+  apply: boolean = false,
+})
+```
+
+- `apply=false` (dry-run): calcula plan y retorna métricas + ruta-por-ruta sin escribir.
+- `apply=true`: ejecuta vía RPC `tripdrive_restructure_dispatch` (atómico).
+- `is_write=true + requires_confirmation=true`: cancela rutas vivas e
+  inserta nuevas. Alto impacto, confirm obligatorio.
+
+### Endpoint interno
+
+`POST /api/orchestrator/_internal/optimize`:
+- Auth: `INTERNAL_AGENT_TOKEN` header (no user auth).
+- Recibe `{ dispatch_id, vehicle_ids?, driver_ids?, apply, caller_user_id, caller_customer_id }`.
+- Reusa `computeOptimizationPlan` del platform sin redefinir lógica.
+- Defensa profunda: valida `caller_customer_id` matchea el customer
+  del dispatch (aunque ya pasó auth en `/chat`).
+- `maxDuration = 60s` para que Vercel no kill la function durante
+  optimización larga.
+
+### Enricher de confirm preview
+
+`enrichOptimizeDispatch` muestra:
+- Headline: "Re-rutear 'TOL Mañana' (2026-05-14) — APPLY" vs "...— DRY-RUN".
+- Estado actual: cuántas rutas, paradas, km y minutos totales.
+- Warning crítico si hay rutas PUBLISHED/IN_PROGRESS (no se puede
+  optimizar — cancelar primero).
+- Warning del modo: apply=true cancela rutas viejas; apply=false solo
+  calcula.
+
+### Summary post-ejecución
+
+El handler post-fetch genera summary con `distance_delta_pct` y
+`duration_delta_pct` calculados del before/after del endpoint. Ej:
+
+> ✅ Tiro "TOL Mañana" optimizado y publicado: 3 ruta(s), 18 parada(s).
+> -12.3% distancia · -8.7% duración vs plan anterior.
+
+Esto es ORO para una demo: el agente reporta concretamente cuánto
+ahorró kilómetros y tiempo. Defiende valor del Pro tier.
+
+**Alternativas consideradas:**
+
+- **Mover `computeOptimizationPlan` a un package compartido**
+  (`@tripdrive/optimizer-core`): el approach correcto a largo plazo
+  pero es 1-2 días de refactor por las dependencias internas. No
+  realista para hoy. Issue #263.
+- **Tool del package usa Supabase RPC directa sin pasar por platform
+  endpoint**: requiere reimplementar Mapbox matrix calls + map
+  response del optimizer al shape de la RPC. Mucho código duplicado.
+- **Pasar `optimizerAdapter` via ToolContext**: pattern más limpio
+  pero requiere modificar la firma del runner y todos los endpoints
+  que lo instancian. Refactor de 30 min — postponer a 2.6 cuando se
+  haga el cleanup general (issue #264).
+- **Hacer dos tools separadas (compute + apply)**: cleaner semánticamente
+  pero el modelo a veces salta de compute a apply sin volver a
+  pasar por el flow. Una sola tool con `apply` boolean es más
+  predecible.
+
+**Riesgos / Limitaciones:**
+
+- **Recalcula plan 2x si el user hace dry-run primero**: 1 call con
+  apply=false + 1 call con apply=true. ~6-30s extra. Aceptable
+  pero issue #265: pasar plan calculado a través del confirmation
+  flow para evitar el segundo cálculo. Requiere serializar
+  `OptimizationPlan` (grande, JSONB)→ confirmation args.
+- **`INTERNAL_AGENT_TOKEN` requiere setup en Vercel**: si no existe,
+  el handler retorna error explícito. Pre-deploy del user: agregar
+  esta env var (puede ser un UUID generado random, ej.
+  `openssl rand -hex 32`).
+- **`PLATFORM_INTERNAL_URL` no configurada**: default a
+  `http://localhost:3000` que NO funciona en Vercel (en prod el
+  fetch debe ser `https://verdfrut-platform.vercel.app`). Pre-deploy
+  del user: setear `PLATFORM_INTERNAL_URL` = URL del platform.
+- **Vercel `maxDuration = 60s`**: cubre la mayoría de optimizaciones
+  (3-15s típico). Si el dispatch tiene 100+ tiendas y 5+ camionetas,
+  puede acercarse al límite. Issue #266 — mover a Vercel Pro
+  (300s) o offload a queue cuando llegue ese caso.
+- **El plan de dry-run NO se persiste**: si el agente lo calcula y
+  el user tarda 10 min en aprobar, el plan podría ser diferente al
+  re-calcular por traffic real-time. Mitigación V1: el agente
+  explicará que apply=true puede dar resultado ligeramente distinto
+  al dry-run (semánticamente equivalente, métricas dentro de ±5%).
+
+**Oportunidades de mejora futuras:**
+
+- Issue #263 — extraer `@tripdrive/optimizer-core` package compartido.
+- Issue #264 — pattern `optimizerAdapter` en ToolContext.
+- Issue #265 — pasar plan calculado a través del confirmation flow
+  (evitar recalcular).
+- Issue #266 — mover optimización pesada a job queue cuando >100 stops.
+- Issue #267 — agente sugiere automáticamente optimizar cuando un
+  tiro tiene N+ paradas sin secuencia óptima.
+
+**Status al cierre de ADR-094 / Ola 2 / 2.4:**
+
+- Endpoint interno + tool + enricher implementados.
+- Type-check 13/13 verde.
+- check-service-role 20 archivos (+1: endpoint optimize documentado).
+- **Total tools del agente: 19** (5 reads + 8 writes + 3 places +
+  2 xlsx + 1 optimize).
+- Pre-deploy user: agregar 2 env vars en Vercel platform
+  (`INTERNAL_AGENT_TOKEN` y `PLATFORM_INTERNAL_URL`).
+- Demo flow para capacitación NETO:
+  1. "Muéstrame los tiros de mañana"
+  2. "Optimiza el tiro X" (agente llama dry-run, muestra plan)
+  3. User aprueba → segunda llamada con apply=true → tiro
+     reestructurado en vivo
+  4. Agente reporta: "Optimizado: -12% distancia, -8% tiempo"
+
+
+
+
+
+
+
 
 
 

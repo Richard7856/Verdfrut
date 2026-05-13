@@ -10,16 +10,19 @@ import type { ToolDefinition } from '../types';
 // 2.1.c: 5 reads. 2.2.a: 8 writes con requires_confirmation en destructivas.
 // 2.7: 3 places (geocode + search_place + create_store).
 // 2.8: 2 xlsx (parse_xlsx_attachment + bulk_create_stores).
+// 2.4: 1 optimize_dispatch (VROOM + Google Routes).
 import { READ_TOOLS } from './reads';
 import { WRITE_TOOLS } from './writes';
 import { PLACES_TOOLS } from './places';
 import { XLSX_TOOLS } from './xlsx';
+import { OPTIMIZE_TOOLS } from './optimize';
 
 export const TOOLS: ReadonlyArray<ToolDefinition> = [
   ...READ_TOOLS,
   ...WRITE_TOOLS,
   ...PLACES_TOOLS,
   ...XLSX_TOOLS,
+  ...OPTIMIZE_TOOLS,
 ];
 
 const TOOLS_BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));
