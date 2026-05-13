@@ -20,10 +20,16 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, 'node_modules'),
 ];
 
-// 3. Disable hierarchical lookups — fuerza a Metro a usar SOLO las paths arriba.
-//    Evita confusión cuando hay versions distintas de React en node_modules
-//    de packages internos.
-config.resolver.disableHierarchicalLookup = true;
+// 3. Hierarchical lookups HABILITADOS (default).
+//    Razón: pnpm con node-linker=isolated guarda transitive deps en
+//    `.pnpm/<pkg>@<ver>/node_modules/<dep>`. Cuando Metro bundlea código
+//    DESDE un paquete que vive en .pnpm/, su `require('invariant')` necesita
+//    poder subir el árbol para encontrar `invariant` un nivel arriba. Con
+//    `disableHierarchicalLookup=true` Metro no lo hace y falla.
+//    Trade-off: pequeño riesgo de resolver una versión incorrecta si hay
+//    duplicates — mitigado porque pnpm garantiza una sola versión por
+//    package en la tree.
+config.resolver.disableHierarchicalLookup = false;
 
 // 4. Enable symlinks resolution — pnpm con node-linker=isolated crea symlinks
 //    para casi todo. Sin este flag, Metro NO sigue los symlinks correctamente
