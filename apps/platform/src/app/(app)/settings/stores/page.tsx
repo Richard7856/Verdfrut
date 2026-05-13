@@ -1,7 +1,7 @@
 // CRUD de tiendas. Tabla + modal de creación. Filtro por zona pendiente para Fase 1.b.
 
 import Link from 'next/link';
-import { Badge, DataTable, EmptyState, PageHeader, type Column } from '@tripdrive/ui';
+import { Badge, Button, DataTable, EmptyState, PageHeader, type Column } from '@tripdrive/ui';
 import type { Store } from '@tripdrive/types';
 import { requireRole } from '@/lib/auth';
 import { listStores } from '@/lib/queries/stores';
@@ -116,6 +116,11 @@ export default async function StoresPage() {
         description={`${stores.length} tienda(s) registradas en ${zones.length} zona(s).`}
         action={
           <div className="flex gap-2">
+            <Link href="/settings/stores/map">
+              <Button variant="secondary" size="sm">
+                🗺️ Mapa
+              </Button>
+            </Link>
             <TemplateDownloadButton entity="stores" />
             <CreateStoreButton zones={zones} />
           </div>
