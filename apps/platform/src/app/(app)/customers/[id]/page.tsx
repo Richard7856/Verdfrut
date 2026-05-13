@@ -179,7 +179,11 @@ export default async function CustomerDetailPage({
         {/* Operación activa hoy */}
         {!customer.isPreview && customer.id === 'neto-real' && (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <FlowSection customerName={customer.name} isPreview={false} />
+            <FlowSection
+              customerName={customer.name}
+              customerId={customer.id}
+              isPreview={false}
+            />
             <FleetSection
               driversCount={driversCount}
               vehiclesCount={vehiclesCount}
@@ -271,7 +275,15 @@ function KpiCard({
   );
 }
 
-function FlowSection({ customerName, isPreview }: { customerName: string; isPreview: boolean }) {
+function FlowSection({
+  customerName,
+  customerId,
+  isPreview,
+}: {
+  customerName: string;
+  customerId: string;
+  isPreview: boolean;
+}) {
   // El flow real está hardcoded en @tripdrive/flow-engine — mostramos los pasos
   // canónicos del flow "Entrega" que es el 99% del volumen operativo.
   const entregaSteps = [
@@ -312,8 +324,13 @@ function FlowSection({ customerName, isPreview }: { customerName: string; isPrev
           </li>
         ))}
       </ol>
-      <div className="mt-3 flex gap-2">
-        <Badge tone="info">Personalización por cliente · Stream A3</Badge>
+      <div className="mt-3 flex items-center gap-2">
+        <Link href={`/customers/${customerId}/flow`}>
+          <Button variant="secondary" size="sm">
+            Ver pantallas + configurar
+          </Button>
+        </Link>
+        <Badge tone="info">Custom per cliente · Stream A3</Badge>
       </div>
     </Card>
   );
