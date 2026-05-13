@@ -665,6 +665,32 @@ export async function clearRouteStopsAction(routeId: string): Promise<ActionResu
 }
 
 /**
+ * Re-calcula ETAs + distancia/duración de la ruta usando haversine sobre el
+ * orden actual. NO re-optimiza el orden (mitigación Bug-#L4).
+ *
+ * Caso de uso: admin reordenó stops POST-PUBLISH y las ETAs originales ya
+ * no aplican. Este action los actualiza sin tocar el orden ni llamar al
+ * optimizer (más rápido + más barato que re-optimize completo).
+ *
+ * Trade-off vs `reoptimizeLiveAction` (ADR-074):
+ *   - recalcEtas: barato, instantáneo, mantiene el orden del admin.
+ *   - reoptimizeLive: usa Google Routes con tráfico real, recomendado en
+ *     IN_PROGRESS para reaccionar a tráfico actual.
+ *   - El botón "Re-calcular ETAs" complementa al "Re-optimizar" — admin
+ *     elige cuál aplicar según contexto.
+ */
+export async function recalculateRouteEtasAction(routeId: string): Promise<ActionResult> {
+  await requireRole('admin', 'dispatcher');
+  return runAction(async () => {
+    const id = requireUuid('routeId', routeId);
+    await recalculateRouteMetrics(id);
+    const route = await getRoute(id);
+    revalidatePath(`/routes/${id}`);
+    if (route?.dispatchId) revalidatePath(`/dispatches/${route.dispatchId}`);
+  });
+}
+
+/**
  * Reordena las paradas de una ruta. ADR-035 (post-publicación reorder):
  *
  * - **Pre-publicación (DRAFT/OPTIMIZED/APPROVED):** reorder libre de TODAS las

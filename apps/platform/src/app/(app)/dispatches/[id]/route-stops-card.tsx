@@ -35,6 +35,7 @@ import {
   assignDepotToRouteAction,
   deleteStopFromRouteAction,
   reoptimizeLiveAction,
+  recalculateRouteEtasAction,
 } from '../../routes/actions';
 import { AddStopButton } from '../../routes/[id]/add-stop-button';
 import { RemoveVehicleButton } from './remove-vehicle-button';
@@ -291,6 +292,21 @@ export function RouteStopsCard({
     });
   }
 
+  // Bug-#L4 mitigation: re-calcular ETAs sin tocar el orden. Útil cuando admin
+  // reordenó post-publish y las ETAs originales quedaron obsoletas. NO llama
+  // optimizer — solo haversine sobre el orden actual. Barato, instantáneo.
+  function handleRecalcEtas() {
+    startTransition(async () => {
+      const res = await recalculateRouteEtasAction(route.id);
+      if (res.ok) {
+        toast.success('ETAs recalculadas', 'Sin cambiar el orden de las paradas.');
+        router.refresh();
+      } else {
+        toast.error('No se pudo recalcular', res.error);
+      }
+    });
+  }
+
   // Format helpers
   const fmtTime = (iso: string | null) =>
     iso
@@ -363,12 +379,25 @@ export function RouteStopsCard({
           para no romper confianza con el chofer. El banner avisa al dispatcher
           para que tome decisión (re-optimizar si todavía hay margen). */}
       {isPostPublish && route.version > 1 && (
-        <p
-          className="mt-2 rounded border border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] px-2 py-1 text-xs text-[var(--color-warning-fg)]"
+        <div
+          className="mt-2 flex items-center justify-between gap-2 rounded border border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] px-2 py-1.5 text-xs text-[var(--color-warning-fg)]"
           role="status"
         >
-          ⚠️ Las paradas se reordenaron después de publicar — las ETAs mostradas son del orden original y ya no se cumplirán.
-        </p>
+          <span>
+            ⚠️ Las paradas se reordenaron — las ETAs son del orden original.
+          </span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={handleRecalcEtas}
+            isLoading={pending}
+            disabled={pending}
+            title="Re-calcula ETAs con haversine sobre el orden actual. NO re-optimiza."
+          >
+            Re-calcular ETAs
+          </Button>
+        </div>
       )}
 
       {/* Stream C O1 — Re-optimizar con tráfico actual. Solo en post-publish

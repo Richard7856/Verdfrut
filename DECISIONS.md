@@ -3559,5 +3559,122 @@ Toluca. Re-geocodeada con Google Geocoding desde el address completo:
 - Issue #213: Pentest profesional antes de cliente Enterprise.
 - Issue #214: Rotación automática de Service Role Key vía Vault o similar.
 
+## [2026-05-13] ADR-084: Hardening round 2 — anti-fraude arrival + recalc ETAs + TTL crons + service role audit
+
+**Contexto:**
+Sesión de hardening post-N5 para "dejar todo listo para Stream A". 4
+entregables que reducen deuda técnica y preparan el terreno multi-customer:
+
+1. Anti-fraude metadata en arrival (mitigation AV-#7).
+2. Bug-#L4 mitigation: re-calcular ETAs sin re-optimizar.
+3. TTL crons para tablas que crecen sin tope (#53, #210).
+4. Audit completo de `createServiceRoleClient()` usage.
+
+**Decisión:**
+
+### 1. Anti-fraude metadata en `stops` (mitigation AV-#7)
+
+Nueva migración `00000000000035_stops_arrival_audit.sql`:
+- `arrival_was_mocked BOOLEAN NULL` — popula con `pos.mocked` de expo-location.
+- `arrival_distance_meters INT NULL` — distancia haversine al markArrived.
+- `arrival_accuracy_meters FLOAT NULL` — precisión GPS reportada.
+
+`markArrived` en native lee `pos.mocked` (Android-only via expo-location) y
+lo persiste junto con el UPDATE de stops. Si es `true`, queda flag en BD para
+que el supervisor + dashboards de fraude futuros detecten patrones.
+
+Decisión consciente: NO bloqueamos el checkin si está mockeado. El stop sigue
+marcando `status='arrived'`. La decisión de qué hacer con esto (alerta,
+auto-rechazo, escalar a supervisor) queda en una Edge Function server-side
+(issue #179) cuando llegue clientes con choferes 3P. Hoy con NETO (empleados
+directos) el flag es solo audit.
+
+### 2. Bug-#L4 mitigation: botón "Re-calcular ETAs"
+
+`recalculateRouteEtasAction` en `apps/platform/src/app/(app)/routes/actions.ts`
+expone la función existente `recalculateRouteMetrics` (que ya hace haversine
+sobre el orden actual) como server action.
+
+UI: cuando una ruta está post-publish (PUBLISHED/IN_PROGRESS) Y tiene
+`version > 1` (i.e., admin reordenó), el banner amarillo "Las paradas se
+reordenaron — ETAs son del orden original" ahora incluye un botón
+"Re-calcular ETAs" que actualiza planned_arrival_at + planned_departure_at +
+total_distance + total_duration sin tocar el orden ni llamar al optimizer.
+
+Trade-off vs `reoptimizeLiveAction` (ADR-074):
+- recalcEtas: barato, instantáneo, mantiene orden del admin.
+- reoptimizeLive: usa Google Routes con tráfico real, recomendado en
+  IN_PROGRESS para reaccionar a atraso real.
+- El admin elige cuál aplicar según contexto.
+
+### 3. TTL crons (#53, #210)
+
+Dos endpoints nuevos en `apps/platform/src/app/api/cron/`:
+
+- `chat-decisions-cleanup/route.ts` — DELETE rows de `chat_ai_decisions`
+  con `classified_at < now() - 90 days`. Schedule sugerido: 1×/día.
+- `push-subs-cleanup/route.ts` — DELETE rows de `push_subscriptions` con
+  `created_at < now() - 90 days`. Schedule sugerido: 1×/semana.
+
+Ambos usan el mismo patrón que crons existentes (header `x-cron-token`
+vs `CRON_SECRET` + service role + logger.info on delete).
+
+**Importante:** estos crons aún no están en el schedule del user. Cuando
+el user agregue Vercel Cron (en lugar de n8n — recordatorio del memory),
+debe incluir estos dos endpoints nuevos.
+
+### 4. Service role audit (`SERVICE_ROLE_AUDIT.md`)
+
+Documento nuevo que cataloga los 24 call-sites actuales de
+`createServiceRoleClient()` en el monorepo, categorizados:
+
+- ✅ Legítimo (23): crons, push fanout, AI mediator, user mgmt admin API,
+  Control Plane, rate-limit helper, audit dashboard.
+- ⚠️ Sospechoso (1): `driver/.../route/actions.ts:159` que escribe
+  `route_versions` con bypass (AV-#2, issue #63).
+- ? Investigar (1): `platform/.../dispatches/actions.ts:549` no obviamente
+  justificado.
+
+Plan de eliminación pre-Stream A con 7 issues priorizados (#63, #215-#221).
+La métrica de éxito al finalizar Stream A es:
+- 0 calls de service role que pueda servirse con sesión + RLS.
+- Lint rule (`#221`) que prohíbe el uso fuera del allow-list documentado.
+
+**Alternativas consideradas:**
+
+1. **Mover validación arrival a Edge Function ahora** (issue #179): descartado
+   por scope. El flag en BD ya permite detectar fraude post-hoc. La Edge
+   Function es para BLOQUEAR fraude — espera a que llegue cliente con
+   choferes 3P.
+2. **Auto-aplicar recalculateRouteEtasAction** en cada reorder admin:
+   descartado — ADR-035 decidió que el admin elige cuándo recalcular para
+   no romper expectativa del chofer.
+3. **Borrar service role usage del driver en este commit:** descartado por
+   riesgo. Refactor de AV-#2 (route_versions) requiere migración SQL para
+   nueva policy RLS + test cuidadoso. Pre-Stream A, no de oferta.
+
+**Riesgos:**
+
+- **`pos.mocked` solo en Android:** iOS no lo expone. Cuando entre cliente
+  con flota iOS, el flag queda NULL — interpretable como "no detectable
+  desde la app" no como "no mockeado". Mitigación: docs claros + dashboard
+  filtra solo por mocked=true (NULL ≠ true).
+- **TTL crons con retención 90d:** si un cliente Enterprise requiere
+  retención más larga por compliance, configurable per-customer es trabajo
+  Stream A. Hoy es global 90d.
+- **`SERVICE_ROLE_AUDIT.md` es snapshot al 2026-05-13:** nuevos usos pueden
+  agregarse y romper el audit. Issue #221 (ESLint rule) lo previene.
+
+**Mejoras futuras:**
+
+- Issue #222: Aplicar las migraciones 035 + la 034 (push_subs_expo) automáticamente
+  en branches Supabase (no manual via MCP).
+- Issue #223: Tests integration que validan que arrival_was_mocked se
+  propaga correctamente desde markArrived al UPDATE.
+- Issue #224: Dashboard `/admin/fraud-radar` con paneles de:
+  - % stops con arrival_was_mocked=true por chofer/semana.
+  - Distribución de arrival_distance_meters (alerta si <10m frecuente).
+  - Distribución de arrival_accuracy_meters (alerta si >100m frecuente).
+
 
 

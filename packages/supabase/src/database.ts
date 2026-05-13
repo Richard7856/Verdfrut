@@ -566,6 +566,9 @@ export type Database = {
         Row: {
           actual_arrival_at: string | null
           actual_departure_at: string | null
+          arrival_accuracy_meters: number | null
+          arrival_distance_meters: number | null
+          arrival_was_mocked: boolean | null
           created_at: string
           id: string
           load: number[]
@@ -580,6 +583,9 @@ export type Database = {
         Insert: {
           actual_arrival_at?: string | null
           actual_departure_at?: string | null
+          arrival_accuracy_meters?: number | null
+          arrival_distance_meters?: number | null
+          arrival_was_mocked?: boolean | null
           created_at?: string
           id?: string
           load?: number[]
@@ -594,6 +600,9 @@ export type Database = {
         Update: {
           actual_arrival_at?: string | null
           actual_departure_at?: string | null
+          arrival_accuracy_meters?: number | null
+          arrival_distance_meters?: number | null
+          arrival_was_mocked?: boolean | null
           created_at?: string
           id?: string
           load?: number[]

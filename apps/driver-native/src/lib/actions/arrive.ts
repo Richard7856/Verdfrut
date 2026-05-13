@@ -111,13 +111,32 @@ export async function markArrived(ctx: StopContext): Promise<ArriveResult> {
     };
   }
 
-  // 4. Update del stop. RLS valida que el chofer pueda.
+  // 4. Update del stop con metadata de audit (ADR-084 / AV-#7).
+  //    `pos.mocked` solo existe en Android — en iOS o si el platform no
+  //    reporta, queda null. Eso es deseable: indica "no medido" no "false".
   const nowIso = new Date().toISOString();
+  const wasMocked =
+    typeof (pos as unknown as { mocked?: boolean }).mocked === 'boolean'
+      ? (pos as unknown as { mocked: boolean }).mocked
+      : null;
   const { error: stopErr } = await supabase
     .from('stops')
-    .update({ status: 'arrived', actual_arrival_at: nowIso })
+    .update({
+      status: 'arrived',
+      actual_arrival_at: nowIso,
+      arrival_was_mocked: wasMocked,
+      arrival_distance_meters: Math.round(distance),
+      arrival_accuracy_meters: pos.coords.accuracy ?? null,
+    })
     .eq('id', ctx.stop.id);
   if (stopErr) return { ok: false, error: `Stop: ${stopErr.message}` };
+
+  // Si detectamos mock location, logueamos warning para que el supervisor
+  // lo investigue. El stop SÍ se marca arrived — la decisión de bloquear o
+  // no checkins mockeados queda para Edge Function server-side (issue #179).
+  if (wasMocked === true) {
+    console.warn('[markArrived] pos.mocked=true detectado — flag persistido en stops.arrival_was_mocked');
+  }
 
   // 5. Si la ruta estaba PUBLISHED, promover a IN_PROGRESS.
   // Best-effort — si falla, igual marcamos arrival como exitosa (el web hace lo
