@@ -4767,6 +4767,162 @@ scripts probados se mapeó 1:1 a las tools.
 
 
 
+## [2026-05-13] ADR-093: Ola 2 / 2.3 — UX polish demo-ready
+
+**Contexto:**
+El user va a negociar precio con los socios de NETO. Su hermano ya
+recomendó el producto, pero los socios buscan bajar precio "por todos
+lados". 2.3 transforma el agente de "demo funcional" a "producto que
+defiende el precio".
+
+Decisión del user (2026-05-13): no hacer pricing/quotas todavía (2.5);
+priorizar polish visible que el operador note en demo.
+
+**Decisión: 3 sub-commits incrementales**
+
+### 2.3.a — Streaming real + tool UI condensada + dark mode
+
+- **Runner**: `anthropic.messages.create()` → `.stream()`. Eventos
+  `stream.on('text', delta)` y `stream.on('thinking', delta)` emiten
+  al SSE token-by-token. Antes el texto aparecía de golpe al final del
+  turn; ahora se ve "typing". Recolectamos final con `finalMessage()`.
+- **TurnView de tool**: rediseñado a una línea compacta con icon
+  emoji + Badge + summary humano. JSON técnico colapsado en
+  `<details>`. Map TOOL_ICON con 18 entradas (📋 reads, ➕ creates,
+  🚀 publish, 🚫 cancel, 🗑️ destroy, 🌍 places, 🏪 store, 📊 xlsx,
+  📦 bulk, etc.). Errors en color crítico.
+- **Dark mode fix**: bubbles user con `color-mix(in oklch,
+  var(--vf-bg) 75%, var(--vf-green-500) 25%)` en lugar de
+  `--vf-green-100` hardcoded. Funciona en light/dark. Tool cards
+  con `--vf-surface-2` (existe en dark theme). Drop overlay con
+  color-mix dinámico.
+
+### 2.3.b — Confirmation previews enriquecidos
+
+Nuevo módulo `packages/orchestrator/src/previews.ts` con
+`enrichPreviewForTool(name, args, ctx) → EnrichedPreview` que tiene
+8 enrichers custom server-side:
+
+- `publish_dispatch`: lee tiro + rutas + choferes + stops → muestra
+  zona, todas las rutas, total paradas, choferes con nombre,
+  advertencia "los N choferes recibirán push".
+- `cancel_dispatch`: cuenta rutas activas + advertencia "los choferes
+  las verán desaparecer" si hay PUBLISHED/IN_PROGRESS.
+- `reassign_driver`: nombres del chofer anterior y nuevo + warning
+  si la ruta está live.
+- `add_route_to_dispatch`: nombre del tiro/vehículo/chofer + lista
+  de tiendas a agregar.
+- `add_stop_to_route`, `remove_stop`: contexto de la parada/ruta.
+- `bulk_create_stores`: cuenta total + dry_run mode + muestra
+  primeras 5 tiendas.
+- `create_store`: zona name + coords.
+
+Try/catch: si el enricher falla, fallback genérico con warning. El
+runner emite `confirmation_required` con `preview` enriquecido. UI
+`ConfirmationCard` renderiza headline bold + bullets con prefix `·`
++ warnings en color warn/critical.
+
+**Antes** (genérico):
+```
+El agente quiere ejecutar: publish_dispatch
+{ "dispatch_id": "abc-123" }
+```
+
+**Ahora**:
+```
+Publicar "TOL Mañana" (2026-05-14)
+· Zona: Toluca
+· 3 ruta(s): VFR-T01, VFR-T02, VFR-T03
+· Total paradas: 18
+· Choferes asignados: Juan Pérez, María González
+⚠ Los 2 chofer(es) recibirán push notification al publicar.
+[ Rechazar ]  [ Aprobar y ejecutar ]
+```
+
+### 2.3.c — Costo MXN + sesiones laterales
+
+- **Pricing constants** en chat-client: $3/$15 por Mtok Sonnet 4.6,
+  cache write 1.25x ($3.75), cache read 0.1x ($0.30), USD→MXN 18.
+  Función `costMxnFor({in, out, cacheWrite, cacheRead})`.
+- **Footer del chat**: muestra tokens + cache hits + **costo MXN
+  total** de la sesión con `Intl.NumberFormat` en `es-MX`. Le
+  permite al operador (y al inversionista) ver costo real por
+  conversación — defiende narrative de pricing tier-based.
+- **Sidebar de sesiones**: `apps/platform/src/app/api/orchestrator/sessions/route.ts`
+  (lista) + `[id]/route.ts` (carga histórico). UI con botón "+ Nueva
+  conversación" + lista de últimas 30 con título + acciones + fecha.
+  Click → carga historial vía `loadSession(id)`. Highlight de la
+  sesión activa. `refreshSessions()` se llama al terminar cada turn.
+
+**Alternativas consideradas:**
+
+- **Mover preview generation al modelo via tool extra**: rechazado
+  porque agrega 1 round-trip extra al modelo (latencia + costo) por
+  cada destructive. Server-side query directo es más rápido y
+  determinístico.
+- **Pricing en USD nativo con switch**: rechazado por simplicidad.
+  El user opera en México con clientes que pagan en MXN. Switch a
+  futuro si entran clientes US.
+- **Mostrar costo proyectado del mes**: rechazado para V1 — requiere
+  agregar quota check + lookup mensual cada turn. Se hará en 2.5
+  con el módulo de gating completo.
+- **Sesiones laterales con virtualization**: rechazado porque cap a
+  30 sesiones es manejable nativo. Si user tiene 1000+ sesiones
+  (improbable V1), agregar `react-window`.
+
+**Riesgos / Limitaciones:**
+
+- **Streaming `.on('text')` solo emite blocks tipo text** — no
+  emite los tool_use deltas individuales. Si Claude tarda en
+  decidir qué tool usar, el user ve "pensando…" sin update visible.
+  Para 2.6: usar `stream.on('inputJson', ...)` y mostrar los args
+  de la tool en construcción.
+- **Pricing constants hardcoded en client component** — si Anthropic
+  cambia precios, hay que tocar código. Mejor mover a env var o
+  config server. Issue #257.
+- **Enrichers hacen 1-4 queries cada uno**: añade ~100-300ms al
+  modal de confirmación. Aceptable para confirm (es síncrono con
+  decisión humana), pero si llegamos a 50 enrichers, pre-fetch en
+  paralelo con runner.
+- **`loadSession` reconstruye turns desde messages JSONB** y SOLO
+  renderiza text blocks de assistant + texto plano del user. Pierde
+  tool_use cards al recargar conversación. Mitigación 2.6: render
+  completo del historial con tool blocks expandibles.
+- **Sidebar siempre visible en md+**: en mobile (< 768px) escondido
+  con `hidden md:flex`. Para mobile real se requiere un drawer o
+  hamburger menu — mobile no es prioridad demo (operador trabaja
+  desktop).
+
+**Oportunidades de mejora futuras:**
+
+- Issue #257: pricing constants → server config.
+- Issue #258: streaming de tool_use input_json deltas para "construyendo
+  tool…" en vivo.
+- Issue #259: cuando recargas sesión, render completo incluyendo
+  tool_use cards (no solo text).
+- Issue #260: mobile drawer para sidebar.
+- Issue #261: archivar/renombrar sesiones desde el sidebar
+  (PATCH `/api/orchestrator/sessions/[id]`).
+- Issue #262: filtros en el sidebar (por estado, por fecha, search).
+
+**Status al cierre de ADR-093 / Ola 2 / 2.3:**
+
+- Streaming real funcionando.
+- Confirmation modal con preview enriquecido (8 tools cubiertas).
+- Sidebar de sesiones con load/new.
+- Costo MXN visible.
+- Dark mode legible.
+- Type-check 13/13 verde.
+- El agente ya está demo-ready: visualmente coherente, da feedback
+  vivo, los modales explican impacto, costo transparente. Defendible
+  vs JSON-dump look-and-feel.
+
+
+
+
+
+
+
 
 
 

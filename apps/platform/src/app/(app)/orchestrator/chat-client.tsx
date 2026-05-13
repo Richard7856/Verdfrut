@@ -43,6 +43,39 @@ interface UploadedAttachment {
   parse_error: string | null;
 }
 
+// Pricing constants — Claude Sonnet 4.6 (anthropic.com/pricing).
+// Cache write usa multiplicador 1.25x, cache read 0.1x.
+const PRICE_IN_PER_MTOK_USD = 3.0;
+const PRICE_OUT_PER_MTOK_USD = 15.0;
+const PRICE_CACHE_WRITE_PER_MTOK_USD = 3.75;
+const PRICE_CACHE_READ_PER_MTOK_USD = 0.3;
+const USD_TO_MXN = 18.0;
+
+function costMxnFor(tokens: {
+  in: number;
+  out: number;
+  cacheWrite: number;
+  cacheRead: number;
+}): number {
+  const usd =
+    (tokens.in / 1_000_000) * PRICE_IN_PER_MTOK_USD +
+    (tokens.out / 1_000_000) * PRICE_OUT_PER_MTOK_USD +
+    (tokens.cacheWrite / 1_000_000) * PRICE_CACHE_WRITE_PER_MTOK_USD +
+    (tokens.cacheRead / 1_000_000) * PRICE_CACHE_READ_PER_MTOK_USD;
+  return usd * USD_TO_MXN;
+}
+
+interface SessionListItem {
+  id: string;
+  title: string | null;
+  state: 'open' | 'closed' | 'archived';
+  last_message_at: string | null;
+  total_tokens_in: number;
+  total_tokens_out: number;
+  total_actions: number;
+  updated_at: string;
+}
+
 export function OrchestratorChat() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -50,14 +83,99 @@ export function OrchestratorChat() {
   const [streaming, setStreaming] = useState(false);
   const [pendingConfirmation, setPendingConfirmation] =
     useState<ConfirmationRequest | null>(null);
-  const [usage, setUsage] = useState<{ tokensIn: number; tokensOut: number } | null>(null);
+  const [usage, setUsage] = useState<{
+    in: number;
+    out: number;
+    cacheWrite: number;
+    cacheRead: number;
+  }>({ in: 0, out: 0, cacheWrite: 0, cacheRead: 0 });
   const [pendingAttachments, setPendingAttachments] = useState<UploadedAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<SessionListItem[]>([]);
+  const [showSidebar, setShowSidebar] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dropRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Cargar lista de sesiones al montar y cuando termina un turno.
+  async function refreshSessions() {
+    try {
+      const res = await fetch('/api/orchestrator/sessions');
+      if (!res.ok) return;
+      const body = (await res.json()) as { sessions: SessionListItem[] };
+      setSessions(body.sessions);
+    } catch {
+      // silencioso
+    }
+  }
+
+  useEffect(() => {
+    void refreshSessions();
+  }, []);
+
+  async function loadSession(id: string) {
+    if (streaming) return;
+    setSessionId(id);
+    setTurns([]);
+    setPendingConfirmation(null);
+    setUsage({ in: 0, out: 0, cacheWrite: 0, cacheRead: 0 });
+    try {
+      const res = await fetch(`/api/orchestrator/sessions/${id}`);
+      if (!res.ok) return;
+      const body = (await res.json()) as {
+        session: SessionListItem;
+        messages: Array<{ id: string; role: string; content: unknown }>;
+      };
+      // Render simplificado: cada message → turn.
+      const restoredTurns: ChatTurn[] = [];
+      for (const m of body.messages) {
+        if (m.role === 'user') {
+          // content puede ser string directo o array de blocks.
+          const text =
+            typeof m.content === 'string'
+              ? m.content
+              : Array.isArray(m.content)
+                ? m.content
+                    .filter((b) => typeof b === 'object' && b && 'type' in b && (b as { type: string }).type === 'text')
+                    .map((b) => (b as { text: string }).text)
+                    .join('\n')
+                : '';
+          if (text) {
+            restoredTurns.push({ id: m.id, role: 'user', text });
+          }
+        } else if (m.role === 'assistant') {
+          if (Array.isArray(m.content)) {
+            for (const block of m.content) {
+              const b = block as { type: string; text?: string; name?: string };
+              if (b.type === 'text' && b.text) {
+                restoredTurns.push({ id: m.id + '-t', role: 'assistant', text: b.text });
+              }
+            }
+          }
+        }
+      }
+      setTurns(restoredTurns);
+      setUsage({
+        in: body.session.total_tokens_in,
+        out: body.session.total_tokens_out,
+        cacheWrite: 0,
+        cacheRead: 0,
+      });
+    } catch {
+      // silencioso
+    }
+  }
+
+  function startNew() {
+    if (streaming) return;
+    setSessionId(null);
+    setTurns([]);
+    setPendingConfirmation(null);
+    setUsage({ in: 0, out: 0, cacheWrite: 0, cacheRead: 0 });
+    setPendingAttachments([]);
+  }
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -233,10 +351,17 @@ export function OrchestratorChat() {
               preview: evt.preview as ConfirmationRequest['preview'],
             });
           } else if (evt.type === 'message_end') {
-            const u = evt.usage as { input_tokens: number; output_tokens: number };
+            const u = evt.usage as {
+              input_tokens: number;
+              output_tokens: number;
+              cache_creation_input_tokens?: number;
+              cache_read_input_tokens?: number;
+            };
             setUsage((prev) => ({
-              tokensIn: (prev?.tokensIn ?? 0) + u.input_tokens,
-              tokensOut: (prev?.tokensOut ?? 0) + u.output_tokens,
+              in: prev.in + u.input_tokens,
+              out: prev.out + u.output_tokens,
+              cacheWrite: prev.cacheWrite + (u.cache_creation_input_tokens ?? 0),
+              cacheRead: prev.cacheRead + (u.cache_read_input_tokens ?? 0),
             }));
           } else if (evt.type === 'error') {
             setTurns((prev) => [
@@ -261,6 +386,7 @@ export function OrchestratorChat() {
       ]);
     } finally {
       setStreaming(false);
+      void refreshSessions();
     }
   }
 
@@ -271,7 +397,59 @@ export function OrchestratorChat() {
     void send(undefined, { tool_use_id: conf.tool_use_id, approved });
   }
 
+  const costMxn = costMxnFor(usage);
+  const fmtMxn = new Intl.NumberFormat('es-MX', {
+    style: 'currency',
+    currency: 'MXN',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  });
+
   return (
+    <div className="flex h-[calc(100vh-200px)] gap-3">
+      {showSidebar && (
+        <aside
+          className="hidden w-56 shrink-0 flex-col gap-2 overflow-y-auto md:flex"
+          style={{ borderRight: '1px solid var(--color-border)', paddingRight: '8px' }}
+        >
+          <Button onClick={startNew} disabled={streaming} variant="outline">
+            + Nueva conversación
+          </Button>
+          <p className="mt-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+            Recientes
+          </p>
+          {sessions.length === 0 && (
+            <p className="text-xs text-[var(--color-text-muted)]">Sin sesiones previas.</p>
+          )}
+          {sessions.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => void loadSession(s.id)}
+              disabled={streaming}
+              className="w-full rounded-[var(--radius-sm)] border px-2 py-1.5 text-left text-xs transition-colors"
+              style={{
+                background:
+                  sessionId === s.id
+                    ? 'color-mix(in oklch, var(--vf-bg) 75%, var(--vf-green-500) 25%)'
+                    : 'transparent',
+                borderColor:
+                  sessionId === s.id
+                    ? 'color-mix(in oklch, var(--vf-green-500) 40%, transparent)'
+                    : 'var(--color-border)',
+                color: 'var(--color-text)',
+              }}
+            >
+              <p className="line-clamp-2 font-medium">
+                {s.title ?? 'Sin título'}
+              </p>
+              <p className="mt-0.5 text-[10px] text-[var(--color-text-muted)]">
+                {s.total_actions} acción(es) · {new Date(s.updated_at).toLocaleDateString('es-MX')}
+              </p>
+            </button>
+          ))}
+        </aside>
+      )}
+
     <div
       ref={dropRef}
       onDragOver={(e) => {
@@ -280,7 +458,7 @@ export function OrchestratorChat() {
       }}
       onDragLeave={() => setIsDragging(false)}
       onDrop={handleDrop}
-      className="relative flex h-[calc(100vh-200px)] flex-col gap-3"
+      className="relative flex flex-1 min-w-0 flex-col gap-3"
     >
       {isDragging && (
         <div
@@ -404,11 +582,25 @@ export function OrchestratorChat() {
         </Button>
       </div>
 
-      {usage && (
-        <p className="text-right text-[10px] text-[var(--color-text-muted)]">
-          Esta sesión: {usage.tokensIn.toLocaleString()} in · {usage.tokensOut.toLocaleString()} out
-        </p>
-      )}
+      <div className="flex items-center justify-between text-[10px] text-[var(--color-text-muted)]">
+        <span>
+          {showSidebar ? null : (
+            <button
+              onClick={() => setShowSidebar(true)}
+              className="hover:underline"
+            >
+              📋 Sesiones
+            </button>
+          )}
+        </span>
+        <span className="text-right">
+          Esta sesión: {usage.in.toLocaleString()} in · {usage.out.toLocaleString()} out
+          {usage.cacheRead > 0 && ` · ${usage.cacheRead.toLocaleString()} cache hits`}
+          {' · '}
+          <span className="font-semibold tabular-nums">{fmtMxn.format(costMxn)}</span>
+        </span>
+      </div>
+    </div>
     </div>
   );
 }
