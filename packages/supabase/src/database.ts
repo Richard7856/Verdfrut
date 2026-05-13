@@ -307,31 +307,37 @@ export type Database = {
       }
       push_subscriptions: {
         Row: {
-          auth: string
+          auth: string | null
           created_at: string
-          endpoint: string
+          endpoint: string | null
+          expo_token: string | null
           id: string
-          p256dh: string
+          p256dh: string | null
+          platform: string
           role: Database["public"]["Enums"]["user_role"]
           user_id: string
           zone_id: string | null
         }
         Insert: {
-          auth: string
+          auth?: string | null
           created_at?: string
-          endpoint: string
+          endpoint?: string | null
+          expo_token?: string | null
           id?: string
-          p256dh: string
+          p256dh?: string | null
+          platform?: string
           role: Database["public"]["Enums"]["user_role"]
           user_id: string
           zone_id?: string | null
         }
         Update: {
-          auth?: string
+          auth?: string | null
           created_at?: string
-          endpoint?: string
+          endpoint?: string | null
+          expo_token?: string | null
           id?: string
-          p256dh?: string
+          p256dh?: string | null
+          platform?: string
           role?: Database["public"]["Enums"]["user_role"]
           user_id?: string
           zone_id?: string | null

@@ -4,6 +4,7 @@
 
 export * from './browser';
 export * from './server';
+export * from './jwt-client';
 export * from './middleware';
 export * from './tenant-registry';
 export * from './types';

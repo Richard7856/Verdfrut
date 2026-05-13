@@ -7,6 +7,11 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { View, ActivityIndicator } from 'react-native';
 import { useAuth } from '@/lib/auth';
 
+// Side-effect import — TaskManager.defineTask debe ejecutarse top-level cuando
+// el bundle carga, no en useEffect. Sin esto, el OS no encuentra la tarea
+// cuando wakea el JS engine en background.
+import '@/lib/gps-task';
+
 export default function RootLayout() {
   return (
     <SafeAreaProvider>

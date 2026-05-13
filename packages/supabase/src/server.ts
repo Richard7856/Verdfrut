@@ -9,6 +9,7 @@ import { createServerClient as createSSRServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import type { Database } from './database';
 import type { VerdFrutSupabaseClient } from './types';
+export { createJwtClient } from './jwt-client';
 
 /**
  * Crea un cliente Supabase para el server.

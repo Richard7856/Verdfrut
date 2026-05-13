@@ -4,7 +4,7 @@
 > debe actualizar la sección correspondiente. Fuente de verdad para "¿cómo
 > está el producto hoy?".
 >
-> **Última actualización**: 2026-05-12.
+> **Última actualización**: 2026-05-12 (post N5).
 > **Owner**: Richard.
 
 ---
@@ -314,10 +314,10 @@ Reemplaza el PWA driver actual por app React Native nativa.
 | Fase | Meta | DoD |
 |---|---|---|
 | N1 ✅ | Setup Expo + auth Supabase + scaffold | **DONE 2026-05-12** — apps/driver-native/ creado, login funcional, pantalla placeholder. ADR-075. |
-| N2 | Pantalla "Mi ruta del día" | Lista paradas + mapa nativo overview |
-| N3 | Detalle parada + deeplink Google Maps + GPS bg | Chofer puede "Navegar", app trackea en bg |
-| N4 | Evidencia: cámara + OCR + offline queue | Foto + ticket extraction funciona offline |
-| N5 | Chat + push notifs nativas | Chat con supervisor funciona como en PWA actual |
+| N2 ✅ | Pantalla "Mi ruta del día" | **DONE 2026-05-12** — mapa nativo + lista de paradas + cache offline + pull-to-refresh. ADR-076. |
+| N3 ✅ | Detalle parada + deeplink Waze/Maps + GPS bg | **DONE 2026-05-12** — detalle parada + marcar llegada con geo + GPS background con foreground service + indicador en header. ADR-077, ADR-078. |
+| N4 ✅ | Evidencia: cámara + OCR + offline queue | **DONE 2026-05-12** — single-screen entrega + OCR vía proxy platform + outbox SQLite con retry exponencial + indicador en header. ADR-079, ADR-080. |
+| N5 ✅ | Chat + push notifs nativas | **DONE 2026-05-12** — chat realtime estilo WhatsApp + push tokens Expo + fanout extendido. Pendiente: deeplink en tap, mediator AI desde native, push inverso supervisor→chofer (N5-bis). ADR-081, ADR-082. |
 | N6 | Beta interna con 1 chofer | 1 chofer operando 1 semana sin issues |
 | N7 | TestFlight + Play Internal Testing | Build de release firmado en ambas stores |
 | N8 | Publish stores | App descargable desde App Store + Play Store |

@@ -2,8 +2,8 @@
 
 App nativa Android del chofer TripDrive. Construida con Expo + React Native.
 
-**Estado**: Fase N1 (scaffold + login + placeholder). Ver `STREAM_B_NATIVE_APP.md`
-en el root del repo para roadmap completo.
+**Estado**: Fase N5 (chat realtime + push notifications nativas). Ver
+`STREAM_B_NATIVE_APP.md` en el root del repo para roadmap completo.
 
 **Plataforma**: Android únicamente en V1. iOS pospuesto (ver ADR-075 + ADR-067).
 
@@ -35,10 +35,25 @@ Crear `apps/driver-native/.env.local` (NO commitear):
 ```bash
 EXPO_PUBLIC_SUPABASE_URL=https://hidlxgajcjbtlwyxerhy.supabase.co
 EXPO_PUBLIC_SUPABASE_ANON_KEY=<anon-key-del-tenant>
+
+# Para que react-native-maps renderice tiles (N2+):
+GOOGLE_MAPS_ANDROID_API_KEY=<api-key-con-Maps-SDK-for-Android-habilitado>
 ```
+
+> ⚠️ **Maps SDK for Android**: la API key debe tener "Maps SDK for Android"
+> habilitado en GCP Console → APIs & Services → Library. Sin esto, el mapa
+> de la pantalla `/route` renderiza gris (los pines y la lista siguen
+> funcionando, pero sin tiles). En producción se recomienda crear una key
+> separada con restricción de fingerprint SHA-1 del APK.
 
 En producción, las credenciales se setean via EAS Secrets (`eas secret:create`)
 para que viajen al build sin estar en el repo.
+
+### Cómo se inyectan las vars
+
+`app.config.js` (en el root del workspace) extiende `app.json` y lee las
+vars de `process.env` al momento de build/start. Esto permite mantener
+`app.json` versionado en repo sin secretos y tener config dinámica para EAS.
 
 ### Correr en desarrollo
 

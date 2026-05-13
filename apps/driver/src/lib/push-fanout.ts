@@ -6,11 +6,19 @@
 // el archivo es server-only y los apps no comparten src/. Mover a paquete
 // `@tripdrive/notifications` valdrá cuando aparezca el tercer consumidor.
 // Por ahora copiamos la pieza mínima que driver necesita.
+//
+// ADR-081 (Stream B / N5): el fanout también envía a tokens nativos Expo
+// (`platform='expo'`) cuando el destinatario es un chofer con la app nativa.
+// La query trae ambos tipos de subs (web + expo); el loop divide y manda por
+// cada canal correspondiente (web-push vs Expo Push API).
 
 import 'server-only';
 import webpush from 'web-push';
+import { Expo, type ExpoPushMessage } from 'expo-server-sdk';
 import { createServiceRoleClient } from '@tripdrive/supabase/server';
 import { logger } from '@tripdrive/observability';
+
+const expo = new Expo();
 
 let vapidConfigured = false;
 function ensureVapidConfigured(): boolean {
@@ -40,12 +48,18 @@ interface ChatPushParams {
  * El URL apunta a la app de plataforma (env DRIVER_APP_URL no aplica aquí —
  * el comercial vive en NEXT_PUBLIC_PLATFORM_URL o equivalente).
  */
-export async function sendChatPushToZoneManagers(params: ChatPushParams): Promise<void> {
-  if (!ensureVapidConfigured()) {
-    await logger.warn('chat.push VAPID no configurado — push omitido', { ...params });
-    return;
-  }
+interface PushSubRow {
+  id: string;
+  platform: 'web' | 'expo';
+  endpoint: string | null;
+  p256dh: string | null;
+  auth: string | null;
+  expo_token: string | null;
+  role: string;
+  zone_id: string | null;
+}
 
+export async function sendChatPushToZoneManagers(params: ChatPushParams): Promise<void> {
   const supabase = createServiceRoleClient();
 
   // V2: fanout amplio — envía a TODOS los que pueden actuar sobre el reporte:
@@ -55,7 +69,7 @@ export async function sendChatPushToZoneManagers(params: ChatPushParams): Promis
   // RLS bypaseada con service role.
   const { data: subs, error } = await supabase
     .from('push_subscriptions')
-    .select('id, endpoint, p256dh, auth, role, zone_id')
+    .select('id, platform, endpoint, p256dh, auth, expo_token, role, zone_id')
     .or(
       `and(role.eq.zone_manager,zone_id.eq.${params.zoneId}),role.eq.admin,role.eq.dispatcher`,
     );
@@ -69,32 +83,134 @@ export async function sendChatPushToZoneManagers(params: ChatPushParams): Promis
     return;
   }
 
-  const platformUrl = process.env.PLATFORM_APP_URL ?? 'http://localhost:3000';
-  const payload = JSON.stringify({
-    title: 'Nuevo chat de incidencia',
-    body: 'Un chofer abrió un caso. Toca para responder.',
-    url: `${platformUrl}/incidents/${params.reportId}`,
-    tag: `chat-${params.reportId}`,
-  });
+  const rows = subs as PushSubRow[];
+  const webSubs = rows.filter((s) => s.platform === 'web');
+  const expoSubs = rows.filter((s) => s.platform === 'expo');
 
-  for (const sub of subs as Array<{ id: string; endpoint: string; p256dh: string; auth: string }>) {
+  const platformUrl = process.env.PLATFORM_APP_URL ?? 'http://localhost:3000';
+  const title = 'Nuevo chat de incidencia';
+  const body = 'Un chofer abrió un caso. Toca para responder.';
+  const reportUrl = `${platformUrl}/incidents/${params.reportId}`;
+  const tag = `chat-${params.reportId}`;
+
+  await Promise.all([
+    sendWebPushBatch(webSubs, { title, body, url: reportUrl, tag }),
+    sendExpoPushBatch(expoSubs, {
+      title,
+      body,
+      data: { reportId: params.reportId, url: reportUrl },
+    }),
+  ]);
+}
+
+interface WebPayload {
+  title: string;
+  body: string;
+  url: string;
+  tag: string;
+}
+
+async function sendWebPushBatch(subs: PushSubRow[], payload: WebPayload): Promise<void> {
+  if (subs.length === 0) return;
+  if (!ensureVapidConfigured()) {
+    await logger.warn('chat.push VAPID no configurado — webpush omitido', {});
+    return;
+  }
+  const supabase = createServiceRoleClient();
+  const body = JSON.stringify(payload);
+
+  for (const sub of subs) {
+    if (!sub.endpoint || !sub.p256dh || !sub.auth) continue;
     try {
       await webpush.sendNotification(
         {
           endpoint: sub.endpoint,
           keys: { p256dh: sub.p256dh, auth: sub.auth },
         },
-        payload,
+        body,
         { TTL: 3600, urgency: 'high' },
       );
     } catch (err) {
       const statusCode = (err as { statusCode?: number }).statusCode;
       if (statusCode === 404 || statusCode === 410) {
         await supabase.from('push_subscriptions').delete().eq('id', sub.id);
-        console.info(`[chat.push] suscripción ${sub.id} eliminada (${statusCode})`);
+        console.info(`[chat.push.web] suscripción ${sub.id} eliminada (${statusCode})`);
       } else {
-        await logger.error('[chat.push] envío falló', { err, subscriptionId: sub.id });
+        await logger.error('[chat.push.web] envío falló', { err, subscriptionId: sub.id });
       }
     }
+  }
+}
+
+interface ExpoPayload {
+  title: string;
+  body: string;
+  data: Record<string, string>;
+}
+
+async function sendExpoPushBatch(subs: PushSubRow[], payload: ExpoPayload): Promise<void> {
+  if (subs.length === 0) return;
+
+  const supabase = createServiceRoleClient();
+
+  // Construir mensajes válidos. Tokens inválidos los removemos de la DB.
+  const messages: ExpoPushMessage[] = [];
+  const subBySendIndex: PushSubRow[] = []; // para mapear ticket→sub al recibir error
+  const invalidSubIds: string[] = [];
+
+  for (const sub of subs) {
+    if (!sub.expo_token || !Expo.isExpoPushToken(sub.expo_token)) {
+      invalidSubIds.push(sub.id);
+      continue;
+    }
+    messages.push({
+      to: sub.expo_token,
+      sound: 'default',
+      title: payload.title,
+      body: payload.body,
+      data: payload.data,
+      priority: 'high',
+      channelId: 'default',
+    });
+    subBySendIndex.push(sub);
+  }
+
+  if (invalidSubIds.length > 0) {
+    await supabase.from('push_subscriptions').delete().in('id', invalidSubIds);
+    console.info(`[chat.push.expo] removidos ${invalidSubIds.length} tokens inválidos`);
+  }
+
+  if (messages.length === 0) return;
+
+  // Expo recomienda chunkear hasta 100 mensajes por request.
+  const chunks = expo.chunkPushNotifications(messages);
+  let subOffset = 0;
+  for (const chunk of chunks) {
+    if (!chunk) continue;
+    try {
+      const tickets = await expo.sendPushNotificationsAsync(chunk);
+      // Si el ticket dice "DeviceNotRegistered", el token ya no sirve —
+      // limpiarlo. Otros errores los logueamos.
+      for (let j = 0; j < tickets.length; j++) {
+        const ticket = tickets[j];
+        const sub = subBySendIndex[subOffset + j];
+        if (ticket && ticket.status === 'error') {
+          const code = ticket.details?.error;
+          if (code === 'DeviceNotRegistered' && sub) {
+            await supabase.from('push_subscriptions').delete().eq('id', sub.id);
+            console.info(`[chat.push.expo] token ${sub.id} removido (DeviceNotRegistered)`);
+          } else {
+            await logger.error('[chat.push.expo] ticket error', {
+              code,
+              message: ticket.message,
+              subscriptionId: sub?.id,
+            });
+          }
+        }
+      }
+    } catch (err) {
+      await logger.error('[chat.push.expo] chunk send falló', { err });
+    }
+    subOffset += chunk.length;
   }
 }

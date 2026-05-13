@@ -2731,3 +2731,746 @@ Crear nuevo workspace `apps/driver-native/` con:
 - Issue #171: Compartir más packages workspace (`@tripdrive/ai`,
   `@tripdrive/utils`) cuando las pantallas de evidencia/chat lleguen (N4-N5).
 - Issue #172: Tests E2E con Maestro o Detox cuando la app pase Fase N5.
+
+## [2026-05-12] ADR-076: Stream B / Fase N2 — Pantalla "Mi ruta del día" con mapa nativo + cache offline
+
+**Contexto:**
+Fase N1 (ADR-075) entregó el scaffold: login funcional + pantalla placeholder.
+N2 es la primera pantalla operativa real: el chofer debe ver su ruta del día
+con mapa nativo arriba y lista de paradas abajo. La meta de N2 es que el
+chofer pueda "abrir la app y entender qué le toca hoy" — todavía sin navegar
+(N3) ni reportar (N4), pero con todos los datos visibles.
+
+Dos decisiones técnicas relevantes salen aquí:
+1. **Cómo se comparten los queries entre web driver y native driver** —
+   ¿package compartido o duplicación?
+2. **Cómo se cachean los datos para soportar conectividad intermitente** —
+   los choferes operan en zonas con cobertura irregular en CDMX.
+
+**Decisión:**
+
+### 1. Queries duplicados, no package compartido
+
+`apps/driver-native/src/lib/queries/route.ts` replica `getDriverRouteForDate`,
+`getRouteStopsWithStores` y agrega `getRouteDepot` + `getDriverRouteBundle`.
+La estructura row→domain es idéntica a `apps/driver/src/lib/queries/route.ts`.
+
+Razón: el cliente Supabase es distinto entre los dos (anon-key + AsyncStorage
+en native vs cookies SSR en web). Compartir requeriría inyectar el cliente
+como dependencia, lo cual fuerza una abstracción que **no sabemos si vamos
+a necesitar** hasta N3-N5 (donde se sumarán queries de stops, breadcrumbs,
+chat). Aplicamos la regla de CLAUDE.md: "tres líneas similares es mejor que
+una abstracción prematura". Cuando N5 cierre, evaluamos qué se mueve a un
+package `@tripdrive/queries` y qué queda divergiendo.
+
+### 2. Cache offline con AsyncStorage + stale-while-revalidate
+
+Patrón:
+- `src/lib/cache.ts` expone `readCache`, `writeCache`, `clearCacheNamespace`
+  con versionado (`v1`) y TTL (24h default).
+- `useRoute` hook lee cache primero al mount → muestra data inmediatamente
+  con flag `isStale=true` → en paralelo hace fetch real → cuando llega lo
+  guarda y limpia el flag.
+- Si el fetch falla y había cache, se mantiene la cache + se muestra
+  `ErrorBanner` con el mensaje del error.
+- Si el fetch falla y NO había cache, queda `EmptyRoute` con botón "Reintentar".
+- El cache key incluye `userId` + `date` — un chofer no ve cache de otro,
+  y el cache de ayer no se confunde con el de hoy.
+
+### 3. Mapa: react-native-maps con PROVIDER_GOOGLE
+
+Pines con color por status (azul=pending, amarillo=arrived, verde=completed,
+gris=skipped, morado=depot). `fitToCoordinates` ajusta bounds automáticamente
+con padding de 40px. Tap en pin scrollea a la StopCard correspondiente y la
+resalta con borde verde.
+
+Sin clustering en V1 — N esperado < 30 stops por ruta. Si el primer cliente
+escala a rutas más densas, abrimos issue #174 para clustering.
+
+### 4. Config dinámica: app.config.js extiende app.json
+
+Convertimos config estática (`app.json`) en config dinámica (`app.config.js`
+que la extiende). Esto permite inyectar `GOOGLE_MAPS_ANDROID_API_KEY` desde
+env vars sin commitearla. Mismo patrón aplica a `EXPO_PUBLIC_SUPABASE_URL`
+y `EXPO_PUBLIC_SUPABASE_ANON_KEY` que `src/lib/supabase.ts` ya leía.
+
+**Alternativas consideradas:**
+
+1. **Package `@tripdrive/queries` con cliente inyectable**: descartado por
+   prematuro. Volvemos al tema después de N5.
+2. **expo-sqlite en lugar de AsyncStorage para cache**: descartado para N2.
+   SQLite tiene sentido para el outbox de evidencia (N4) donde necesitamos
+   queue ordenada con retry, no para cache de un bundle JSON pequeño.
+3. **React Query / SWR para fetch + cache**: descartado por sobrecarga
+   de dependencia para un único endpoint. El hook custom de 80 líneas hace
+   exactamente lo que necesitamos sin dependencias.
+4. **Mapbox SDK nativo en lugar de Google Maps**: descartado por costo MAU
+   recurrente. Google Maps SDK Android es gratuito hasta 28K loads/mes vs
+   ~$0.50 por 1000 MAU de Mapbox. La diferencia visual no justifica el costo
+   para un mapa de overview.
+5. **`@types/react@~19.0.0`** (heredado del scaffold N1): rompía type-check
+   por incompatibilidad del JSXElementConstructor con forward-refs de RN.
+   Bumpeado a `~19.2.0` que ya estaba en el monorepo via otras apps.
+
+**Riesgos:**
+
+- **Google Maps API key sin "Maps SDK for Android" habilitado**: el mapa
+  renderiza gris. El user ya tiene una key con permisos Routes + Geo
+  (usada por el optimizer y geocoding); requiere habilitar Maps SDK for
+  Android en GCP Console para que esta pantalla muestre tiles. Sin esto,
+  pines y depot siguen visibles sobre fondo gris — funcional pero feo.
+- **Performance con 30+ pines**: `tracksViewChanges={false}` mitiga gran
+  parte del impacto. Si reportan lag, abrimos issue #174 (clustering).
+- **Cache stale después de cambio de ruta del dispatcher**: el chofer puede
+  ver la versión vieja hasta que la red responda. Mitigación: `isStale` lo
+  marca visualmente con banner amarillo. En N5 (chat + push) podemos
+  invalidar el cache al recibir push del dispatcher.
+- **Cache key incluye fecha local del tenant**: si el chofer cruza
+  medianoche con la app abierta, no auto-refresca. Aceptable — siguiente
+  refresh (pull-to-refresh, regreso a foreground en N3) lo arregla.
+
+**Mejoras futuras:**
+
+- Issue #173: Botón "Más info" en StopCard que abre bottom-sheet con
+  contacto + ventana horaria + demanda (preparación para N3).
+- Issue #174: Clustering de pines cuando N > 30 stops en mismo bounds.
+- Issue #175: Pull-to-refresh con feedback háptico (expo-haptics).
+- Issue #176: Snapshot test del RouteMap con datos sintéticos cuando
+  agreguemos test suite (referenciado en KNOWN_ISSUES #145).
+- Issue #177: Invalidar cache al recibir push del dispatcher (N5).
+- Issue #178: Migrar `@tripdrive/queries` cuando N5 cierre y veamos
+  qué realmente se comparte vs diverge entre web/native driver.
+
+## [2026-05-12] ADR-077: Stream B / Fase N3 — GPS background + detalle de parada + Navegar deeplink
+
+**Contexto:**
+Después de N2 el chofer ya ve su ruta del día pero no puede operar: no abre el
+detalle de cada parada, no puede pedir guiado a Waze/Google Maps, no puede
+marcar llegada, y su supervisor no lo ve moverse. N3 cierra esa brecha.
+
+Tres áreas técnicas relevantes:
+1. **Validación de "Marcar llegada"** — anti-fraude geo: ¿client-side o server-side?
+2. **GPS background tracking** en Android 12+ con foreground service obligatorio.
+3. **Deeplinks de navegación** — qué app de mapas se lanza desde "Navegar".
+
+**Decisión:**
+
+### 1. "Marcar llegada" con validación geo client-side (por ahora)
+
+`src/lib/actions/arrive.ts` implementa `markArrived(ctx)` que:
+- Pide permiso foreground si falta.
+- Lee GPS con `Location.getCurrentPositionAsync({ accuracy: High })` + timeout 15s.
+- Calcula `haversineMeters` vs `store.lat/lng`.
+- Si distancia > 300m (`ARRIVAL_RADIUS_METERS_ENTREGA`), devuelve rejection con
+  distancia exacta y umbral — la UI muestra "estás a 2.3km, acércate".
+- Si OK, hace `UPDATE stops SET status='arrived', actual_arrival_at=now()`.
+- Si la ruta estaba PUBLISHED, también la promueve a IN_PROGRESS.
+
+Idempotente: si el stop ya está `arrived` o `completed`, devuelve ok=true.
+
+**¿Por qué client-side, sabiendo que el web la tiene server-side?**
+Porque en native NO tenemos server actions gratis como Next.js. Re-crear esa
+infra (Edge Function de Supabase para `markArrived`) tiene costo en build,
+deploy y test que no se justifica para el primer cliente (NETO, choferes
+empleados directos, modelo de confianza). RLS sigue protegiendo el UPDATE.
+
+**Cuándo migrar a server:** cuando entren clientes con choferes 3P (outsourcing)
+donde el incentivo a marcar llegada falsa es real. Issue #179 abierto para
+mover la validación a una Edge Function `arrive-at-stop`.
+
+### 2. GPS background con `expo-location` + `TaskManager` + foreground service
+
+`src/lib/gps-task.ts` implementa el patrón estándar Expo:
+- `TaskManager.defineTask(GPS_TASK_NAME, callback)` registrado top-level
+  (importado desde `app/_layout.tsx` como side-effect).
+- `Location.startLocationUpdatesAsync` con `accuracy: High`, `distanceInterval: 20`,
+  `timeInterval: 10000`, y `foregroundService` config (notif persistente
+  "TripDrive — siguiendo tu ruta", obligatoria en Android 12+ API 31).
+- El task callback lee state (`routeId`, `driverId`) de AsyncStorage cada vez —
+  no asume que la memoria del JS engine sobrevivió. Si no hay state, se
+  auto-detiene.
+- Throttling: persiste un breadcrumb a `route_breadcrumbs` cada 30s (vs 90s
+  del web), ignorando todos los fixes intermedios.
+
+**¿Por qué SÓLO breadcrumbs y no Realtime broadcast como en el web?**
+Mantener una conexión WebSocket Supabase Realtime estable en background es
+frágil. El OS duerme la red, el WS muere, re-subscribirse en cada wake-up
+del task es lento + costoso. Los breadcrumbs cumplen el rol "supervisor ve
+al chofer moverse" con ~30s de lag — degradación aceptable vs los 8s del
+broadcast del web. Si reportan que se siente lento, agregamos Realtime sobre
+breadcrumbs en un sprint chico (issue #180).
+
+**¿Cuándo se enciende?**
+Sólo cuando `route.status === 'IN_PROGRESS'` Y tenemos `driverId`. PUBLISHED =
+chofer aún no llegó a la primera parada → no consumimos batería. En cuanto
+marca primera llegada, route pasa a IN_PROGRESS, `useGpsBroadcast` lo detecta
+y arranca el task. Al cerrar sesión, `signOut()` lo detiene.
+
+**Indicador visual** en `RouteHeader`: barra de color verde "GPS activo —
+supervisor te ve en vivo", roja si denegado, amarilla si falló start.
+
+### 3. Deeplinks: Waze → geo: → Google Maps web (fallback)
+
+`src/lib/deeplinks.ts` con `openNavigationTo({ lat, lng, label })`:
+1. Intenta `waze://?ll=lat,lng&navigate=yes` — Waze es el favorito del
+   chofer mexicano (tráfico real-time + reportes comunitarios).
+2. Si Waze no está, en Android prueba `geo:lat,lng?q=lat,lng(label)` que
+   abre el picker del sistema (Google Maps, Maps.me, lo que tenga el user).
+3. Si todo falla, abre `google.com/maps/dir/?api=1&destination=lat,lng` en
+   browser — el intent handler de Android delega a la app de Google Maps
+   si está instalada, o al browser si no.
+
+NO hardcodeamos Google Maps directo porque algunos choferes ya tienen Waze
+como default y queremos respetarlo.
+
+**Alternativas consideradas:**
+
+1. **Server action via Edge Function para markArrived**: descartado por costo
+   inicial; documentado para migración futura cuando entren choferes 3P.
+2. **expo-background-fetch en lugar de TaskManager**: descartado — está
+   diseñado para fetches periódicos discretos, no para streams continuos de
+   location. expo-location + TaskManager es el camino oficial.
+3. **Mantener broadcast Realtime en bg**: descartado por fragilidad de WS en
+   bg sin foreground service real para Realtime. Los breadcrumbs son
+   suficientes hasta que reporten.
+4. **Geofencing nativo con `Location.startGeofencingAsync`**: descartado
+   para V1. Es otra área de complejidad (registrar regiones por cada stop,
+   manejar enter/exit, throttling). Auto-detección de arrival queda
+   deferred a issue #181 — el botón "Marcar llegada" manual ya cubre.
+5. **Hardcodear Google Maps directo**: descartado por respeto al default
+   del chofer (muchos prefieren Waze para tráfico CDMX).
+6. **Pasar `coords` de `useGpsBroadcast` al botón Marcar llegada**:
+   descartado para evitar acoplar el detalle de stop con el bg task.
+   `markArrived` lee su propio fix puntual (más fresco) con
+   `getCurrentPositionAsync`. Trade-off: 1 lectura GPS extra.
+
+**Riesgos:**
+
+- **Permiso `ACCESS_BACKGROUND_LOCATION` en Android 11+** requiere flujo
+  de 2 pasos: primero conceder foreground, luego ir a settings y elegir
+  "Permitir todo el tiempo". Algunos choferes pueden quedarse en "Solo
+  mientras la app esté abierta" y romper el bg tracking. Mitigación:
+  `RouteHeader` muestra banner rojo "Permiso de ubicación denegado" para
+  que el supervisor lo detecte y guíe al chofer por WhatsApp.
+- **Foreground service notif persistente** puede molestar al chofer
+  ("¿por qué hay notificación todo el día?"). Copy claro en la notif lo
+  mitiga + se apaga automáticamente al `signOut` o cuando ruta deja de
+  IN_PROGRESS. Educación inicial: documentar en onboarding.
+- **Battery drain** con `accuracy: High` + `distanceInterval: 20m` +
+  `timeInterval: 10s`: en pruebas piloto medir consumo. Si > 5%/h ajustamos
+  a `Balanced` accuracy o aumentamos intervals.
+- **Race condition en signOut**: el bg task puede estar a mitad de un
+  insert cuando se llama `stopGpsTask`. RLS rechazará el insert post-logout,
+  pero el task ya sale en la siguiente iteración cuando no encuentra state.
+  Hay un breve gap donde fallan warnings (cosmético, no funcional).
+- **App killed por OS** (Doze mode / battery saver agresivo en algunas
+  marcas como Xiaomi/Huawei): el foreground service ayuda pero no es
+  garantía total. Issue #182 abierto para documentar workarounds por marca.
+- **Anti-fraude geo client-side**: el chofer puede usar mock-location en
+  Dev Options para falsear llegada. Para detectarlo, futuro: pasar
+  `pos.mocked` (Android-only, expo-location lo expone) al backend en
+  metadata del stop y alertar al supervisor.
+- **Validación falsa por GPS pobre indoors**: lectura inicial puede ser
+  500m+ desviada antes de fix. El timeout 15s + radius 300m da margen
+  para que el chofer obtenga fix bueno. Si falla, mensaje claro "sal a
+  un lugar abierto".
+
+**Mejoras futuras:**
+
+- Issue #179: Mover `markArrived` a Edge Function Supabase + validar
+  `pos.mocked` en metadata.
+- Issue #180: Realtime broadcast sobre breadcrumbs cuando el supervisor
+  pida ver al chofer "en vivo" con < 30s de lag.
+- Issue #181: Auto-detección de llegada por geofencing
+  (`Location.startGeofencingAsync` + radius 50m).
+- Issue #182: Doc por marca/OEM sobre cómo deshabilitar battery
+  optimization para TripDrive (Xiaomi, Huawei, Samsung).
+- Issue #183: Indicador de "última posición enviada hace Xs" en el
+  RouteHeader cuando el supervisor reporta lag.
+- Issue #184: Caching defensivo del `getStopContext` (hoy hace 3 reads
+  cada vez que el chofer abre detalle).
+- Issue #185: Pre-fetch del detalle de la próxima parada (la pending) al
+  cargar /route — sería tap instantáneo.
+
+## [2026-05-12] ADR-078: Deeplinks de navegación — Waze first, geo: fallback
+
+**Contexto:**
+ADR-077 cubre la decisión de qué apps soportar y por qué. Este ADR documenta
+la justificación específica del orden de preferencia para que futuras
+sesiones no la reviertan accidentalmente.
+
+**Decisión:**
+Orden de intento al pulsar "Navegar" en `/stop/[id]`:
+1. **Waze** (`waze://?ll=lat,lng&navigate=yes`) — primer intento.
+2. **`geo:` URI** Android estándar — picker del sistema.
+3. **Google Maps web HTTPS** — fallback último.
+
+**Por qué Waze primero (no Google Maps):**
+- Cobertura de tráfico CDMX/MX en Waze supera la de Google Maps Live
+  Traffic (datos crowdsourced de mismos usuarios, no de smartphones Android
+  genéricos).
+- Cultura local: la mayoría de choferes ya usan Waze por costumbre. Forzar
+  Google Maps obliga a re-aprender.
+- Google Maps queda accesible vía el `geo:` picker si lo prefieren.
+
+**Alternativas consideradas:**
+- Hardcodear Google Maps: descartado (ver arriba).
+- Dejar que el chofer elija en Settings cuál app usar como default:
+  innecesario — el OS Android ya recuerda la elección del picker `geo:`.
+- Integrar nuestra propia navegación turn-by-turn con Mapbox Navigation
+  SDK: descartado (decisión 2026-05-12 en PLATFORM_STATUS sección 9:
+  "navegación turn-by-turn delegada a Waze/Google Maps nativo, no propia").
+
+**Riesgos:**
+- iOS no tiene `geo:` estándar; cuando entre iOS (post Android-only V1)
+  hay que agregar `LSApplicationQueriesSchemes` con `waze` y `comgooglemaps`
+  en Info.plist + usar URLs específicas. Documentado en `lib/deeplinks.ts`.
+
+**Mejoras futuras:**
+- Issue #186: Telemetría — qué % de tappers en "Navegar" terminan en Waze
+  vs geo: picker vs HTTP. Si HTTP fallback es >10%, algo está roto y
+  necesitamos investigar.
+
+## [2026-05-12] ADR-079: Stream B / Fase N4 — OCR proxy via platform (no llamar Anthropic desde el cliente)
+
+**Contexto:**
+La Fase N4 introduce la captura del ticket del cliente. El flujo deseado es:
+chofer toma foto → app extrae datos con Claude Vision → chofer confirma/edita
+→ guarda en `delivery_reports.ticket_data`.
+
+La pregunta técnica clave: ¿quién llama a Anthropic API? Las opciones son
+(a) directo desde la app nativa con `ANTHROPIC_API_KEY` embebida en el bundle,
+o (b) proxiar a través de un endpoint del platform.
+
+**Decisión:**
+Opción (b) — nuevo endpoint **`POST /api/ocr/ticket`** en `apps/platform/`
+que recibe `{ imageUrl }`, valida JWT del chofer, valida que el usuario sea
+un row en `drivers`, aplica rate limit (30/hora/chofer), y delega a
+`extractTicketFromImageUrl` de `@tripdrive/ai` (ya existente para el web).
+
+Nuevo helper en `@tripdrive/supabase`: `createJwtClient(jwt)` para route
+handlers que reciben `Authorization: Bearer <jwt>` (vs cookie-based de SSR).
+
+Cliente native: `src/lib/ocr.ts` con `extractTicket(imageUrl)` que llama al
+endpoint con el JWT de la sesión y devuelve `OcrResult` discriminado
+(`ok`/`reason`). La pantalla degrada a entrada manual si reason ∈
+{unavailable, timeout, error}.
+
+**Por qué proxy y no key embebida:**
+
+1. **Seguridad**: la API key en un APK es trivial de extraer (`unzip apk`
+   → buscar en bundle JS). Un atacante puede quemar nuestro presupuesto
+   Anthropic en minutos.
+2. **Rate limit centralizado**: usamos `tripdrive_rate_limit_check` RPC
+   (ADR-054) para acotar 30 OCRs/hora/chofer. Sin proxy no podríamos.
+3. **Auditoría**: el endpoint puede loggear cada llamada con el `userId`
+   para detectar patrones de abuso.
+4. **Misma key que el web** (`ANTHROPIC_API_KEY` en Vercel del platform).
+   Sin duplicación de billing.
+
+**Alternativas consideradas:**
+
+1. **API key embebida con scope/spend limits en GCP/Anthropic Console**:
+   descartado — los limits son agregados, un atacante igual puede agotar
+   nuestro presupuesto mensual. Seguro = no exponer la key.
+2. **Edge Function de Supabase** en lugar de endpoint del platform:
+   descartado por inercia — el platform ya tiene `@tripdrive/ai` instalado
+   y el patrón route handler es familiar. Edge Functions agregan otro
+   deploy target.
+3. **Endpoint sin rate limit** (delegar todo al usage limit de Anthropic):
+   descartado — si la app entra en un loop bug, el cliente paga la cuenta.
+4. **Llamada desde el bg worker del outbox**: descartado — el OCR es UX-
+   inmediato (chofer espera ~3s viendo spinner). Hacerlo offline obligaría
+   a chofer entrar datos manual sin saberlo, y al sync se sobreescribirían.
+
+**Riesgos:**
+
+- **`ANTHROPIC_API_KEY` aún no seteada en Vercel** (pendiente del user
+  desde Sprint H1). Mientras tanto el endpoint devuelve 503 y la UI muestra
+  "OCR no disponible — confirma manualmente". Aceptable como modo
+  degradado.
+- **Costo por OCR**: Claude Sonnet 4.6 cobra ~$3/M input tokens. Una foto
+  de ticket (típico ~1500 tokens encoded) = $0.005 por extracción. 30/h ×
+  10 choferes × 8h = 2400 calls/día → $12/día. Si el primer cliente
+  excede esto, ajustamos rate limit o cacheamos.
+- **Latencia**: 2-4s extra al submit del ticket. Mitigado: la pantalla
+  muestra spinner "Leyendo ticket…" y NO bloquea — el chofer puede
+  ignorar el OCR result y submit manual.
+- **Foto mal capturada**: Claude devuelve `confidence < 0.5` con muchos
+  null. La UI muestra `confidence%` para que el chofer decida re-tomar.
+
+**Mejoras futuras:**
+
+- Issue #187: Telemetría de OCR confidence — promediar por chofer/tienda
+  para detectar quien necesita re-entrenamiento sobre cómo enfocar la
+  cámara.
+- Issue #188: Cache OCR por `imageUrl` hash — si el chofer reintenta el
+  submit sin retomar foto, no re-OCRamos.
+- Issue #189: Streaming responses para mostrar campos a medida que
+  Claude los extrae (mejora percibida de latencia).
+
+## [2026-05-12] ADR-080: Stream B / Fase N4 — Outbox offline con expo-sqlite + single-screen entrega
+
+**Contexto:**
+La N4 lleva el flujo de evidencia al native. Tres cuestiones técnicas grandes:
+
+1. **¿Multi-step wizard como el web o single-screen?**
+2. **¿Cómo soportar offline?** El chofer en CDMX pierde señal entre tiendas;
+   no debe perder la entrega si la red cae al submit.
+3. **¿Dónde viven las fotos durante el wait?** El bundle del proceso puede
+   morir entre captura y upload.
+
+**Decisión:**
+
+### 1. Single-screen evidence (no wizard de 10 pasos)
+
+`app/(driver)/stop/[id]/evidence.tsx` es UNA pantalla con secciones:
+- (1) Foto del exhibidor — required.
+- (2) Foto del ticket + OCR opcional + editor de fields (número/fecha/total).
+- (3) Toggle "¿Hubo merma?" → foto + descripción.
+- (4) Toggle "¿Otro incidente?" → descripción libre.
+- Botón "Enviar entrega" → encola al outbox, vuelve a `/route`.
+
+El web tiene un flow-engine con 10+ pasos (arrival_exhibit, incident_check,
+product_arranged, waste_check, receipt_check, …) para `type='entrega'`.
+Replicar eso en native sería deuda significativa sin ROI claro:
+- En el web es necesario porque cada step persiste server-side y se puede
+  recuperar si el chofer cierra el tab. En native el state vive en
+  AsyncStorage/SQLite — la pantalla puede recuperar todo.
+- El chofer prefiere "una sola pantalla con todo" sobre "ir y volver".
+- 80% de las entregas son felices y no necesitan los branches del wizard.
+
+**Lo que NO cubrimos en N4 (deferred):**
+- `type='tienda_cerrada'` y `type='bascula'` — flujos secundarios que
+  el web maneja con sus propios wizards (facade/scale → chat_redirect →
+  tienda_abierta_check). Issue #190 para N4-bis.
+- Multi-paso `incident_cart` que abre chat con supervisor antes de seguir.
+  Issue #191 — entra con N5 (chat).
+- Productos individuales con `IncidentDetail[]` (rechazo/faltante/sobrante
+  por SKU). El web tiene UI completa. En native lo guardamos sólo como
+  descripción libre. Issue #192.
+
+### 2. Offline-first via outbox SQLite
+
+`src/lib/outbox/` con 4 archivos:
+- `db.ts` — `expo-sqlite` async API, tabla `outbox(id, type, status, payload,
+  attempts, last_error, last_attempt_at, created_at)`. Índices por status
+  y created_at.
+- `types.ts` — `OutboxItem`, `OutboxStatus`, payload tipado por `OutboxOpType`.
+- `queue.ts` — `enqueueSubmitDelivery()` copia las fotos a
+  `documentDirectory/outbox/{id}/` (persistente) antes de insertar.
+  `subscribe()` para que la UI reaccione a cambios.
+- `worker.ts` — singleton que:
+  - Resetea items `in_flight` huérfanos al start (recovery post-crash).
+  - Poll cada 30s + kick inmediato en cambio de NetInfo `isConnected`.
+  - Procesa items `pending` o `failed` listos para retry según backoff
+    exponencial (5s → 30s → 5min → 30min, cap 1h).
+  - Max 10 attempts antes de dead-letter (`failed` permanente).
+
+El handler `handleSubmitDelivery` orquesta el commit a Supabase:
+1. Upload exhibit → bucket `evidence` (público).
+2. Upload ticket → bucket `ticket-images` (privado, signed URL 1 año).
+3. Upload merma (si aplica) → `ticket-images`.
+4. `INSERT delivery_reports` con `status='submitted'`,
+   `resolution_type='completa'`, todas las URLs + ticketData + flags.
+5. `UPDATE stops SET status='completed'`.
+6. Si todas las stops done → `UPDATE routes SET status='COMPLETED'`.
+
+**Idempotencia:** cada paso es retry-safe.
+- Uploads usan path determinístico `{slot}-{op.createdAt}.jpg` — si retry
+  llega después de éxito silencioso, Storage devuelve "Duplicate" que
+  interpretamos como already-uploaded.
+- INSERT delivery_reports tiene UNIQUE(stop_id); duplicate violation =
+  already-applied, seguimos al UPDATE stops.
+- UPDATE stops/routes con `SET status=...` son idempotentes por naturaleza.
+
+**Indicador UI** en `RouteHeader`: barra azul "📤 N envíos pendientes"
+o amarilla "⚠ N envíos con error · M en cola" si hay failed. Sólo se
+renderiza si hay algo en cola (cero ruido cuando todo está sincronizado).
+
+### 3. Persistent storage de fotos
+
+`expo-image-picker` devuelve URIs en `cacheDirectory` que el OS puede
+limpiar bajo presión. Antes de encolar, `queue.persistPhoto()` copia las
+fotos a `documentDirectory/outbox/{opId}/{slot}.jpg` que el OS NO toca.
+Al marcar `done`, el worker borra el directorio completo.
+
+**Alternativas consideradas:**
+
+1. **IndexedDB-like en SQLite (BLOB columns)**: descartado — guardar
+   imágenes como BLOB infla la DB y satura el row cache. Mejor: file
+   system + path reference en SQLite.
+2. **AsyncStorage en lugar de SQLite**: descartado — AsyncStorage es
+   un single-key blob, no soporta queries/índices. Para una queue con
+   filtros por status + ordenamiento por created_at, SQLite gana.
+3. **React Query mutations con `persistor`**: descartado por overkill.
+   Una sola op type no justifica la complejidad de React Query.
+4. **Encolar fotos individuales (1 op por foto) + 1 op de submit final**:
+   descartado — el submit final podría arrancar antes de que terminen
+   las fotos por race. Mejor: 1 op atómica que sube todo + crea report.
+5. **Background fetch task para sync** (vs polling foreground): descartado
+   por ahora. El polling 30s + NetInfo trigger es suficiente para foreground;
+   bg sync agresivo requiere otro foreground service Android. Si reportan
+   que items quedan stuck con app cerrada, lo retomamos.
+
+**Riesgos:**
+
+- **Race del worker entre tabs/instancias de la app**: no aplica en
+  native (1 sola instancia por proceso). En el web sí tendrían que
+  manejarlo.
+- **JWT expira durante un retry largo**: los Bearer tokens de Supabase
+  expiran. supabase-js refresca automáticamente con el refresh token
+  guardado en AsyncStorage. Si el refresh también murió (chofer offline
+  > 1 mes), el insert falla por auth y el item queda `failed`. Recovery:
+  el chofer logea de nuevo y los items se reintentan.
+- **Espacio en disco lleno** (cacheDirectory + documentDirectory): la
+  copia a documentDirectory duplica espacio temporalmente. Para 10
+  fotos de 2MB cada una, +20MB. Aceptable en Android medio (>10GB free).
+- **Fotos quedando huérfanas si el item se borra de SQLite manualmente**:
+  no hay garbage collector automático del FS. Si reportan, agregamos
+  un sweep al worker init que borre `outbox/*/` sin item correspondiente.
+- **OCR corre online antes del enqueue** — si el chofer está offline al
+  capturar ticket, no hay OCR, se quedan los campos vacíos y el chofer
+  los llena manual. El submit igual encola y procesa cuando hay red.
+- **Photos enormes desde dispositivos modernos** (Samsung S23 saca 50MP
+  → 6-12MB original): expo-image-manipulator comprime a 1600px lado largo +
+  JPEG 78% → ~300-500KB. La compresión corre antes de persistir al
+  outbox, no después.
+- **`UNIQUE(stop_id)` en delivery_reports** vs el caso de re-tomar la
+  decisión: si el chofer reportó pero quiere corregir, hoy NO puede
+  desde la app. El supervisor puede editar via web. Issue #193.
+
+**Mejoras futuras:**
+
+- Issue #190: `type='tienda_cerrada'` + `type='bascula'` con sus respectivos
+  flujos secundarios. Cubre el ~10% de visitas no felices.
+- Issue #191: `incident_cart` con chat al supervisor antes de continuar
+  (entra con N5).
+- Issue #192: UI para reportar `IncidentDetail[]` por SKU (rechazo,
+  faltante, sobrante).
+- Issue #193: "Editar reporte enviado" — re-abre el outbox item si
+  status='draft' o agrega un mecanismo de PATCH al supervisor.
+- Issue #194: Compresión defensiva con timeout 5s (caso devices viejos
+  donde manipulator se cuelga). Hoy la fallback es usar la imagen original
+  sin comprimir.
+- Issue #195: Notificar al supervisor cuando un item lleva >2h `failed`
+  permanente (push o slack).
+- Issue #196: Sweep al worker start que borre `outbox/*/` directorios
+  cuyo opId ya no existe en SQLite.
+
+## [2026-05-12] ADR-081: Stream B / Fase N5 — Push notifications nativas (Expo) + tabla compartida
+
+**Contexto:**
+Fase N5 introduce push notifications nativas para que el supervisor alcance
+al chofer en su app Android. El web driver/platform ya usaba Web Push (VAPID)
+con la tabla `push_subscriptions` (endpoint + p256dh + auth). La pregunta
+técnica: ¿extendemos la tabla existente o creamos una nueva para Expo?
+
+**Decisión:**
+
+### 1. Extender `push_subscriptions` con `platform` + `expo_token`
+
+Migración `00000000000034_push_subscriptions_expo.sql`:
+- Nueva columna `platform TEXT NOT NULL DEFAULT 'web'` (CHECK in 'web'|'expo').
+- Nueva columna `expo_token TEXT NULL`.
+- Las columnas web-specific (`endpoint`, `p256dh`, `auth`) pasan a NULLABLE.
+- CHECK constraint `push_subscriptions_payload_shape` que valida:
+  - `platform='web'` ⇒ endpoint + p256dh + auth NOT NULL, expo_token NULL.
+  - `platform='expo'` ⇒ expo_token NOT NULL, web fields NULL.
+- UNIQUE index parcial `(user_id, expo_token) WHERE expo_token IS NOT NULL`.
+- Index `(expo_token) WHERE NOT NULL` para lookup inverso si un cron invalida tokens.
+
+**Backfill:** ninguno necesario. Las filas existentes son todas web; el
+DEFAULT 'web' las cubre. Los expo tokens sólo aparecen cuando el native
+empieza a registrar.
+
+### 2. Fanout unificado en `push-fanout.ts`
+
+El fanout existente (drive app) ahora trae ambos tipos en la misma query y
+divide en dos paths:
+- **`sendWebPushBatch`**: usa `web-push` lib como antes. Sin VAPID config →
+  warn + skip silente. Tokens 404/410 se borran de la tabla.
+- **`sendExpoPushBatch`**: usa `@expo/expo-server-sdk` con `Expo.chunkPushNotifications`
+  (cap 100/chunk). Tokens con `DeviceNotRegistered` se borran. Errores otros
+  van al logger.
+
+Las dos funciones corren en `Promise.all` para no serializar el fanout.
+
+### 3. Cliente native con `expo-notifications`
+
+`src/lib/push.ts` con `registerPushAsync()` que:
+1. Verifica `Device.isDevice` (los pushes no llegan en emulador).
+2. Pide permiso (Android 13+ requiere POST_NOTIFICATIONS explícito).
+3. Crea Android notification channel `default` con importance HIGH.
+4. Obtiene `ExpoPushToken` via `getExpoPushTokenAsync({ projectId })`.
+5. Resuelve `role` + `zone_id` del user via `user_profiles`.
+6. Upsert al row `push_subscriptions` con `platform='expo'`, `expo_token=<token>`,
+   web fields explícitamente null. ON CONFLICT (user_id, expo_token) DO NOTHING
+   (idempotencia).
+
+`unregisterPushAsync()` corre en `signOut` y elimina el row del device actual.
+
+**Alternativas consideradas:**
+
+1. **Tabla separada `expo_push_tokens`**: descartado por costo de mantenimiento.
+   El fanout tendría que hacer 2 queries + 2 loops. Una tabla con discriminator
+   `platform` mantiene la query simple.
+2. **Polimorfismo via JSON column**: descartado por debilidad de tipos en TS
+   y SQL. Columnas tipadas + CHECK constraint son más explícitas y fallan
+   temprano si hay inconsistencia.
+3. **OneSignal/Firebase Cloud Messaging directo**: descartado. Expo es un
+   wrapper sobre FCM (Android) + APNS (iOS) que nos da:
+   - Manejo automático de token rotation.
+   - Mismo SDK para iOS (sin código extra cuando entre iOS post V1).
+   - SDK server-side simple (`@expo/expo-server-sdk`).
+   El trade-off es depender de la relay de Expo (gratis hasta 600/sec).
+4. **Encriptar payload del push**: descartado. Los pushes contienen sólo
+   metadata (reportId, url). El contenido sensible vive en la app tras
+   tap → fetch real.
+
+**Riesgos:**
+
+- **Sin EAS projectId configurado** (`PENDING_EAS_PROJECT_ID` actual):
+  `getExpoPushTokenAsync` falla con mensaje claro. La pantalla muestra
+  "Falta projectId de EAS. Corre `pnpm eas:configure`." y el usuario sigue
+  usando la app sin recibir push. No bloquea login ni operación.
+- **Permiso POST_NOTIFICATIONS denegado** (Android 13+): el user_profile
+  no tiene token, supervisor no le alcanza. UI documenta status pero no
+  fuerza re-pedido — Android no permite re-prompt sin ir a Settings. Issue
+  abierta para banner persistente.
+- **Migration NO aplicada todavía en BD**: el archivo SQL existe pero el
+  user debe aprobar `apply_migration` MCP. Sin aplicar, registerPushAsync
+  falla con `column "platform" does not exist`. Está documentado en el
+  handoff.
+- **Tokens stale** (chofer reinstala app): Expo invalida el viejo, el
+  endpoint `getExpoPushTokenAsync` devuelve uno nuevo, el upsert lo registra,
+  pero el viejo queda como zombie hasta que un push intente alcanzarlo y
+  reciba `DeviceNotRegistered` → entonces lo limpiamos. Aceptable, no afecta
+  funcionalidad.
+- **Rate limit de Expo Push Service** (600 msg/sec): no debería tocarse
+  con un solo cliente. Si llegamos, chunkPushNotifications + retry con
+  backoff resuelve.
+
+**Mejoras futuras:**
+
+- Issue #200: Banner persistente en RouteHeader si push no está registrado
+  (`registrationResult.ok === false`), con CTA "Activar notificaciones" que
+  abre Settings del OS via `Linking.openSettings()`.
+- Issue #201: Push handler con deeplink — tap en notif del chat abre
+  directo `/(driver)/stop/<stopId>/chat`. Hoy sólo `console.log`. Necesita
+  resolver `reportId → stopId` y router push.
+- Issue #202: Push del supervisor al chofer cuando el supervisor responde
+  en chat — hoy SÓLO el push fanout del *driver* envía al supervisor.
+  Falta el inverso: cuando supervisor inserta mensaje desde platform/web,
+  trigger fanout al chofer. Requiere extender el endpoint de send message
+  en platform.
+- Issue #203: Tipos de push (`chat_new`, `route_updated`, `arrival_reminder`)
+  para que el handler haga routing distinto por tipo.
+
+## [2026-05-12] ADR-082: Stream B / Fase N5 — Chat native: realtime postgres_changes + insert directo sin AI mediator
+
+**Contexto:**
+N5 lleva el chat chofer↔supervisor al native. El web tiene una server action
+robusta (`sendDriverMessage`) que: 1) valida texto, 2) corre rate-limit,
+3) inserta el message, 4) corre AI mediator (Claude classifyDriverMessage)
+que auto-responde a triviales o escala a zone_manager, 5) dispara push fanout.
+
+La pregunta técnica: ¿cómo replicar en native sin server actions Next.js?
+
+**Decisión:**
+
+### 1. Insert directo via Supabase con RLS protegiendo (sin proxy)
+
+`src/lib/actions/send-message.ts` hace `supabase.from('messages').insert(...)`
+con `sender='driver'` + `sender_user_id=auth.uid()`. La policy `messages_insert`
+(migración 018) valida que el chofer no pueda mentir sobre su rol. El trigger
+`tg_messages_open_chat` server-side setea `chat_opened_at`/`timeout_at` al
+primer mensaje — eso no cambia.
+
+**Lo que SE PIERDE vs web:**
+- **AI mediator** (`classifyDriverMessage`) NO corre. Todos los mensajes del
+  chofer escalan al supervisor — sin auto-respuestas de Claude para triviales.
+- **Push fanout** al supervisor NO se dispara desde el insert. El trigger
+  server-side existe pero sólo abre el chat (campos `chat_opened_at`), no
+  dispara webhook/fanout.
+
+**Mitigación temporal:**
+- El supervisor sigue viendo el chat en realtime via su web/platform — no
+  pierde mensajes, sólo no recibe push hasta que llega un chofer-web user.
+- En operación con NETO (primer cliente), el supervisor está pegado al
+  dashboard durante la jornada — viendo el chat sin push es viable.
+
+**Cuándo migrar a proxy (issue #198 + #202):**
+- Cuando entren clientes con supervisor en mobile-only.
+- Cuando reportemos que >X% de mensajes triviales escalan ruidosamente.
+
+Mientras tanto, la opción más limpia para arreglar ambos limitaciones es
+agregar un endpoint `POST /api/chat/messages` en el platform (similar al
+proxy OCR de ADR-079) que: valida JWT, corre mediator, inserta, dispara
+fanout. Native call → ese endpoint en lugar de Supabase directo.
+
+### 2. Realtime con `postgres_changes` (idéntico al web)
+
+`src/hooks/useChatRealtime.ts`:
+- Subscribe a `supabase.channel('chat:{reportId}').on('postgres_changes', ...)`.
+- Filter server-side `report_id=eq.{X}` + RLS adicional.
+- Refetch on AppState `active` (recovery si el WS quedó dormido en bg).
+- Dedup por id en caso de doble-deliver.
+
+### 3. Pantalla `/stop/[id]/chat`
+
+Estilo WhatsApp:
+- FlatList de mensajes con bubbles diferenciadas por sender.
+- KeyboardAvoidingView + TextInput multiline + botón Enviar.
+- Auto-scroll al final on new message.
+- Botón "Chat con supervisor" en `/stop/[id]/index` que sólo aparece si
+  `stop.status ∈ ('completed', 'skipped')` (i.e., hay `delivery_report` row).
+
+**Lo que se difiere a N5-bis:**
+- Imagen attachment en chat → issue #199 (reusar evidence capture).
+- Iniciar chat sin reporte previo (chofer pide ayuda antes de entregar) →
+  necesita flow_engine work o auto-crear report `tienda_cerrada`.
+- Marcar chat como `driver_resolved` desde native → button + action.
+
+**Alternativas consideradas:**
+
+1. **Proxy endpoint para insert** (replica del web): descartado por scope.
+   Es la migración correcta cuando entren los limitantes de no-mediator y
+   no-fanout. Doc en issue #198.
+2. **Webhook Postgres → mediator + fanout**: descartado por complejidad.
+   Requiere Edge Function de Supabase + manejo de retry. Cuando entre el
+   proxy del punto 1, queda más limpio porque toda la lógica vive en un
+   sitio.
+3. **Replicar mediator client-side** (llamar Claude desde native con la
+   API key en bundle): descartado por la misma razón que OCR (ADR-079) —
+   key expuesta.
+4. **Subscribe a `presence` en lugar de `postgres_changes`**: descartado.
+   Presence sirve para "quién está online" no para sync de mensajes.
+
+**Riesgos:**
+
+- **Race con `tg_messages_open_chat`** trigger: el trigger es server-side
+  síncrono dentro del mismo statement INSERT, así que el row vuelve con
+  campos ya seteados. No hay race.
+- **Realtime sin internet**: el channel falla silencioso, no llegan
+  mensajes nuevos. Cuando vuelve la red, AppState 'active' → refetch.
+- **Mensajes del chofer durante outage**: el insert falla, la UI muestra
+  alert. Por ahora NO encolamos al outbox — el chofer tiene que reintentar
+  manual. Issue #204 para llevar al outbox.
+- **Supervisor responde mientras chofer no tiene red**: el mensaje queda
+  en BD; cuando chofer vuelve a red, refetch lo trae. UX correcta.
+- **Bubbles del supervisor sin foto/nombre**: sólo "Supervisor" estático.
+  Sin context info aún (zone manager X vs Y). Aceptable para V1, mejorable.
+
+**Mejoras futuras:**
+
+- Issue #197: Mediator AI desde native via proxy endpoint platform.
+- Issue #198: Push fanout al supervisor cuando native envía mensaje.
+- Issue #199: Imagen en chat (reusar `captureAndCompress` + bucket).
+- Issue #202: Push del supervisor → chofer (hoy sólo va en el otro sentido).
+- Issue #204: Outbox para mensajes de chat (si falla insert, encolar).
+- Issue #205: Indicador de typing del supervisor (Realtime presence channel).
+- Issue #206: Marcar chat como `driver_resolved` desde native.
+
+
+

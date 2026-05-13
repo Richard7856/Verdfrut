@@ -178,112 +178,215 @@ con su email/password de Supabase y ve una pantalla vacía "Mi ruta del día".
 
 ---
 
-### Fase N2 — Pantalla "Mi ruta del día" ⚪
+### Fase N2 — Pantalla "Mi ruta del día" ✅ DONE 2026-05-12 (ADR-076)
 
 **Meta**: chofer logueado ve la lista de sus paradas del día con mini-mapa
 arriba mostrando todas. Pull-to-refresh recarga datos. Offline muestra
 último estado cacheado.
 
 **DoD**:
-- [ ] Query `getDriverRouteForDate(date)` reutilizable (queries.ts del native).
-- [ ] Mapa con `react-native-maps` + `PROVIDER_GOOGLE`:
-  - Pin verde por parada con número de secuencia.
-  - Pin azul para CEDIS/depot.
-  - Bounds auto-ajustadas.
-  - Tap en pin → scroll a esa parada en lista.
-- [ ] Lista debajo del mapa con StopCard por cada parada:
-  - Número de secuencia
-  - Código + nombre tienda
-  - Hora estimada de llegada
-  - Estado (pending / arrived / completed / skipped)
-  - Tap → navega a `/stop/[id]`.
-- [ ] Pull-to-refresh con `RefreshControl`.
-- [ ] Skeleton screen mientras carga.
-- [ ] Sin conexión: muestra último cache + banner "Modo offline".
-- [ ] Header: nombre chofer + fecha + logout.
+- [x] Queries duplicadas en `src/lib/queries/route.ts`: `getDriverRouteForDate`,
+      `getRouteStopsWithStores`, `getRouteDepot`, `getDriverRouteBundle`.
+- [x] Mapa con `react-native-maps` + `PROVIDER_GOOGLE`:
+  - Pin azul = pending, amarillo = arrived, verde = completed, gris = skipped.
+  - Pin morado para CEDIS/depot.
+  - Bounds auto-ajustadas (`fitToCoordinates`).
+  - Tap en pin → scroll a esa parada + resaltado verde.
+- [x] Lista debajo del mapa con StopCard por cada parada:
+  - Número de secuencia con badge circular.
+  - Código + nombre tienda + dirección.
+  - ETA (hora estimada de llegada).
+  - Status pill con color por status.
+  - Tap → highlight (navegación a `/stop/[id]` queda para N3).
+- [x] Pull-to-refresh con `RefreshControl`.
+- [x] Skeleton screen mientras carga (sin cache).
+- [x] Sin conexión: muestra último cache + banner "📡 Datos en cache".
+- [x] Header: brand + fecha localizada + progreso N/M + logout.
+- [x] Empty state "Sin ruta asignada" con retry.
+- [x] Type-check del workspace verde (`@types/react` bumpeado a ~19.2.0).
+- [x] `app.config.js` que extiende `app.json` para inyectar API keys desde env.
 
 **Documentación entregable**:
-- ADR-068: estrategia de cache offline en native.
+- [x] ADR-076: queries duplicados, cache stale-while-revalidate, mapa nativo.
 
-**Riesgos**:
-- Google Maps API key requerida para `PROVIDER_GOOGLE`. Crear en GCP console,
-  agregarla a `app.json` config.
-- Performance con 50+ pins en mapa. Mitigación: clustering si pasa de 30.
+**Pendientes operativos del user (no-bloqueantes para development local)**:
+- Habilitar **Maps SDK for Android** en GCP Console para la API key actual
+  (hoy tiene Routes + Geocoding). Sin esto el mapa renderiza gris pero
+  funcional (pines y bounds visibles sobre fondo placeholder).
+- Crear `.env.local` en `apps/driver-native/` con:
+  ```
+  GOOGLE_MAPS_ANDROID_API_KEY=...
+  EXPO_PUBLIC_SUPABASE_URL=https://hidlxgajcjbtlwyxerhy.supabase.co
+  EXPO_PUBLIC_SUPABASE_ANON_KEY=...
+  ```
+- Cuando se buildee con EAS para preview/production, mover a EAS Secrets
+  (issue #168, ya documentado).
+
+**Riesgos resueltos / aceptados**:
+- Performance con 30+ pines: mitigado con `tracksViewChanges={false}`.
+  Clustering deferred a issue #174 si reportan lag.
+- Cache stale: banner amarillo lo marca visualmente; invalidación por push
+  entra en N5 (issue #177).
 
 ---
 
-### Fase N3 — Detalle parada + Navegación + GPS background ⚪
+### Fase N3 — Detalle parada + Navegación + GPS background ✅ DONE 2026-05-12 (ADR-077, ADR-078)
 
 **Meta**: chofer abre detalle de una parada y ve toda la info. Tap "Navegar"
 abre Waze o Google Maps con la dirección. Durante la ruta, GPS background
-trackea posición y la sube a Supabase Realtime cada N segundos.
+trackea posición y persiste breadcrumbs cada 30s para que el supervisor lo vea.
 
 **DoD**:
-- [ ] Pantalla `/stop/[id]` con:
-  - Foto satelital de la tienda (Google Maps Static API).
-  - Código + nombre + dirección.
-  - Hora estimada + hora real (si llegó).
-  - Demanda (kg, cajas).
-  - Botón **"Navegar"** primary → lanza `geo:` URI con fallback a `https://google.com/maps/dir`.
-  - Botón "Marcar llegada" → cambia status a `arrived`.
-  - Botón "Reportar entrega" → navega a `/stop/[id]/evidence`.
-- [ ] GPS background task con `expo-location`:
-  - Pide permisos `BACKGROUND` y `ALWAYS`.
-  - Solo activo cuando hay ruta `IN_PROGRESS`.
-  - Reporta cada 8s a Supabase Realtime (canal `route:gps`).
-  - Foreground service notification en Android (requerido por Android 12+).
-- [ ] Foreground service Android con icono notification + texto "TripDrive
-      tracking tu ruta".
-- [ ] Auto-detection de llegada por geofencing (cuando chofer entra en
-      radius 50m de la parada) → toast "Ya llegaste — marca llegada".
+- [x] Pantalla `/stop/[id]` con:
+  - Código + nombre + dirección + ventana horaria.
+  - Demanda (kg + cajas si disponible).
+  - ETA planeada + llegada real (si arrived/completed).
+  - Contacto tappeable (`tel:` URI).
+  - Botón **"Navegar"** primary → Waze → geo: picker → fallback HTTP.
+  - Botón "Marcar llegada" con validación geo client-side (radius 300m).
+  - Botón "Reportar entrega" placeholder → alert "Próximamente (Fase N4)".
+  - Banner warning si `coord_verified=false`.
+  - Notas del dispatcher si existen.
+- [x] GPS background task con `expo-location` + `expo-task-manager`:
+  - Pide permisos foreground + background con prompts del sistema.
+  - Sólo activo cuando `route.status === 'IN_PROGRESS'` Y `driverId` presente.
+  - Persiste a `route_breadcrumbs` cada 30s (sin broadcast Realtime — diff
+    vs web documentado en ADR-077).
+  - Foreground service Android obligatorio (Android 12+ requirement).
+  - Auto-detiene al `signOut`.
+- [x] Foreground service Android con copy "TripDrive — siguiendo tu ruta".
+- [x] Indicador GPS en `RouteHeader` (verde activo / rojo denegado / amarillo failed).
+- [x] Wire de tap en StopCard → `router.push('/(driver)/stop/[id]')`.
+- [x] `signOut` apaga el GPS task + limpia cache del usuario saliente.
+- [x] `app.config.js` configurado con plugin expo-location + permission strings.
+- [x] Type-check del workspace verde.
 
 **Documentación entregable**:
-- ADR-069: GPS background + foreground service.
-- ADR-070: deeplink strategy (Waze/Google Maps).
+- [x] ADR-077: GPS bg + validación arrival client-side.
+- [x] ADR-078: deeplink strategy Waze→geo:→HTTP.
 
-**Riesgos**:
-- iOS `Always` location permission requiere justificación en App Store review.
-  Mitigación: copy claro en `app.json` `NSLocationAlwaysUsageDescription`.
-- Android 12+ obliga foreground service para background location → impacto en
-  UX (notif persistente). Mitigación: copy claro "Estamos tracking tu ruta
-  para tu supervisor — al terminar ruta, se apaga solo".
+**Pendientes operativos del user** (no-bloqueantes para development):
+- Conceder permiso `ACCESS_BACKGROUND_LOCATION` al primer prompt (Android lo
+  pide en 2 pasos: foreground primero, luego "Permitir todo el tiempo" en
+  Settings).
+- Rebuild EAS dev client: agregamos native modules (expo-location,
+  expo-task-manager) — el bundle JS solo no alcanza, hay que regenerar APK
+  con `pnpm build:android` y reinstalar.
+
+**Deferred (issues abiertos)**:
+- Geofencing auto-arrival → issue #181.
+- Realtime broadcast sobre breadcrumbs (live view supervisor) → issue #180.
+- Migrar `markArrived` a Edge Function + detectar `mock_location` → issue #179.
+- Doc por marca de cómo deshabilitar battery optimization → issue #182.
 
 ---
 
-### Fase N4 — Evidencia: cámara + OCR + offline queue ⚪
+### Fase N4 — Evidencia: cámara + OCR + offline queue ✅ DONE 2026-05-12 (ADR-079, ADR-080)
 
-**Meta**: chofer toma foto del ticket de entrega. App extrae datos con
-Claude Vision (OCR). Si está offline, se encola y sincroniza al recuperar
-señal.
+**Meta**: chofer captura foto del exhibidor + ticket, opcionalmente OCR
+extrae datos, marca merma/incidente, encola al outbox SQLite que sincroniza
+en background. Single-screen, no wizard.
 
 **DoD**:
-- [ ] Pantalla `/stop/[id]/evidence`:
-  - Captura con `expo-camera`.
-  - Preview + retry.
-  - Compresión a JPEG 70% antes de upload.
-- [ ] Upload a Supabase Storage (bucket `delivery-evidence`).
-- [ ] Llamada a Claude Vision con la imagen → extrae fecha, monto, productos.
-- [ ] Confirmación del chofer (puede editar campos extraídos).
-- [ ] Submit final crea `delivery_report` row.
-- [ ] **Outbox offline** con `expo-sqlite`:
-  - Si offline al submit: guarda en queue local con timestamp.
-  - Background sync cuando vuelve conexión.
-  - Indicador visible "N entregas pendientes de sincronizar".
-- [ ] Compresión defensiva (timeout 5s en `compressImage` → fallback a
-      imagen sin comprimir, ya implementado en PWA).
+- [x] Pantalla `/stop/[id]/evidence` single-screen con secciones:
+  - Foto exhibidor (required, bucket `evidence` público).
+  - Foto ticket (required, bucket `ticket-images` privado) + OCR opcional
+    + editor de campos (número/fecha/total) + toggle "datos verificados".
+  - Switch "¿Hubo merma?" → foto + descripción opcional.
+  - Switch "¿Otro incidente?" → descripción libre.
+  - Botón "Enviar entrega" → encola + vuelve a `/route`.
+- [x] OCR vía proxy: `POST /api/ocr/ticket` en `apps/platform/` con auth JWT,
+  rate limit 30/h/chofer, delega a `extractTicketFromImageUrl` de `@tripdrive/ai`.
+- [x] Outbox SQLite (`expo-sqlite`) con tabla `outbox`:
+  - 1 sola op type: `submit_delivery`.
+  - Worker singleton con polling 30s + kick por NetInfo.
+  - Backoff exponencial (5s · 30s · 5min · 30min, cap 1h).
+  - Max 10 attempts antes de dead-letter.
+  - Idempotente: uploads usan timestamp determinístico,
+    `delivery_reports` UNIQUE(stop_id) maneja duplicates como already-applied.
+- [x] Fotos persistidas a `documentDirectory/outbox/{opId}/{slot}.jpg`
+  (no cacheDirectory que el OS puede limpiar).
+- [x] Compresión con `expo-image-manipulator` a 1600px lado largo + JPEG 78%.
+- [x] Indicador outbox en `RouteHeader` (azul "N pendientes" / amarillo "N con error").
+- [x] `signOut` apaga el worker (mantiene SQLite — el siguiente login reanuda).
+- [x] Auto-promueve ruta a `COMPLETED` cuando todas las stops están done.
+- [x] Type-check del workspace verde.
 
 **Documentación entregable**:
-- ADR-071: outbox pattern en native con SQLite.
+- [x] ADR-079: OCR proxy via platform (no key en bundle).
+- [x] ADR-080: Outbox SQLite + single-screen.
 
-**Riesgos**:
-- Tamaño de evidencia (varios MB) consume datos del chofer. Mitigación:
-  warning antes de upload en redes celulares lentas.
-- OCR Claude Vision tarda 2-4s. Mitigación: spinner + texto "Leyendo
-  ticket..." — no bloquear UI.
+**Pendientes operativos del user** (no-bloqueantes para desarrollo local):
+- **`ANTHROPIC_API_KEY` en Vercel del platform** (pendiente desde Sprint H1).
+  Sin esto el endpoint OCR devuelve 503 y la UI degrada a entrada manual.
+- **Rebuild EAS dev client** — agregamos `expo-sqlite`, `expo-image-picker`,
+  `expo-image-manipulator`, `expo-file-system`, `@react-native-community/netinfo`.
+- **Verificar buckets `evidence` y `ticket-images` existen en Supabase** —
+  migración `00000000000008_storage_buckets.sql` ya los crea desde Sprint 8.
 
----
+**Deferred a N4-bis (issues abiertos)**:
+- `type='tienda_cerrada'` + `type='bascula'` → issue #190.
+- `incident_cart` con chat al supervisor → issue #191 (N5).
+- `IncidentDetail[]` por SKU UI → issue #192.
+- Edit-after-submit → issue #193.
+- Compresión defensiva con timeout → issue #194.
+- Notificar supervisor de dead-letter → issue #195.
+- Sweep de huérfanos al worker init → issue #196.
 
-### Fase N5 — Chat con supervisor + push nativas ⚪
+### Fase N5 — Chat con supervisor + push nativas ✅ DONE 2026-05-12 (ADR-081, ADR-082)
+
+**Meta**: chofer chatea con supervisor en tiempo real desde la app native.
+Cuando el chofer envía, el supervisor recibe push en su web (y vice versa
+cuando un chofer-web manda — el chofer-native no recibe pushes del supervisor
+todavía, eso es issue #202).
+
+**DoD**:
+- [x] Migración SQL `00000000000034_push_subscriptions_expo.sql` — agrega
+  `platform` + `expo_token` con CHECK constraints. Backward-compatible.
+- [x] Native `src/lib/push.ts` — `registerPushAsync` + `unregisterPushAsync`
+  con `expo-notifications` + upsert a `push_subscriptions`.
+- [x] Native `useChatRealtime` con `postgres_changes` filter por report_id
+  + refetch on AppState active.
+- [x] Native `/stop/[id]/chat` pantalla estilo WhatsApp con bubbles diferenciadas,
+  KeyboardAvoidingView, auto-scroll, send con feedback de error.
+- [x] Native `sendMessage` action — insert directo via Supabase con RLS.
+- [x] Native `usePushRegistration` hook montado en `(driver)/_layout.tsx`.
+- [x] Native: botón "Chat con supervisor" en `/stop/[id]/index` (sólo si
+  stop completed/skipped — i.e. hay delivery_report).
+- [x] Web `push-fanout.ts` extendido para enviar a Expo tokens vía
+  `@expo/expo-server-sdk` además de Web Push. Idempotente: `DeviceNotRegistered`
+  → borra el row.
+- [x] `signOut` desregistra el token del device.
+- [x] `app.config.js` con plugin `expo-notifications` + icon/color.
+- [x] Type-check del workspace verde (con `Database` type extendida con los
+  campos nuevos pendientes de aplicar migration en DB real).
+
+**Documentación entregable**:
+- [x] ADR-081: tabla compartida web+expo + fanout dividido.
+- [x] ADR-082: chat native con insert directo (sin AI mediator).
+
+**Pendientes operativos del user**:
+- **Aplicar la migración** `00000000000034_push_subscriptions_expo.sql` —
+  pendiente porque CLAUDE.md restringe `apply_migration` MCP sin OK
+  explícito. Aplicar via MCP o `supabase db push` cuando esté listo.
+- **Rebuild EAS dev client** — agregamos `expo-notifications` + `expo-device`
+  (native modules). Sin rebuild, registerPushAsync devuelve `token_failed`.
+- **Configurar EAS projectId** — `pnpm eas:configure` reemplaza el placeholder
+  `PENDING_EAS_PROJECT_ID` con el real. Sin esto, push tokens fallan.
+- **`expo-server-sdk` requerirá deploy del web driver** — el push-fanout
+  cambió. Vercel re-deploy del `tripdrive-driver` (Next 16). El platform NO
+  necesita re-deploy.
+
+**Deferred a N5-bis (issues abiertos)**:
+- AI mediator desde native (proxy endpoint) → issue #197.
+- Push fanout cuando native envía mensaje (al supervisor) → issue #198.
+- Imagen en chat → issue #199.
+- Push handler deeplink → issue #201.
+- Push supervisor → chofer (nativos) → issue #202.
+- Tipos de push (chat_new, route_updated, etc.) → issue #203.
+- Outbox para mensajes de chat → issue #204.
+- Presence/typing indicator → issue #205.
+- Marcar chat como `driver_resolved` desde native → issue #206.
 
 **Meta**: chofer chatea con zone_manager en tiempo real. Push notifications
 nativas (FCM/APNS) al supervisor cuando hay nuevo mensaje. AI mediator de

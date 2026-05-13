@@ -1,6 +1,6 @@
 # TripDrive — Roadmap (post Sprint H6)
 
-> Actualizado el 2026-05-11. La plataforma se llama **TripDrive** (dominio `tripdrive.xyz` comprado en Hostinger, nameservers en Vercel). Primer cliente productivo: **VerdFrut**, alias operativo de su contrato con NETO Tiendas en CDMX y Toluca.
+> Actualizado el 2026-05-12 (post N5). La plataforma se llama **TripDrive** (dominio `tripdrive.xyz` comprado en Hostinger, nameservers en Vercel). Primer cliente productivo: **VerdFrut**, alias operativo de su contrato con NETO Tiendas en CDMX y Toluca.
 
 ---
 

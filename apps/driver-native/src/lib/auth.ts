@@ -4,6 +4,10 @@
 import { useEffect, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabase';
+import { stopGpsTask } from './gps-task';
+import { clearCacheNamespace } from './cache';
+import { stopOutboxWorker } from './outbox';
+import { unregisterPushAsync } from './push';
 
 export interface AuthState {
   session: Session | null;
@@ -62,5 +66,21 @@ export async function signInWithPassword(
 }
 
 export async function signOut(): Promise<void> {
+  // Apagar el GPS task antes del logout — sin sesión, los inserts a
+  // route_breadcrumbs fallarían por RLS y el task quedaría loggeando warnings.
+  // Tampoco queremos dejar la notif de foreground service prendida.
+  await stopGpsTask();
+  // Apagar el worker del outbox — sus retries usarían la sesión del usuario
+  // que sale. Las items pendientes se quedan en SQLite y reanudan cuando el
+  // mismo usuario u otro entra y el worker reinicia (auth check ya validaría
+  // RLS si el usuario es distinto).
+  stopOutboxWorker();
+  // Limpiar cache de ruta del chofer que sale — el siguiente usuario en el
+  // mismo dispositivo NO debe ver datos del anterior.
+  await clearCacheNamespace('route');
+  // Desregistrar el token de push del device — si el siguiente login es el
+  // mismo chofer, se re-registra; si es otro, el anterior no recibe pushes
+  // mientras este device se loguea.
+  await unregisterPushAsync();
   await supabase.auth.signOut();
 }
