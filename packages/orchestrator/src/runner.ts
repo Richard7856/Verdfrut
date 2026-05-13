@@ -53,9 +53,17 @@ export type RunnerEvent =
 export interface RunnerInput {
   /** Historial previo de la sesión (mensajes para reconstruir contexto). */
   history: Anthropic.MessageParam[];
-  /** Nuevo input del usuario (texto). */
+  /**
+   * Nuevo input del usuario (texto). Si está vacío y no hay confirmation,
+   * el runner asume que `history` ya contiene el último input/tool_result y
+   * solo invoca al modelo para continuar.
+   */
   userMessage: string;
-  /** Para confirmaciones pendientes: si el user aprobó/rechazó una tool. */
+  /**
+   * Legacy fallback (pre-2.2.b): pasar la confirmación al modelo via tool_result
+   * "AWAITING_EXECUTION". Solo se usa si el endpoint no pudo ejecutar la
+   * confirmation directamente (action pendiente no encontrada).
+   */
   confirmation?: {
     tool_use_id: string;
     approved: boolean;
@@ -120,12 +128,15 @@ export async function runOrchestrator(input: RunnerInput): Promise<{
         },
       ],
     });
-  } else {
+  } else if (input.userMessage && input.userMessage.length > 0) {
     messages.push({
       role: 'user',
       content: input.userMessage,
     });
   }
+  // Si no hay userMessage ni confirmation, asumimos que history ya contiene
+  // el último tool_result (flow 2.2.b post-confirmación ejecutada en server).
+  // El modelo solo necesita continuar el turno.
 
   let iterations = 0;
   while (iterations < MAX_LOOP_ITERATIONS) {
@@ -204,9 +215,27 @@ export async function runOrchestrator(input: RunnerInput): Promise<{
       }
 
       // Si requires_confirmation, emitir confirmation_required y NO ejecutar.
-      // Al usuario aprobar/rechazar via endpoint /confirm, viene un nuevo
-      // turno con input.confirmation cargado.
+      // Persistimos la action con status='pending_confirmation' para que el
+      // endpoint /confirm la encuentre y ejecute directo (sin re-llamar al
+      // modelo) cuando el user apruebe.
       if (tool.requires_confirmation) {
+        try {
+          await input.toolContext.supabase.from('orchestrator_actions').insert({
+            customer_id: input.toolContext.customerId,
+            session_id: input.toolContext.sessionId,
+            user_id: input.toolContext.userId,
+            tool_name: tool.name,
+            is_write: tool.is_write,
+            requires_confirmation: true,
+            args: { ...(block.input as object), __tool_use_id: block.id } as never,
+            status: 'pending_confirmation',
+            result: null,
+          });
+        } catch {
+          // Si el insert falla, emitimos la confirmación igual — el flujo
+          // viejo (re-emit por el modelo) sirve como fallback degraded.
+        }
+
         await input.emit({
           type: 'confirmation_required',
           tool_use_id: block.id,
@@ -227,6 +256,7 @@ export async function runOrchestrator(input: RunnerInput): Promise<{
         requires_confirmation: tool.requires_confirmation,
       });
 
+      const startedAt = Date.now();
       let result: ToolResult;
       try {
         result = await tool.handler(block.input as Record<string, unknown>, input.toolContext);
@@ -236,8 +266,30 @@ export async function runOrchestrator(input: RunnerInput): Promise<{
           error: err instanceof Error ? err.message : 'Tool handler lanzó excepción',
         };
       }
+      const durationMs = Date.now() - startedAt;
 
       await input.emit({ type: 'tool_use_result', tool_use_id: block.id, result });
+
+      // Audit: persistir cada tool_use en orchestrator_actions.
+      // is_write determina si la action cuenta para el quota mensual.
+      try {
+        await input.toolContext.supabase.from('orchestrator_actions').insert({
+          customer_id: input.toolContext.customerId,
+          session_id: input.toolContext.sessionId,
+          user_id: input.toolContext.userId,
+          tool_name: tool.name,
+          is_write: tool.is_write,
+          requires_confirmation: tool.requires_confirmation,
+          args: block.input as never,
+          status: result.ok ? 'success' : 'error',
+          result: result.ok ? ((result.data ?? null) as never) : null,
+          error_message: result.ok ? null : result.error,
+          duration_ms: durationMs,
+        });
+      } catch {
+        // Audit failure NO debe romper el loop — la operación ya sucedió.
+        // El próximo turn lo verá; el operador puede revisar logs.
+      }
 
       (toolResults.content as Anthropic.ToolResultBlockParam[]).push({
         type: 'tool_result',

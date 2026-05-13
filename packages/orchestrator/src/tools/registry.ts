@@ -7,11 +7,13 @@
 import type { ToolDefinition } from '../types';
 
 // Cada archivo de tool exporta su array. Aquí los concatenamos.
-// 2.1.b: array vacío (skeleton). 2.1.c: agrega reads. 2.2: agrega writes.
+// 2.1.c: 5 reads. 2.2.a: 8 writes con requires_confirmation en destructivas.
 import { READ_TOOLS } from './reads';
+import { WRITE_TOOLS } from './writes';
 
 export const TOOLS: ReadonlyArray<ToolDefinition> = [
   ...READ_TOOLS,
+  ...WRITE_TOOLS,
 ];
 
 const TOOLS_BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));

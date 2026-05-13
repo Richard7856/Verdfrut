@@ -4474,6 +4474,148 @@ explícitamente.
 
 
 
+## [2026-05-13] ADR-091: Ola 2 / Sub-bloque 2.2 — Tools de escritura + confirm flow correcto
+
+**Contexto:**
+Con foundations listos (ADR-090), el agente solo podía leer. 2.2 le da
+manos: 8 tools de escritura que cubren el flujo operativo completo
+(crear tiros, agregar rutas/paradas, mover/eliminar paradas, publicar,
+cancelar, reasignar choferes).
+
+Decisión del user 2026-05-13: **confirmaciones desde el día 1** para
+destructivas (no esperar a 2.3 como sugería el plan original). Eso forzó
+también el refactor del flow de confirmación, que en 2.1 quedaba con
+una limitación: el modelo recibía un tool_result "AWAITING_EXECUTION"
+y debía re-emitir el mismo tool_use post-aprobación — frágil porque
+Claude a veces decidía otra cosa.
+
+**Decisión:**
+
+**Commit 2.2 (un solo commit, scope coherente):**
+
+1. **Package: `tools/writes.ts`** con 8 tools:
+
+   | Tool | is_write | requires_confirmation | Notas |
+   |---|---|---|---|
+   | create_dispatch | true | false | Tiro vacío, low-risk |
+   | add_route_to_dispatch | true | true | Crea route + N stops |
+   | add_stop_to_route | true | true | Re-numera secuencias siguientes |
+   | move_stop | true | false | Solo reordena; misma data |
+   | remove_stop | true | true | Solo pending; re-numera |
+   | publish_dispatch | true | true | Alto impacto — push a choferes |
+   | cancel_dispatch | true | true | Cancela rutas asociadas también |
+   | reassign_driver | true | true | Valida disponibilidad y zona |
+
+   Cada tool: validación estricta de args (UUID_RE, DATE_RE, rangos), check
+   ownership por customer_id, check de zone match (vehículo/chofer/store
+   en misma zona del tiro), check de status válido (no permitir cambios
+   en CANCELLED/COMPLETED).
+
+   Las tools NO reusan server actions del platform (esas dependen de
+   cookies de sesión); replican lógica usando `ctx.supabase`
+   (service_role) + customer_id filter defensivo. Duplicación deliberada
+   — modular en eval set + tests aparte (2.6).
+
+2. **Runner: audit persistence** en `orchestrator_actions`:
+   - Cada tool_use ejecutada: insert con `tool_name`, `is_write`,
+     `requires_confirmation`, `args`, `status` (success/error),
+     `result`, `error_message`, `duration_ms`.
+   - Errores del audit insert no rompen el loop (try/catch silente):
+     la operación ya sucedió, lo importante es que no falle el flujo
+     del usuario por un fallo de telemetría.
+   - Index parcial `idx_orch_actions_writes_month` (de mig 040) hace
+     el query del quota mensual sub-ms.
+
+3. **Confirmation flow refactor (`confirmation.ts` + endpoint):**
+
+   Flow nuevo:
+   ```
+   1. Modelo emite tool_use con requires_confirmation=true.
+   2. Runner persiste orchestrator_actions con status='pending_confirmation'
+      + args + __tool_use_id inyectado en args para look-up posterior.
+   3. Runner emite evento 'confirmation_required', PAUSA y termina turn.
+   4. Cliente muestra modal y manda POST /chat con confirmation.
+   5. ENDPOINT (no runner) llama executeConfirmedTool():
+      a. Look-up de pending action por session_id + __tool_use_id.
+      b. Si aprobada: ejecuta tool.handler() directamente con args.
+      c. Update orchestrator_actions con status final + result + duration.
+      d. Inyecta tool_result al historial.
+   6. Endpoint llama al runner con history que ya tiene el tool_result;
+      runner deja al modelo continuar (sin re-emitir tool_use).
+   ```
+
+   Eso evita el desperdicio del flow legacy. Fallback: si la action
+   pendiente no se encuentra (raro: tabla wipe, session pierde state),
+   el endpoint cae al flow legacy donde el modelo decide via
+   "AWAITING_EXECUTION" tool_result.
+
+**Alternativas consideradas:**
+
+- **Una sola tool `execute_operation` con discriminador `operation` interno**:
+  rechazado — Anthropic recomienda tools específicas por operación.
+  El modelo razona mejor con tools tipadas estrictamente.
+- **Permitir cambiar `is_write` y `requires_confirmation` dinámico
+  por args**: rechazado — `add_stop_to_route` podría querer no-confirm
+  cuando la ruta es DRAFT y sí-confirm cuando es PUBLISHED. Por ahora
+  todo write con `requires_confirmation: true` como default safe.
+  Refinamiento posible: separar a `add_stop_to_draft_route` y
+  `add_stop_to_published_route` si el modelo se vuelve charlón.
+- **Mover el handler a server actions del platform**: rechazado por
+  cookies (server actions las requieren). Las tools deben ser
+  contextless (solo reciben ctx con service_role + customer_id explícito).
+- **Persistir confirmation con TTL corto (ej. 5 min)**: rechazado para
+  V1. Si el user tarda en aprobar (ej. va a buscar info, abre tab nueva),
+  la action queda esperando. Sin TTL es resiliente. Limpieza vía cron en 2.5.
+
+**Riesgos / Limitaciones:**
+
+- **`add_stop_to_route` y `remove_stop` hacen UPDATEs de secuencia en
+  2 pasadas** (negativos temporales → positivos finales) para evitar
+  conflicto con `UNIQUE (route_id, sequence)`. Es N writes por
+  reordenamiento. Para rutas de 30 stops es ~60 UPDATEs — sub-segundo
+  pero no instantáneo. Mejora futura: RPC SECURITY DEFINER que haga
+  el swap atómico.
+- **`publish_dispatch` no triggerea push** a los choferes todavía
+  desde el orquestador. La lógica de push se quedó en server actions
+  del platform que el orquestador no llama. Issue #246 — agregar
+  notificación push al final del handler de publish.
+- **El `executeConfirmedTool` requiere `tool_use_id` inyectado en args
+  como `__tool_use_id`** — hack porque la tabla actions no tiene
+  columna específica para el blob_id. Refactor en mig 041 si se
+  vuelve incómodo (issue #247).
+- **No hay rate limit todavía**: un user con AI activado podría
+  disparar 100 tools/min. Mitigación V1: el runner ya tiene
+  `MAX_LOOP_ITERATIONS=12`. Quota mensual real entra en 2.5.
+
+**Oportunidades de mejora futuras:**
+
+- **2.3**: previews enriquecidos en confirmation_required ("Publicar tiro
+  X impacta a 5 rutas con 23 paradas; 4 choferes recibirán push") —
+  generados server-side, no via tool extra.
+- **2.4**: `optimize_dispatch` invoca VROOM existente.
+- **2.5**: gating + quotas + UI de control en CP.
+- **2.6**: streaming token-by-token + sesiones laterales + eval set.
+- **2.7**: tools de Google Places para crear stores conversacional.
+- **2.8**: tool `parse_xlsx` para bulk import.
+- Issue #246 — push notification post-publish.
+- Issue #247 — columna `tool_use_id` en orchestrator_actions.
+- Issue #248 — RPC atómica para reorder de stops.
+
+**Status al cierre de ADR-091 / 2.2:**
+
+- 8 tools writes registradas + auditadas + confirmation flow correcto.
+- Type-check 13/13 verde. check-service-role 18 archivos sin drift.
+- Total tools del agente: 13 (5 reads + 8 writes).
+- El agente ya puede armar un tiro completo conversacional desde cero.
+- Próximo: 2.3 (previews enriquecidos + UX polish) o saltar a 2.7-2.8
+  (file upload + Google Places para la visión "como Claude").
+
+
+
+
+
+
+
 
 
 

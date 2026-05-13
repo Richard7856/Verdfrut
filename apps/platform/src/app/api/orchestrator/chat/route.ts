@@ -13,6 +13,7 @@ import { requireAdminOrDispatcher } from '@/lib/auth';
 import { createServerClient, createServiceRoleClient } from '@tripdrive/supabase/server';
 import {
   runOrchestrator,
+  executeConfirmedTool,
   type RunnerEvent,
   type ToolContext,
   type AnthropicMessageParam,
@@ -157,10 +158,53 @@ export async function POST(req: Request) {
       };
 
       try {
+        // Flow de confirmación 2.2.b: si viene confirmation, ejecutar la
+        // tool pendiente DIRECTAMENTE en el server (sin re-emitir tool_use
+        // por el modelo). Inyectamos el tool_result al historial y dejamos
+        // que el modelo continúe el turno con el resultado real.
+        let workingHistory: AnthropicMessageParam[] = [...history];
+        let confirmationForRunner: typeof payload.confirmation | undefined;
+
+        if (payload.confirmation) {
+          const exec = await executeConfirmedTool(
+            admin,
+            toolContext,
+            payload.confirmation.tool_use_id,
+            payload.confirmation.approved,
+          );
+
+          if (!exec) {
+            // No se encontró la action pendiente — fallback al flow legacy
+            // que delega al modelo decidir.
+            confirmationForRunner = payload.confirmation;
+          } else {
+            // Emitir el resultado para que la UI lo muestre.
+            await emit({
+              type: 'tool_use_result',
+              tool_use_id: exec.toolUseId,
+              result: exec.result,
+            });
+
+            // Inyectar tool_result al historial.
+            workingHistory.push({
+              role: 'user',
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: exec.toolUseId,
+                  content: JSON.stringify(exec.result),
+                  is_error: !exec.result.ok,
+                },
+              ],
+            });
+          }
+        }
+
         const { finalHistory, pendingConfirmation } = await runOrchestrator({
-          history,
-          userMessage: payload.message ?? '',
-          confirmation: payload.confirmation,
+          history: workingHistory,
+          userMessage:
+            payload.confirmation && !confirmationForRunner ? '' : payload.message ?? '',
+          confirmation: confirmationForRunner,
           callerRole: profile.role as 'admin' | 'dispatcher',
           toolContext,
           emit,

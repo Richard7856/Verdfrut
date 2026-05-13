@@ -3,5 +3,6 @@
 
 export * from './types';
 export * from './runner';
+export * from './confirmation';
 export * from './tools/registry';
 export { SYSTEM_PROMPT } from './prompts/system';
