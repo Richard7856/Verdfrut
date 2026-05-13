@@ -3472,5 +3472,92 @@ Estilo WhatsApp:
 - Issue #205: Indicador de typing del supervisor (Realtime presence channel).
 - Issue #206: Marcar chat como `driver_resolved` desde native.
 
+## [2026-05-13] ADR-083: Auditoría de seguridad N5+ y hardening pendiente
+
+**Contexto:**
+Post-cierre de N5, antes de que el primer chofer use la app native en operación
+real (N6), hacemos un audit de seguridad sistemático. La operación con NETO es
+con choferes empleados directos (modelo de confianza alta) pero al escalar a
+3P/outsourcing los vectores de ataque cambian. Documentamos las medidas YA
+implementadas y los gaps pendientes con su severidad.
+
+**Decisión: medidas aplicadas en este ciclo (post-N5)**
+
+### Rate limit en `sendMessage` del native (mitiga AV-#1, AV-#5)
+`apps/driver-native/src/lib/actions/send-message.ts` ahora consume el RPC
+`tripdrive_rate_limit_check` (ADR-054) con bucket `native-chat-send:{userId}`,
+max 30/min. Antes era ilimitado — un chofer comprometido (cookie/JWT robado)
+podía saturar al supervisor con miles de mensajes. Si el RPC falla por infra
+caída, fail-open con warn al logger (preferimos perder rate-limiting que
+bloquear al chofer legítimo).
+
+### Geo-fix retroactivo: TOL-1422
+Tienda importada del XLSX tenía coords (18.20, -98.05) — en Cuernavaca, no
+Toluca. Re-geocodeada con Google Geocoding desde el address completo:
+(19.2532, -99.7299) — Santa Cruz Cuauhtenco, Zinacantepec. Marcada
+`coord_verified=false` (APPROXIMATE type, no ROOFTOP) para que la UI alerte.
+
+**Estado del threat model actual**
+
+| ID | Vector | Severidad | Estado | Mitigación actual / mejora futura |
+|---|---|---|---|---|
+| AV-#1 | Cookie/JWT theft → spam | Media | Mitigado parcial | Rate limit en sendMessage native ✓. Falta: reorderStopsAction native (issue #207). |
+| AV-#2 | Service role bypass en driver web actions | Alta | Pendiente | Hoy service role expuesto server-side. Mejora: migrar a sesión del chofer + RLS por field (#63). |
+| AV-#3 | Admin reorder sin verificación de zona | Baja | No aplica V1 | Modelo actual sin "admin de zona". Re-evaluar si entra modelo multi-zona. |
+| AV-#4 | Info leak por sequence de stops | Muy baja | RLS cubre | Tenant aislado (1 Supabase por cliente). |
+| AV-#5 | reason en push notif visible al chofer | Baja | Mitigado | Hoy hardcoded. Falta: sanitizar si entra input dinámico. |
+| AV-#6 | Geocoding sin HTTPS verification | Media | Mitigado parcial | Anti-fraude geo (300m radius) bloquea spoof. Falta: anotar `geocode_source` en stores (#83). |
+
+**Nuevos vectores identificados post-N5**
+
+### AV-#7 — Mock location en Android (markArrived bypass)
+- **Vector:** chofer activa Dev Options → Mock Location → falsea estar en la tienda → markArrived pasa la validación haversine.
+- **Impacto:** medio. Permite check-in sin estar físicamente ahí. RLS valida que el stop sea suyo, pero no detecta mock.
+- **Mitigación:** `expo-location` expone `pos.mocked` (Android-only). Persistir en `delivery_reports.metadata.arrival_mocked=true` + alertar al supervisor si frecuencia >5% por chofer.
+- **Issue:** #208 (TODO en próximo sprint hardening pre-piloto).
+
+### AV-#8 — `markArrived` validación client-side bypassable
+- **Vector:** chofer ingeniero con tool de debug intercepta el call a Supabase y modifica el payload (skip validación geo).
+- **Impacto:** medio. El UPDATE de `stops` lo valida RLS pero no el geo. Equivale a AV-#7 pero por otro medio.
+- **Mitigación:** mover validación a Edge Function de Supabase (sigue siendo native-callable pero validación server-side imposible de saltar).
+- **Issue:** #179 (ya documentado en ADR-077).
+
+### AV-#9 — Cache de fotos en `documentDirectory` accesible a otras apps
+- **Vector:** En Android sin SELinux estricto, una app con permiso de leer external storage podría leer `Android/data/xyz.tripdrive.driver/files/`.
+- **Impacto:** bajo. Fotos del ticket pueden tener info comercial. Path por scoping de Android moderna (API 30+) está protegido.
+- **Mitigación:** API 30+ aplica scoped storage automático. En API 29-, las fotos del outbox quedan accesibles. Documentamos minSdkVersion=30 como recomendación.
+- **Issue:** #209.
+
+### AV-#10 — Token Expo Push expuesto en push_subscriptions sin TTL
+- **Vector:** atacante con acceso a service role obtiene la lista de Expo Push tokens → puede enviar push spoof.
+- **Impacto:** bajo. Spoof solo afecta a UI del chofer (mensajes falsos), no a datos. Expo Push API valida que el sender tenga acceso al projectId — ataque requiere también robar projectId credentials.
+- **Mitigación:** rotar `EXPO_ACCESS_TOKEN` 1×/año. No persistir tokens beyond 90 días sin uso.
+- **Issue:** #210.
+
+**Issues hardening pendiente para Sprint H8 (pre-piloto extendido)**
+
+| # | Tarea | Por qué | Effort |
+|---|---|---|---|
+| #207 | Rate limit en `reorderStopsAction` native | AV-#1 ext | XS |
+| #208 | Persistir `mocked` flag en arrival_coords metadata | AV-#7 | S |
+| #179 | Edge Function para `markArrived` server-side | AV-#8 | M |
+| #209 | Doc minSdkVersion=30 + scoped storage check | AV-#9 | XS |
+| #210 | TTL en push_subscriptions inactivas >90d | AV-#10 | S |
+| #63 | Migrar service_role usage a sesión + RLS field-level | AV-#2 | L |
+
+**Riesgos:**
+- **N6 piloto con AV-#7/#8 abiertos:** si NETO usa choferes empleados directos
+  (modelo de confianza), riesgo aceptable. Si entra cliente con 3P/outsourcing,
+  estos issues son P0.
+- **Métricas de detección NO instrumentadas:** hoy no sabemos si AV-#7 está
+  ocurriendo en operación real. Issue #211 para agregar dashboard con métricas
+  de "% checkins con mocked=true" y "% con distancia >100m al store".
+
+**Mejoras futuras (post-piloto)**
+- Issue #211: Dashboard de métricas de fraude (mock %, distancia checkin, etc).
+- Issue #212: WAF Cloudflare al frente cuando entren bots/abuse desde IPs externas.
+- Issue #213: Pentest profesional antes de cliente Enterprise.
+- Issue #214: Rotación automática de Service Role Key vía Vault o similar.
+
 
 

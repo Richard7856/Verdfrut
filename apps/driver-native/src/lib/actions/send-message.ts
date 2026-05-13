@@ -11,10 +11,18 @@
 //     `chat_opened_at` y `timeout_at` al primer mensaje. La fanout de push
 //     al zone_manager NO ocurre desde aquí (la dispara el web server action).
 //     Para que ocurra desde native necesitamos webhook o proxy → issue #198.
+//
+// HARDENING (ADR-083):
+//   Rate limit via `tripdrive_rate_limit_check` RPC — máx 30 mensajes/min
+//   por chofer. Mitiga AV-#1 (cookie theft → spam de mensajes que saturan
+//   al supervisor) y AV-#5 (chofer comprometido enviando ruido).
 
 import { supabase } from '@/lib/supabase';
 
 const MAX_CHAT_TEXT = 2000;
+const RATE_LIMIT_KEY = 'native-chat-send';
+const RATE_LIMIT_MAX_PER_MINUTE = 30;
+const RATE_LIMIT_WINDOW_SECONDS = 60;
 
 export type SendMessageResult =
   | { ok: true; id: string }
@@ -39,6 +47,26 @@ export async function sendMessage(
   const userId = userData.user?.id;
   if (!userId) {
     return { ok: false, error: 'Sesión expirada.' };
+  }
+
+  // Rate limit anti-spam. RPC `tripdrive_rate_limit_check` valida server-side
+  // contra `rate_limit_buckets` (ADR-054). Si excede, devuelve false sin
+  // contar el intento como hit (decisión del RPC: gate antes de increment).
+  const { data: allowed, error: rateErr } = await supabase.rpc('tripdrive_rate_limit_check', {
+    p_bucket_key: `${RATE_LIMIT_KEY}:${userId}`,
+    p_max_hits: RATE_LIMIT_MAX_PER_MINUTE,
+    p_window_seconds: RATE_LIMIT_WINDOW_SECONDS,
+  });
+  if (rateErr) {
+    // Si el RPC falla (caída de BD, etc.), seguimos optimísticamente — el
+    // RLS y el resto de protecciones siguen activos. Loggeamos warn pero
+    // no bloqueamos al chofer por un fallo de infra de rate-limit.
+    console.warn('[sendMessage] rate-limit check falló:', rateErr.message);
+  } else if (allowed === false) {
+    return {
+      ok: false,
+      error: `Estás enviando mensajes muy rápido. Espera un momento (máx ${RATE_LIMIT_MAX_PER_MINUTE}/min).`,
+    };
   }
 
   const { data, error } = await supabase
