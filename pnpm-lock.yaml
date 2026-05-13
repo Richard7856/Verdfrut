@@ -166,6 +166,9 @@ importers:
       '@babel/runtime':
         specifier: ^7.25.0
         version: 7.29.2
+      '@expo/config-plugins':
+        specifier: ~10.0.0
+        version: 10.0.3
       '@expo/metro-runtime':
         specifier: ~4.0.0
         version: 4.0.1(react-native@0.76.5(@babel/core@7.29.0)(@babel/preset-env@7.29.5(@babel/core@7.29.0))(@types/react@19.2.0)(react@19.0.0))
@@ -1239,6 +1242,9 @@ packages:
 
   '@expo/code-signing-certificates@0.0.6':
     resolution: {integrity: sha512-iNe0puxwBNEcuua9gmTGzq+SuMDa0iATai1FlFTMHJ/vUmKvN/V//drXoLJkVb5i5H3iE/n/qIJxyoBnXouD0w==}
+
+  '@expo/config-plugins@10.0.3':
+    resolution: {integrity: sha512-fjCckkde67pSDf48x7wRuPsgQVIqlDwN7NlOk9/DFgQ1hCH0L5pGqoSmikA1vtAyiA83MOTpkGl3F3wyATyUog==}
 
   '@expo/config-plugins@10.1.2':
     resolution: {integrity: sha512-IMYCxBOcnuFStuK0Ay+FzEIBKrwW8OVUMc65+v0+i7YFIIe8aL342l7T4F8lR4oCfhXn7d6M5QPgXvjtc/gAcw==}
@@ -7008,6 +7014,25 @@ snapshots:
   '@expo/code-signing-certificates@0.0.6':
     dependencies:
       node-forge: 1.4.0
+
+  '@expo/config-plugins@10.0.3':
+    dependencies:
+      '@expo/config-types': 53.0.5
+      '@expo/json-file': 9.1.5
+      '@expo/plist': 0.3.5
+      '@expo/sdk-runtime-versions': 1.0.0
+      chalk: 4.1.2
+      debug: 4.4.3
+      getenv: 2.0.0
+      glob: 10.5.0
+      resolve-from: 5.0.0
+      semver: 7.8.0
+      slash: 3.0.0
+      slugify: 1.6.9
+      xcode: 3.0.1
+      xml2js: 0.6.0
+    transitivePeerDependencies:
+      - supports-color
 
   '@expo/config-plugins@10.1.2':
     dependencies:

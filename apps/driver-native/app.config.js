@@ -57,6 +57,11 @@ module.exports = ({ config }) => ({
         color: '#34c97c',
       },
     ],
+    // Workaround: strip `enableBundleCompression` del build.gradle.
+    // El template de prebuild de @expo/cli@0.24.x incluye esa property
+    // que solo existe en RN 0.79+ (SDK 54). Como estamos en RN 0.76, falla.
+    // Ver: plugins/strip-bundle-compression.js
+    './plugins/strip-bundle-compression.js',
   ],
   extra: {
     ...config.extra,
