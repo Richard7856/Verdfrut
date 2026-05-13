@@ -4231,3 +4231,115 @@ modelo (issue separado #237).
 
 
 
+## [2026-05-14] ADR-089: Stream A / Fase A4.1 — Branding plumbing
+
+**Contexto:**
+La Fase A4 del plan multi-customer (`MULTI_CUSTOMER.md` sec 7) introduce
+branding customizable: cada customer define `brand_color_primary` +
+`brand_logo_url` (campos ya en mig 037) y las apps web + native lo
+renderizan automáticamente. Esto valida visualmente la multi-tenancy
+cuando entra un 2do customer demo.
+
+Riesgo de hacer A4 completo de una vez: refactorear todos los usos de
+`--vf-green-*` en las apps (100+ call sites) a un nuevo token brand
+podría romper visualmente sin advertencia. Y verdfrut (único customer
+hoy) tiene `#34c97c` que NO es exactamente equivalente a las shades
+oklch del sistema actual — un override directo desplazaría todo el verde.
+
+**Decisión:**
+
+A4 se divide en dos sub-fases:
+
+- **A4.1 (este ADR)**: plumbing. Helper server-side
+  `getCurrentCustomerBranding()` + inyección de var CSS nueva
+  `--customer-brand-primary` en el layout raíz de platform y driver.
+  La var es **opt-in** — ningún componente la consume todavía.
+- **A4.2 (futuro)**: refactorear componentes clave (botón primary,
+  badge de status, accent del sidebar) para usar `--customer-brand-primary`
+  con fallback a `--vf-green-600`. Effect visible cuando un customer
+  cambie color. Diferido hasta que entre el 2do customer demo y se
+  valide el approach.
+- **A4.3 (futuro)**: native (RN no usa CSS — requiere Context provider
+  + actualización del tema styled-system de Reanimated/native-maps).
+
+**Entregables A4.1:**
+
+- `apps/platform/src/lib/branding.ts` + `apps/driver/src/lib/branding.ts`
+  (duplicación deliberada V1; mover a `@tripdrive/branding` cuando
+  entre 3er consumidor).
+- `getCurrentCustomerBranding()` lee `user_profiles → customers` con
+  inner join via la sesión del caller. La policy `customers_select`
+  (mig 037) ya restringe a "tu propio customer", el helper la respeta.
+- Fallback graceful: sin sesión / sin customer / hex inválido →
+  `DEFAULT_BRANDING` (verdfrut color). El helper nunca tira excepciones
+  — el branding no debe romper el layout.
+- `brandingCss(branding)` helper de serialización: produce
+  `:root{--customer-brand-primary:#XXXXXX;}` validado.
+- Inyectado en `apps/platform/src/app/(app)/layout.tsx` (post-auth) y
+  `apps/driver/src/app/layout.tsx` (root). Driver async porque el root
+  layout aplica también a pantallas pre-login con DEFAULT_BRANDING.
+
+**Cero impacto visual hoy**: la var es opt-in. Verdfrut sigue viéndose
+idéntico (sus `--vf-green-*` no se tocan).
+
+**Alternativas consideradas:**
+
+- **Override directo de `--vf-green-600/700`** con el hex del customer:
+  rechazado porque el sistema de shades oklch del token-system se
+  desbalancea (el customer no provee shades 700/800/900, solo el primario).
+  Calcular shades vía conversión hex→oklch en server-side es posible
+  pero overkill V1.
+- **Resolver branding en cada Server Component** que lo necesite:
+  rechazado por DRY. Centralizar en root layout + var CSS evita reads
+  duplicados.
+- **Pasar branding via Context Client en lugar de CSS vars**: para
+  componentes Client esto es más natural. Pero CSS vars funcionan en
+  Server + Client uniformemente, y permiten `:hover`, transiciones, etc.
+- **No duplicar branding.ts**: package `@tripdrive/branding` resolvería,
+  pero solo hay 2 consumidores hoy y crear paquete + tsconfig +
+  exports + transpile rule es más fricción que valor. Duplicación
+  documentada.
+
+**Riesgos / Limitaciones:**
+
+- **Cada page authenticated hace 1 query extra a Supabase** (1 JOIN
+  user_profiles + customers). Caché implícito de `auth.getUser` reduce
+  costo; sub-ms para volúmenes actuales. Si se vuelve hot path, mover
+  a `customer_id` en JWT custom claim (issue #236).
+- **Pre-login en driver hace query también** (intentando leer user que
+  no existe). El helper devuelve DEFAULT_BRANDING en ese caso pero el
+  request a Supabase se hace igual. Acceptable porque login es página
+  pre-cache.
+- **Hex validation simple** (`/^#[0-9a-fA-F]{6}$/`). No valida hex
+  inválidos como `#FFFFFG` (falsa-positiva para G en byte). El form
+  de A2.3 ya valida con HTML pattern; defense in depth está OK.
+- **`dangerouslySetInnerHTML` en `<style>`**: XSS no aplicable porque
+  el contenido viene de `brand_color_primary` validado por regex hex
+  antes de serializar. Cero user input concatenado.
+
+**Oportunidades de mejora futuras:**
+
+- **#240** — A4.2: refactor de botones primary + accents para usar
+  `--customer-brand-primary`. Empezar por `Button.tsx primary` en
+  `@tripdrive/ui`.
+- **#241** — A4.3: branding en native via Context provider de React
+  Native. Reanimated/Maps styled-system aparte.
+- **#242** — Logo customizable en sidebar/topbar (`brand_logo_url`).
+  Requiere validación de URL + posiblemente proxy de imágenes para
+  optimización.
+- **#243** — `@tripdrive/branding` package cuando entre el 3er
+  consumidor (probable: app marketing).
+- **#236** — `customer_id` en custom JWT claim para evitar 1 query
+  por render.
+
+**Status al cierre de ADR-089:**
+
+- 2 helpers `branding.ts` (platform + driver).
+- Inyección de `--customer-brand-primary` en root layouts.
+- Cero impacto visual para verdfrut (var opt-in, no consumida todavía).
+- Stream A status: A1 ✅ + A2 ✅ + A3.0 ✅ + P2 hardening ✅ + A4.1 ✅.
+  Próximo: A4.2 refactor de componentes (cuando se quiera demostrar
+  branding con un customer demo) o A3 flow data-driven.
+
+
+

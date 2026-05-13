@@ -7,6 +7,7 @@ import { Toaster } from '@tripdrive/ui';
 import { RegisterServiceWorker } from '@/components/register-service-worker';
 import { OutboxMount } from '@/components/outbox-mount';
 import { InactivityGuard } from '@/components/inactivity-guard';
+import { getCurrentCustomerBranding, brandingCss } from '@/lib/branding';
 import './globals.css';
 
 const geistSans = Geist({
@@ -61,13 +62,21 @@ export const viewport: Viewport = {
 
 // Driver app inicia en tema claro — el chofer trabaja al aire libre,
 // alto contraste y blanco son mejores para legibilidad bajo el sol.
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // ADR-089 / A4.1: branding per-customer del user logueado.
+  // Sin sesión (pre-login) → DEFAULT_BRANDING (verdfrut). Cero cambio visual
+  // hasta que componentes A4.2+ consuman --customer-brand-primary.
+  const branding = await getCurrentCustomerBranding();
+
   return (
     <html
       lang="es-MX"
       data-theme="light"
       className={`${geistSans.variable} ${geistMono.variable}`}
     >
+      <head>
+        <style dangerouslySetInnerHTML={{ __html: brandingCss(branding) }} />
+      </head>
       <body>
         <RegisterServiceWorker />
         {/* Worker del outbox vive durante toda la sesión — ADR-019 */}
