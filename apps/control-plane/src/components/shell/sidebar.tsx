@@ -11,12 +11,17 @@ import { cn } from '@tripdrive/ui';
 interface NavItem {
   href: string;
   label: string;
-  group: 'GENERAL' | 'TENANTS' | 'OPERACIÓN' | 'SISTEMA';
+  group: 'GENERAL' | 'CLIENTES' | 'TENANTS' | 'OPERACIÓN' | 'SISTEMA';
 }
 
 const NAV_ITEMS: NavItem[] = [
   { href: '/', label: 'Overview', group: 'GENERAL' },
 
+  // ADR-086 / Stream A — multi-tenancy interna (modelo #2 plan híbrido).
+  { href: '/customers', label: 'Customers', group: 'CLIENTES' },
+  { href: '/customers/new', label: 'Nuevo customer', group: 'CLIENTES' },
+
+  // Modelo #3 — project-per-tenant Enterprise.
   { href: '/tenants', label: 'Tenants', group: 'TENANTS' },
   { href: '/tenants/new', label: 'Onboardear cliente', group: 'TENANTS' },
 
@@ -26,7 +31,9 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/admins', label: 'Admins', group: 'SISTEMA' },
 ];
 
-const GROUP_ORDER: NavItem['group'][] = ['GENERAL', 'TENANTS', 'OPERACIÓN', 'SISTEMA'];
+const GROUP_ORDER: NavItem['group'][] = [
+  'GENERAL', 'CLIENTES', 'TENANTS', 'OPERACIÓN', 'SISTEMA',
+];
 
 const ENV_LABEL = process.env.NEXT_PUBLIC_ENV_LABEL ?? 'PROD';
 
