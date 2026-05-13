@@ -419,6 +419,187 @@ export async function listPendingDispatchesForCustomer(
   });
 }
 
+// ============================================================================
+// A3-ops.3 — Detail de ruta para CP (super-admin TripDrive ve TODO el flujo).
+// ============================================================================
+
+export interface RouteStopRow {
+  id: string;
+  sequence: number;
+  status: 'pending' | 'arrived' | 'completed' | 'skipped';
+  storeCode: string;
+  storeName: string;
+  storeAddress: string;
+  storeLat: number;
+  storeLng: number;
+  plannedArrivalAt: string | null;
+  plannedDepartureAt: string | null;
+  actualArrivalAt: string | null;
+  actualDepartureAt: string | null;
+  notes: string | null;
+  arrivalWasMocked: boolean | null;
+  arrivalDistanceMeters: number | null;
+  arrivalAccuracyMeters: number | null;
+}
+
+export interface RouteBreadcrumbRow {
+  recordedAt: string;
+  lat: number;
+  lng: number;
+  speed: number | null;
+}
+
+export interface RouteDetail {
+  id: string;
+  name: string;
+  date: string;
+  status: string;
+  customerId: string;
+  driverId: string | null;
+  driverName: string | null;
+  vehicleId: string;
+  vehiclePlate: string | null;
+  zoneId: string;
+  totalDistanceMeters: number | null;
+  totalDurationSeconds: number | null;
+  estimatedStartAt: string | null;
+  estimatedEndAt: string | null;
+  actualStartAt: string | null;
+  actualEndAt: string | null;
+  publishedAt: string | null;
+  stops: RouteStopRow[];
+  lastBreadcrumb: RouteBreadcrumbRow | null;
+  recentBreadcrumbs: RouteBreadcrumbRow[];
+}
+
+export async function getRouteDetailForCustomer(
+  customerId: string,
+  routeId: string,
+): Promise<RouteDetail | null> {
+  const sb = createServiceRoleClient();
+
+  const { data: route, error: rtErr } = await sb
+    .from('routes')
+    .select(`
+      id, name, date, status, customer_id, driver_id, vehicle_id, zone_id,
+      total_distance_meters, total_duration_seconds,
+      estimated_start_at, estimated_end_at,
+      actual_start_at, actual_end_at, published_at,
+      drivers:driver_id ( id, user_id, user_profiles:user_id ( full_name ) ),
+      vehicles:vehicle_id ( id, plate )
+    `)
+    .eq('id', routeId)
+    .eq('customer_id', customerId)
+    .maybeSingle();
+
+  if (rtErr) throw new Error(`[cp.customers.routeDetail] ${rtErr.message}`);
+  if (!route) return null;
+
+  const r = route as unknown as {
+    id: string;
+    name: string;
+    date: string;
+    status: string;
+    customer_id: string;
+    driver_id: string | null;
+    vehicle_id: string;
+    zone_id: string;
+    total_distance_meters: number | null;
+    total_duration_seconds: number | null;
+    estimated_start_at: string | null;
+    estimated_end_at: string | null;
+    actual_start_at: string | null;
+    actual_end_at: string | null;
+    published_at: string | null;
+    drivers: { user_profiles: { full_name: string } | null } | null;
+    vehicles: { plate: string } | null;
+  };
+
+  // Stops + stores join
+  const { data: stops } = await sb
+    .from('stops')
+    .select(`
+      id, sequence, status, planned_arrival_at, planned_departure_at,
+      actual_arrival_at, actual_departure_at, notes,
+      arrival_was_mocked, arrival_distance_meters, arrival_accuracy_meters,
+      stores:store_id ( code, name, address, lat, lng )
+    `)
+    .eq('route_id', routeId)
+    .order('sequence', { ascending: true });
+
+  const stopRows: RouteStopRow[] = ((stops ?? []) as unknown as Array<{
+    id: string;
+    sequence: number;
+    status: RouteStopRow['status'];
+    planned_arrival_at: string | null;
+    planned_departure_at: string | null;
+    actual_arrival_at: string | null;
+    actual_departure_at: string | null;
+    notes: string | null;
+    arrival_was_mocked: boolean | null;
+    arrival_distance_meters: number | null;
+    arrival_accuracy_meters: number | null;
+    stores: { code: string; name: string; address: string; lat: number; lng: number } | null;
+  }>).map((s) => ({
+    id: s.id,
+    sequence: s.sequence,
+    status: s.status,
+    storeCode: s.stores?.code ?? '—',
+    storeName: s.stores?.name ?? '—',
+    storeAddress: s.stores?.address ?? '',
+    storeLat: s.stores?.lat ?? 0,
+    storeLng: s.stores?.lng ?? 0,
+    plannedArrivalAt: s.planned_arrival_at,
+    plannedDepartureAt: s.planned_departure_at,
+    actualArrivalAt: s.actual_arrival_at,
+    actualDepartureAt: s.actual_departure_at,
+    notes: s.notes,
+    arrivalWasMocked: s.arrival_was_mocked,
+    arrivalDistanceMeters: s.arrival_distance_meters,
+    arrivalAccuracyMeters: s.arrival_accuracy_meters,
+  }));
+
+  // Últimos 50 breadcrumbs para el indicador de actividad reciente.
+  const { data: breadcrumbs } = await sb
+    .from('route_breadcrumbs')
+    .select('recorded_at, lat, lng, speed')
+    .eq('route_id', routeId)
+    .order('recorded_at', { ascending: false })
+    .limit(50);
+
+  const recent: RouteBreadcrumbRow[] = ((breadcrumbs ?? []) as Array<{
+    recorded_at: string; lat: number; lng: number; speed: number | null;
+  }>).map((b) => ({
+    recordedAt: b.recorded_at,
+    lat: b.lat,
+    lng: b.lng,
+    speed: b.speed,
+  }));
+
+  return {
+    id: r.id,
+    name: r.name,
+    date: r.date,
+    status: r.status,
+    customerId: r.customer_id,
+    driverId: r.driver_id,
+    driverName: r.drivers?.user_profiles?.full_name ?? null,
+    vehicleId: r.vehicle_id,
+    vehiclePlate: r.vehicles?.plate ?? null,
+    zoneId: r.zone_id,
+    totalDistanceMeters: r.total_distance_meters,
+    totalDurationSeconds: r.total_duration_seconds,
+    estimatedStartAt: r.estimated_start_at,
+    estimatedEndAt: r.estimated_end_at,
+    actualStartAt: r.actual_start_at,
+    actualEndAt: r.actual_end_at,
+    publishedAt: r.published_at,
+    stops: stopRows,
+    lastBreadcrumb: recent[0] ?? null,
+    recentBreadcrumbs: recent,
+  };
+}
+
 // Mutaciones — todas via service_role (CP es super-admin cross-customer).
 // Validaciones de input duras: el slug es el subdomain, no permite cambios
 // libres una vez creado (issue #232 si queremos rename con redirect).
