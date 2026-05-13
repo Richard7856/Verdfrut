@@ -12,9 +12,21 @@ import { getTool, listToolsForCustomer } from './tools/registry';
 import { enrichPreviewForTool, type EnrichedPreview } from './previews';
 import type { ToolContext, ToolDefinition, ToolResult } from './types';
 
-const MODEL = 'claude-sonnet-4-6';
+// Modelo configurable via env. Default Sonnet 4.6 con extended thinking.
+// Para downgrade temporal (testing, control de costo): setear
+// `ORCHESTRATOR_MODEL=claude-haiku-4-5` en Vercel + redeploy.
+//
+// Haiku 4.5: ~3x más barato ($1/$5 in/out vs $3/$15 de Sonnet) pero
+// razona PEOR cuando hay multi-step planning (armar un tiro completo
+// requiere coordinar 5-8 tools en secuencia). Recomendado solo para
+// pruebas de costo o conversaciones simples.
+const MODEL = process.env.ORCHESTRATOR_MODEL ?? 'claude-sonnet-4-6';
 const MAX_TOKENS = 8192;
 const MAX_LOOP_ITERATIONS = 12; // Salvavidas contra loops infinitos.
+
+// Extended thinking solo en modelos que lo soportan (Sonnet 4.5+, Opus 4+).
+// Haiku 4.5 NO soporta thinking — el SDK tirará error si lo enviamos.
+const SUPPORTS_THINKING = !MODEL.includes('haiku');
 const THINKING_BUDGET = 4000;
 
 // Eventos que el runner emite via callback. El endpoint SSE los re-emite al
@@ -147,10 +159,9 @@ export async function runOrchestrator(input: RunnerInput): Promise<{
 
     // 2.3.a: streaming real con .stream() — emite deltas token-by-token.
     // Acumulamos los content blocks finales para push al historial.
-    const stream = anthropic.messages.stream({
+    const streamParams: Anthropic.MessageStreamParams = {
       model: MODEL,
       max_tokens: MAX_TOKENS,
-      thinking: { type: 'enabled', budget_tokens: THINKING_BUDGET },
       system: [
         {
           type: 'text',
@@ -160,7 +171,11 @@ export async function runOrchestrator(input: RunnerInput): Promise<{
       ],
       tools: toolsForApi,
       messages,
-    });
+    };
+    if (SUPPORTS_THINKING) {
+      streamParams.thinking = { type: 'enabled', budget_tokens: THINKING_BUDGET };
+    }
+    const stream = anthropic.messages.stream(streamParams);
 
     // Suscribir a deltas y emitir SSE.
     stream.on('text', async (delta) => {

@@ -296,27 +296,43 @@ export function OrchestratorChat() {
           if (evt.type === 'session' && typeof evt.sessionId === 'string') {
             setSessionId(evt.sessionId);
           } else if (evt.type === 'message_start') {
+            // Fix bug doble respuesta: NO creamos bubble aquí. El runner emite
+            // message_start por CADA iter del loop; si el iter solo hace
+            // tool_use sin texto, antes quedaba bubble vacía "…". Ahora el
+            // bubble se crea lazy en el primer thinking/text delta.
             currentAssistantId = crypto.randomUUID();
-            setTurns((prev) => [
-              ...prev,
-              { id: currentAssistantId!, role: 'assistant', text: '', thinking: '' },
-            ]);
           } else if (evt.type === 'thinking_delta' && currentAssistantId) {
             const delta = String(evt.delta ?? '');
-            setTurns((prev) =>
-              prev.map((t) =>
-                t.id === currentAssistantId
-                  ? { ...t, thinking: (t.thinking ?? '') + delta }
-                  : t,
-              ),
-            );
+            const targetId = currentAssistantId;
+            setTurns((prev) => {
+              const exists = prev.some((t) => t.id === targetId);
+              if (exists) {
+                return prev.map((t) =>
+                  t.id === targetId
+                    ? { ...t, thinking: (t.thinking ?? '') + delta }
+                    : t,
+                );
+              }
+              return [
+                ...prev,
+                { id: targetId, role: 'assistant', text: '', thinking: delta },
+              ];
+            });
           } else if (evt.type === 'text_delta' && currentAssistantId) {
             const delta = String(evt.delta ?? '');
-            setTurns((prev) =>
-              prev.map((t) =>
-                t.id === currentAssistantId ? { ...t, text: (t.text ?? '') + delta } : t,
-              ),
-            );
+            const targetId = currentAssistantId;
+            setTurns((prev) => {
+              const exists = prev.some((t) => t.id === targetId);
+              if (exists) {
+                return prev.map((t) =>
+                  t.id === targetId ? { ...t, text: (t.text ?? '') + delta } : t,
+                );
+              }
+              return [
+                ...prev,
+                { id: targetId, role: 'assistant', text: delta },
+              ];
+            });
           } else if (evt.type === 'tool_use_start') {
             const toolId = `tool-${String(evt.tool_use_id)}`;
             setTurns((prev) => [
