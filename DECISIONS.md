@@ -3961,3 +3961,136 @@ necesitan re-correr, deben pasar `customer_id` explícito como input.
 
 
 
+## [2026-05-14] ADR-087: Stream A — RLS rewrite multi-customer (migration 039)
+
+**Contexto:**
+Post-ADR-086 las 8 tablas operativas (zones, user_profiles, stores,
+vehicles, drivers, depots, routes, dispatches) tenían `customer_id NOT
+NULL` pero las policies de RLS seguían siendo single-tenant: cualquier
+admin/dispatcher veía toda la data del schema sin importar a qué customer
+pertenecía. La multi-tenancy era ficticia hasta cerrar el loop.
+
+Además, el trigger `auto_set_customer_id` de la migration 037 tenía un
+hueco: respeta `customer_id` explícito sin validar contra el caller
+(`IF NEW.customer_id IS NOT NULL THEN RETURN NEW`). Eso permitía a un
+admin del customer A insertar en `routes` con
+`customer_id = (id de customer B)`, escapando el aislamiento. El trigger
+solo cierra el caso "INSERT sin customer_id" (defaulting al caller); el
+WITH CHECK de la policy es lo que cierra "INSERT con customer_id ajeno".
+
+**Decisión:**
+
+Migration `00000000000039_rls_customer_scoped.sql` en transacción
+atómica reescribe **31 policies** en las 8 tablas. Patrón general:
+
+```sql
+USING (
+  customer_id = current_customer_id()
+  AND (
+    -- lógica role/zone original (admin / dispatcher / zone_manager / driver)
+  )
+)
+WITH CHECK (
+  customer_id = current_customer_id()
+  AND (
+    -- misma lógica original
+  )
+)
+```
+
+- **8 tablas operativas con customer_id direct**: zones (4 policies),
+  user_profiles (4), stores (4), vehicles (4), drivers (4), depots (4),
+  routes (4), dispatches (2 — la legacy `dispatches_write FOR ALL` + read).
+- **Tablas dependientes** (stops, route_versions, route_breadcrumbs,
+  delivery_reports, messages, push_subscriptions, route_transfers,
+  route_gap_events): NO se tocan — sus policies actuales ya filtran por
+  `route_id IN (SELECT id FROM routes)` o similares, lo cual hereda el
+  filter de customer_id en cascada.
+- **customers**: la policy `customers_select` de mig 037 sigue válida.
+
+WITH CHECK explícito en INSERT y UPDATE cierra el hueco del trigger: si
+un admin de A intenta `INSERT ... customer_id = B`, falla con
+`42501: new row violates row-level security policy`.
+
+**Alternativas consideradas:**
+
+- **Fix el trigger en lugar de WITH CHECK**: cambiar
+  `auto_set_customer_id` a `IF NEW.customer_id IS NOT NULL AND
+  NEW.customer_id <> current_customer_id() THEN RAISE EXCEPTION`. Más
+  estricto pero rompe el caso legítimo del service_role pasando
+  `customer_id` explícito (Control Plane, RPC `tripdrive_restructure_dispatch`).
+  El WITH CHECK aplica a `authenticated` solo (service_role bypassea
+  RLS) — más quirúrgico.
+- **Policies separadas para INSERT vs UPDATE WITH CHECK**: redundante.
+  La regla es la misma para ambas direcciones (no permitir cambiar
+  customer_id).
+- **Hacer el rewrite en branch Supabase y mergear**: el plan original lo
+  sugería. Descartado porque (a) solo hay 1 customer (verdfrut) → el
+  filter no cambia comportamiento observable, (b) ganar tiempo de
+  validación pre-piloto N6 vale más que el riesgo, (c) rollback es
+  trivial: re-aplicar las definiciones de mig 007 + mig 013.
+
+**Riesgos / Limitaciones:**
+
+- **Performance**: `current_customer_id()` se llama una vez por statement
+  (es STABLE), pero cada policy hace `customer_id = current_customer_id()`
+  como AND a la condición existente. PostgreSQL puede usar el index
+  `idx_<table>_customer` creado en mig 037. Sin medición todavía;
+  esperable sub-ms para volúmenes actuales.
+- **`current_customer_id()` retorna NULL** si el caller no tiene fila en
+  `user_profiles` (ej. token JWT válido pero el profile fue eliminado).
+  En ese caso `customer_id = NULL` evalúa a NULL → falla la policy →
+  user no ve nada. Comportamiento correcto pero podría confundir.
+- **Smoke test cubrió 6 escenarios** (admin verdfrut ve sus 8 tablas con
+  los mismos counts pre-039 + 2 ataques cross-customer rechazados con
+  42501). NO cubrió: driver, zone_manager, dispatcher. Esos tienen
+  policies con sub-cláusulas más complejas; el rewrite las preserva pero
+  conviene smoke real con cuenta de chofer NETO antes del piloto N6.
+- **Helper recursivo**: `current_customer_id()` lee de `user_profiles`
+  WHERE `id = auth.uid()`. Como user_profiles ahora tiene
+  `profiles_select` con `customer_id = current_customer_id()` AND ..., el
+  helper podría caer en recursión circular. Mitigado por
+  `SECURITY DEFINER` — el helper bypassea RLS de user_profiles.
+
+**Smoke test ejecutado contra prod**:
+
+| # | Test | Resultado |
+|---|---|---|
+| 1 | Admin verdfrut existe y tiene customer_id | ✅ rifigue97@gmail.com → verdfrut |
+| 2 | Counts via RLS post-039 | ✅ idénticos a pre-039: zones=1, users=4, stores=83, vehicles=4, drivers=2, depots=2, routes=18, dispatches=12 |
+| 3 | INSERT con customer_id ajeno via subquery vacía | ✅ 0 rows insertados (sub-vacía bloquea acceso a customers ajenos) |
+| 4 | INSERT con customer_id ajeno hardcodeado | ✅ ERROR 42501: row-level security policy violation |
+| 5 | UPDATE con customer_id ajeno | ✅ ERROR 42501: row-level security policy violation |
+| 6 | Cleanup del fake customer temporal | ✅ Solo verdfrut queda |
+
+**Oportunidades de mejora futuras:**
+
+- **#233** — smoke tests E2E con cuentas reales (admin, dispatcher,
+  zone_manager, driver) post-piloto N6. Idealmente en tests automatizados
+  con `pg_tap` o equivalentes.
+- **#234** — medir performance de las policies con `EXPLAIN ANALYZE` en
+  queries hot (route list driver, dashboard admin) cuando entre el 2do
+  customer real.
+- **#235** — endurecer el trigger `auto_set_customer_id`: agregar
+  `RAISE EXCEPTION` si `NEW.customer_id` provista difiere de
+  `current_customer_id()` cuando el caller es authenticated (no
+  service_role). Defensa en profundidad sobre el WITH CHECK.
+- **#236** — exponer `customer_id` via custom JWT claim para evitar el
+  SELECT a `user_profiles` en cada `current_customer_id()`. Requiere
+  hook de Supabase Auth.
+
+**Status al cierre de ADR-087**:
+
+- 31 policies reescritas en una transacción atómica (mig 039).
+- BD prod aislada por customer a nivel RLS. Cross-customer INSERT/UPDATE
+  rechazados con 42501.
+- Admin verdfrut sigue operando con cero cambios observables.
+- Plan Stream A:
+  - ✅ A1 schema (mig 037 + 038 + hardening).
+  - ✅ A2 Control Plane CRUD (3 commits).
+  - ✅ A3.0 RLS rewrite (mig 039 — este ADR).
+  - ⏳ A3 Flow engine data-driven (próximo bloque).
+  - ⏳ A4 Branding customizable.
+
+
+

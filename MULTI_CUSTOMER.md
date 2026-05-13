@@ -435,11 +435,12 @@ Puede ver TODOS los customers vía un service role + queries por
 Stream A arranca en 037:
 
 ```
-037_multi_customer_schema.sql       # ✅ ADR-086 — customers + FK NOT NULL + trigger auto-set + helper
-038_multi_customer_rls.sql          # ⏳ rewrite de policies con current_customer_id() (branch Supabase first)
-039_customer_flow_steps.sql         # ⏳ customer_flow_steps + customer_store_fields (A3 + A5)
-040_customer_invoices.sql           # ⏳ billing (A6)
-041_user_role_customer_admin.sql    # ⏳ enum extension (A2)
+037_multi_customer_schema.sql            # ✅ ADR-086 — customers + FK NOT NULL + trigger auto-set + helper
+038_restructure_dispatch_customer_fix.sql # ✅ ADR-086 follow-up — RPC pasa customer_id
+039_rls_customer_scoped.sql              # ✅ ADR-087 — 31 policies reescritas + cierre hueco WITH CHECK
+040_customer_flow_steps.sql              # ⏳ customer_flow_steps + customer_store_fields (A3 + A5)
+041_customer_invoices.sql                # ⏳ billing (A6)
+042_user_role_customer_admin.sql         # ⏳ enum extension (A2)
 ```
 
 **Decisión de packaging para A1**: schema + backfill + NOT NULL + trigger +
