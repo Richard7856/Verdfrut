@@ -143,7 +143,9 @@ export async function runOrchestrator(input: RunnerInput): Promise<{
     iterations++;
     await input.emit({ type: 'message_start', sequence: iterations });
 
-    const response = await anthropic.messages.create({
+    // 2.3.a: streaming real con .stream() — emite deltas token-by-token.
+    // Acumulamos los content blocks finales para push al historial.
+    const stream = anthropic.messages.stream({
       model: MODEL,
       max_tokens: MAX_TOKENS,
       thinking: { type: 'enabled', budget_tokens: THINKING_BUDGET },
@@ -157,6 +159,16 @@ export async function runOrchestrator(input: RunnerInput): Promise<{
       tools: toolsForApi,
       messages,
     });
+
+    // Suscribir a deltas y emitir SSE.
+    stream.on('text', async (delta) => {
+      await input.emit({ type: 'text_delta', delta });
+    });
+    stream.on('thinking', async (delta) => {
+      await input.emit({ type: 'thinking_delta', delta });
+    });
+
+    const response = await stream.finalMessage();
 
     await input.emit({
       type: 'message_end',
@@ -174,17 +186,6 @@ export async function runOrchestrator(input: RunnerInput): Promise<{
       role: 'assistant',
       content: response.content,
     });
-
-    // Emitir text deltas (para UI). El "streaming" real lo haríamos con
-    // .stream() — esta versión 2.1.b usa create() simple y emite el texto
-    // completo al final. 2.1.d migra a streaming real.
-    for (const block of response.content) {
-      if (block.type === 'thinking') {
-        await input.emit({ type: 'thinking_delta', delta: block.thinking });
-      } else if (block.type === 'text') {
-        await input.emit({ type: 'text_delta', delta: block.text });
-      }
-    }
 
     // Si no hay tool_use → terminó el turno.
     if (response.stop_reason !== 'tool_use') {

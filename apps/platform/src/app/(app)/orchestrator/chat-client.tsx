@@ -276,8 +276,14 @@ export function OrchestratorChat() {
       className="relative flex h-[calc(100vh-200px)] flex-col gap-3"
     >
       {isDragging && (
-        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[var(--radius-md)] border-2 border-dashed border-[var(--vf-green-500,#16a34a)] bg-[var(--vf-green-100,#dcfce7)]/60">
-          <p className="text-sm font-medium text-[var(--vf-green-700,#15803d)]">
+        <div
+          className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[var(--radius-md)] border-2 border-dashed"
+          style={{
+            background: 'color-mix(in oklch, var(--vf-bg) 70%, var(--vf-green-500) 30%)',
+            borderColor: 'var(--vf-green-500)',
+          }}
+        >
+          <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
             Suelta el archivo (xlsx, csv) para adjuntarlo
           </p>
         </div>
@@ -400,49 +406,96 @@ export function OrchestratorChat() {
   );
 }
 
+// Iconos compactos por tipo de tool — visual cue rápido sin leer el name.
+const TOOL_ICON: Record<string, string> = {
+  list_dispatches_today: '📋',
+  list_routes: '🛣️',
+  search_stores: '🔍',
+  list_available_drivers: '👤',
+  list_available_vehicles: '🚐',
+  create_dispatch: '➕',
+  add_route_to_dispatch: '➕🛣️',
+  add_stop_to_route: '📍',
+  move_stop: '↕️',
+  remove_stop: '🗑️',
+  publish_dispatch: '🚀',
+  cancel_dispatch: '🚫',
+  reassign_driver: '🔄',
+  geocode_address: '🌍',
+  search_place: '🗺️',
+  create_store: '🏪',
+  parse_xlsx_attachment: '📊',
+  bulk_create_stores: '📦',
+};
+
 function TurnView({ turn }: { turn: ChatTurn }) {
   if (turn.role === 'tool') {
+    const icon = (turn.toolName && TOOL_ICON[turn.toolName]) || '🔧';
+    const tone = turn.toolPending ? 'warning' : turn.toolResult?.ok ? 'success' : 'danger';
+    const summary = turn.toolResult?.summary;
+    const errorMsg = !turn.toolResult?.ok ? turn.toolResult?.error : null;
+
     return (
-      <Card>
+      <div
+        className="rounded-[var(--radius-md)] border px-3 py-2 text-sm"
+        style={{
+          background: 'var(--vf-surface-2, var(--color-surface-2))',
+          borderColor: 'var(--color-border)',
+        }}
+      >
         <div className="flex items-center gap-2">
-          <Badge tone={turn.toolPending ? 'warning' : turn.toolResult?.ok ? 'success' : 'danger'}>
-            {turn.toolName}
-          </Badge>
+          <span className="text-base" aria-hidden>
+            {icon}
+          </span>
+          <Badge tone={tone}>{turn.toolName}</Badge>
           {turn.toolPending && (
             <span className="text-xs text-[var(--color-text-muted)]">ejecutando…</span>
           )}
-          {turn.toolResult?.summary && (
-            <span className="text-xs text-[var(--color-text-muted)]">
-              {turn.toolResult.summary}
-            </span>
-          )}
         </div>
-        <details className="mt-2">
-          <summary className="cursor-pointer text-xs text-[var(--color-text-muted)] hover:underline">
-            Ver argumentos y respuesta
+        {summary && (
+          <p className="mt-1 text-sm text-[var(--color-text)]">{summary}</p>
+        )}
+        {errorMsg && (
+          <p className="mt-1 text-sm text-[var(--vf-crit,#dc2626)]">⚠ {errorMsg}</p>
+        )}
+        <details className="mt-1.5">
+          <summary className="cursor-pointer text-[11px] text-[var(--color-text-muted)] hover:underline">
+            Detalles técnicos
           </summary>
           <div className="mt-2 space-y-2 text-xs">
             <div>
-              <p className="font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+              <p className="font-semibold uppercase tracking-wide text-[10px] text-[var(--color-text-muted)]">
                 Args
               </p>
-              <pre className="overflow-x-auto rounded-[var(--radius-sm)] bg-[var(--color-surface-2,#f5f5f5)] p-2 font-mono text-[11px]">
+              <pre
+                className="overflow-x-auto rounded-[var(--radius-sm)] p-2 font-mono text-[11px]"
+                style={{
+                  background: 'var(--vf-surface-3, color-mix(in oklch, var(--vf-bg) 85%, white 8%))',
+                  color: 'var(--color-text)',
+                }}
+              >
                 {JSON.stringify(turn.toolArgs, null, 2)}
               </pre>
             </div>
             {turn.toolResult && (
               <div>
-                <p className="font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+                <p className="font-semibold uppercase tracking-wide text-[10px] text-[var(--color-text-muted)]">
                   Resultado
                 </p>
-                <pre className="overflow-x-auto rounded-[var(--radius-sm)] bg-[var(--color-surface-2,#f5f5f5)] p-2 font-mono text-[11px]">
+                <pre
+                  className="overflow-x-auto rounded-[var(--radius-sm)] p-2 font-mono text-[11px]"
+                  style={{
+                    background: 'var(--vf-surface-3, color-mix(in oklch, var(--vf-bg) 85%, white 8%))',
+                    color: 'var(--color-text)',
+                  }}
+                >
                   {JSON.stringify(turn.toolResult, null, 2)}
                 </pre>
               </div>
             )}
           </div>
         </details>
-      </Card>
+      </div>
     );
   }
 
@@ -450,12 +503,17 @@ function TurnView({ turn }: { turn: ChatTurn }) {
   return (
     <div className={isUser ? 'flex justify-end' : ''}>
       <div
-        className="max-w-[85%] rounded-[var(--radius-md)] p-3"
+        className="max-w-[85%] rounded-[var(--radius-md)] border p-3"
         style={{
+          // Dark-mode safe: usamos color-mix con el bg actual + un tinte
+          // verde sutil para user, sin asumir light/dark.
           background: isUser
-            ? 'var(--vf-green-100, #dcfce7)'
-            : 'var(--color-surface-1, #ffffff)',
-          border: '1px solid var(--color-border)',
+            ? 'color-mix(in oklch, var(--vf-bg) 75%, var(--vf-green-500) 25%)'
+            : 'var(--vf-surface-1, var(--color-surface-1))',
+          borderColor: isUser
+            ? 'color-mix(in oklch, var(--vf-green-500) 40%, transparent)'
+            : 'var(--color-border)',
+          color: 'var(--color-text)',
         }}
       >
         {turn.thinking && (
@@ -468,7 +526,7 @@ function TurnView({ turn }: { turn: ChatTurn }) {
             </p>
           </details>
         )}
-        <p className="whitespace-pre-wrap text-sm text-[var(--color-text)]">
+        <p className="whitespace-pre-wrap text-sm">
           {turn.text ?? (turn.role === 'assistant' ? '…' : '')}
         </p>
       </div>
