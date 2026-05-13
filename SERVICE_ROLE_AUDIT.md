@@ -14,6 +14,11 @@
 > Cualquier otro uso es deuda técnica a eliminar antes/durante Stream A.
 >
 > **Total call-sites al 2026-05-13**: 24.
+> **Actualización 2026-05-14 (pre-Stream A)**: AV-#2 / issue #63 cerrado vía
+> migration 036 + RPC `bump_route_version_by_driver` (ADR-085). Issue #218
+> revisado y resuelto: ambas líneas son legítimas. Lint rule #221 implementada
+> con `no-restricted-imports`. **Call-sites netos: 23** (driver baja a 0
+> bypasses).
 
 ---
 
@@ -56,18 +61,31 @@ Issue #216.
 de insertar. Mientras tanto, agregar customer_id check en el código TS.
 Issue #217.
 
-### ✅ Legítimo: user management (auth.users admin API) (4 call-sites)
+### ✅ Legítimo: user management (auth.users admin API) (3 call-sites)
 
 | Archivo | Justificación |
 |---|---|
 | `apps/platform/src/lib/queries/users.ts:182` | `supabase.auth.admin.createUser(...)` — invitar usuarios. |
 | `apps/platform/src/lib/queries/users.ts:253` | `supabase.auth.admin.updateUserById(...)` — reset password. |
 | `apps/platform/src/lib/queries/users.ts:292` | `supabase.auth.admin.deleteUser(...)` — eliminar user. |
-| `apps/platform/src/lib/queries/dispatches.ts:145` | Lee user_profiles bypaseando RLS — POR QUÉ? Revisar. |
 
-**Stream A impact:** Los 3 primeros son legítimos (Supabase Auth admin API
-requiere service role obligatoriamente). El 4to (`dispatches.ts:145`) NO ES
-OBVIO — investigar si puede usar sesión normal con RLS. Issue #218.
+**Stream A impact:** Supabase Auth admin API requiere service role
+obligatoriamente. Sin cambios.
+
+### ✅ Legítimo: lectura pública sin sesión (1 call-site)
+
+| Archivo | Justificación |
+|---|---|
+| `apps/platform/src/lib/queries/dispatches.ts:145` | `getDispatchByPublicToken(token)` para `/share/dispatch/[token]` — visitante anónimo SIN sesión. RLS bloquearía la lectura. |
+
+**Issue #218 resolución 2026-05-14:** Inicialmente clasificado como
+sospechoso. Revisión confirma legítimo: el endpoint expone solo dispatches
+con `public_share_token` set (revocable), valida UUID antes de la query, y
+la lógica del token sustituye el chequeo de sesión. **Stream A impact**:
+agregar filter implícito por `customer_id` no aplica — el token mismo es
+único por customer; pero al introducir `customer_id` en dispatches debemos
+incluirlo en el SELECT para que la share page renderice branding del
+customer correcto. Issue #225 para esa adaptación.
 
 ### ✅ Legítimo: Control Plane (1 call-site)
 
@@ -99,29 +117,44 @@ Pero el costo de refactor es mínimo. Issue #219 (P3).
 
 ## ⚠️ Sospechosos — requieren refactor
 
-### S-1 — `platform/.../dispatches/actions.ts:549`
+### S-1 — `platform/.../dispatches/actions.ts:549` — ✅ CONFIRMADO LEGÍTIMO (2026-05-14)
 
-Necesita revisión manual: ¿qué hace exactamente con service role?
+Llama a RPC `tripdrive_restructure_dispatch` (migration 032). La RPC fue
+declarada `SECURITY DEFINER` con `GRANT EXECUTE` SOLO a `service_role` —
+deliberadamente bloqueada para sesión normal. Razón: la RPC borra rutas
+viejas + inserta nuevas en una sola transacción, y la decisión fue
+tunelizar TODO ese flujo crítico a través de service_role para tener un
+único punto de control / auditoría. La action ya hace
+`requireRole('admin', 'dispatcher')` antes del call.
 
-### S-2 — `driver/.../route/actions.ts:159` (AV-#2)
+**Stream A impact**: evaluar si la RPC debe reabrirse a `authenticated`
+con validación interna de role + customer_id, eliminando service_role del
+client-side. Si se reabre, recordar agregar check
+`current_user_customer() = dispatch.customer_id`. Issue #226 (P2).
 
-Driver action escribe `route_versions` con service role bypass. Ya documentado
-en KNOWN_ISSUES #63 y AV-#2. **Mover a sesión + RLS** específica que permita
-al chofer actualizar SOLO su propia ruta.
+### S-2 — `driver/.../route/actions.ts:159` (AV-#2) — ✅ RESUELTO 2026-05-14
+
+Cerrado por ADR-085 + migration 036. La action ahora usa
+`supabase.rpc('bump_route_version_by_driver', ...)`. La RPC es
+SECURITY DEFINER + valida `auth.uid()` como chofer dueño de la ruta + estado
+PUBLISHED/IN_PROGRESS antes de bump. Issue #63 cerrado.
 
 ---
 
 ## Plan de eliminación pre-Stream A
 
-| Prioridad | Issue | Acción | Effort |
-|---|---|---|---|
-| P1 | #63 / AV-#2 | Refactor `route/actions.ts` con sesión normal + RLS field-level | M |
-| P1 | #218 | Investigar `dispatches.ts:145` y refactor si aplica | S |
-| P2 | #215 | Agregar `customer_id` filter en queries de crons | S |
-| P2 | #216 | Agregar `customer_id` filter en push fanout | S |
-| P2 | #217 | Mover AI mediator a Edge Function con customer_id check | M |
-| P3 | #220 | Filtrar audit page por customer_id | XS |
-| P3 | #219 | Refactor rate-limit a sesión normal (SECURITY DEFINER ya cubre) | S |
+| Prioridad | Issue | Acción | Effort | Status |
+|---|---|---|---|---|
+| P1 | #63 / AV-#2 | Refactor `route/actions.ts` con RPC SECURITY DEFINER | M | ✅ ADR-085 |
+| P1 | #218 | Investigar `dispatches.ts:145` / `actions.ts:549` | S | ✅ ambos legítimos |
+| P1 | #221 | ESLint rule contra `createServiceRoleClient` fuera del allow-list | S | ✅ implementada |
+| P2 | #215 | Agregar `customer_id` filter en queries de crons | S | abierto |
+| P2 | #216 | Agregar `customer_id` filter en push fanout | S | abierto |
+| P2 | #217 | Mover AI mediator a Edge Function con customer_id check | M | abierto |
+| P2 | #226 | Reabrir `tripdrive_restructure_dispatch` a authenticated (eval) | M | abierto |
+| P3 | #220 | Filtrar audit page por customer_id | XS | abierto |
+| P3 | #219 | Refactor rate-limit a sesión normal (SECURITY DEFINER ya cubre) | S | abierto |
+| P3 | #225 | Adaptar `getDispatchByPublicToken` a customer_id | XS | abierto |
 
 **Total effort estimado:** ~1 sprint (2 semanas) para hacer todo P1+P2 + ~3 días
 para P3. Hacer ANTES del primer cliente real multi-customer.

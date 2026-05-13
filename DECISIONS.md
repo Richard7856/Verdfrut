@@ -3678,3 +3678,119 @@ La métrica de éxito al finalizar Stream A es:
 
 
 
+## [2026-05-14] ADR-085: Pre-Stream A — cerrar service_role bypass driver + guardrail de inventario
+
+**Contexto:**
+ADR-083 catalogó AV-#2 (driver service_role bypass) y ADR-084 produjo
+`SERVICE_ROLE_AUDIT.md` con 24 call-sites + 2 sospechosos (S-1 platform
+restructure, S-2 driver route). Stream A introduce RLS escalada por
+`customer_id`; cualquier bypass restante desde código cliente del driver
+es una potencial puerta abierta multi-tenant. Pre-condición técnica
+documentada en `MULTI_CUSTOMER.md` antes de arrancar fase A1.
+
+Adicionalmente, el audit dejó issue #221 abierto: lint rule contra nuevos
+usos de `createServiceRoleClient()` fuera del allow-list, para evitar que
+el inventario crezca silenciosamente durante el desarrollo de Stream A.
+
+**Decisión:**
+
+1. **AV-#2 / issue #63 — cerrado** vía RPC + refactor:
+   - Migration 036 crea `bump_route_version_by_driver(p_route_id, p_reason)
+     RETURNS INTEGER`, `SECURITY DEFINER`, `GRANT EXECUTE TO authenticated`.
+   - La función valida: caller autenticado, caller es chofer, ruta pertenece
+     al chofer, ruta en `PUBLISHED`/`IN_PROGRESS`, reason 1-200 chars.
+   - Hace bump atómico de `routes.version` + insert `route_versions` con
+     `FOR UPDATE` para evitar race conditions del bump concurrente.
+   - `apps/driver/src/app/route/actions.ts:reorderStopsByDriverAction`
+     elimina el import de `createServiceRoleClient` y usa
+     `supabase.rpc('bump_route_version_by_driver', ...)` con la sesión del
+     chofer.
+   - `packages/supabase/src/database.ts` agrega la firma de la RPC al tipo
+     `Database['public']['Functions']` (curado manualmente).
+
+2. **Issue #218 — resuelto sin refactor** tras investigación:
+   - `apps/platform/src/lib/queries/dispatches.ts:145`
+     (`getDispatchByPublicToken`) es legítimo — vista pública sin sesión
+     `/share/dispatch/[token]`. Reclasificado en `SERVICE_ROLE_AUDIT.md` en
+     una nueva sección "lectura pública sin sesión".
+   - `apps/platform/src/app/(app)/dispatches/actions.ts:549`
+     (`tripdrive_restructure_dispatch`) es legítimo por diseño — la RPC fue
+     declarada `SECURITY DEFINER` + `GRANT EXECUTE TO service_role` SOLO,
+     deliberadamente bloqueada para sesión normal. La action ya hace
+     `requireRole('admin', 'dispatcher')` antes. Se deja issue #226 para
+     evaluar reabrir a `authenticated` con check de customer_id durante
+     Stream A.
+
+3. **Issue #221 — guardrail más simple que eslint flat config:**
+   - El repo aún usa `next lint` default sin flat config compartido. Meter
+     un `eslint.config.mjs` por app + plugin custom es overkill para una
+     sola regla.
+   - En vez de eso, `scripts/check-service-role.sh` + snapshot
+     `scripts/service-role-allowlist.txt` con los 16 archivos autorizados.
+   - El script falla si aparece un call-site nuevo NO listado, y advierte
+     si un archivo del allow-list ya NO usa service_role (limpieza).
+   - Expuesto como `pnpm check:service-role`. Pendiente: agregar al CI
+     pre-merge cuando se monte el pipeline (issue #227).
+
+**Alternativas consideradas:**
+
+- **Expandir policy `routes_update` con OR para driver** que matchee
+  `driver_id IN (SELECT id FROM drivers WHERE user_id = auth.uid())`. Se
+  rechazó porque la policy aplica a TODA columna del UPDATE: un chofer
+  malicioso podría reasignar `vehicle_id`, cambiar `status`, mover la fecha.
+  La RPC es más estricta (solo bump version + audit).
+- **Edge Function** para encapsular la operación. Más superficie de red
+  + más latencia por un endpoint que en realidad solo necesita lógica
+  Postgres. RPC SECURITY DEFINER es la solución idiomática.
+- **ESLint flat config con `no-restricted-imports`** + plugin custom.
+  Funcional pero requiere migrar 3 apps + 7 packages a flat config.
+  Postergado a issue #228 (Stream A cleanup) — el bash script entrega
+  el mismo guardrail hoy.
+
+**Riesgos / Limitaciones:**
+
+- **Migration 036 NO aplicada en prod aún** — el harness rechazó la
+  aplicación directa por seguridad. Hay que correr `supabase db push`
+  manual o autorizar el MCP `apply_migration` explícitamente. Hasta
+  entonces, la action en prod fallará silenciosamente en el bump (el
+  reorden de stops persiste — el catch ya cubre, solo se pierde el audit
+  trail). El refactor del código TS ya está mergeable; aplicar migration
+  ANTES de deploy.
+- El allow-list (`scripts/service-role-allowlist.txt`) es estado mutable:
+  cada vez que se justifica un nuevo call-site hay que regenerar con
+  `pnpm check:service-role -- --refresh` Y agregar la justificación en
+  `SERVICE_ROLE_AUDIT.md`. Si se regenera sin documentar, el guardrail
+  pierde sentido. Mitigación: revisión de PR explícita en cualquier
+  diff que toque `service-role-allowlist.txt`.
+- La RPC `bump_route_version_by_driver` confía que solo
+  `reorderStopsByDriverAction` la invoca. Si en el futuro otra action
+  (admin) la llamara con el JWT de un chofer, podría bumpear versions sin
+  el contexto de "Chofer reordenó". Mitigación: el `reason` es input del
+  caller, queda en audit trail; revisar en KPI de fraud-radar (#224)
+  patrones de reasons no-estándar.
+
+**Oportunidades de mejora futuras:**
+
+- **#226** — evaluar reabrir `tripdrive_restructure_dispatch` a
+  authenticated durante Stream A (eliminar último bypass platform crítico).
+- **#225** — `getDispatchByPublicToken` debe incluir `customer_id` en el
+  SELECT al introducir multi-tenancy, para que la share page renderice
+  branding del customer correcto.
+- **#227** — agregar `pnpm check:service-role` al pipeline CI pre-merge.
+- **#228** — eventualmente migrar a ESLint flat config + plugin custom
+  (`no-restricted-imports` con `paths` específicos) cuando se haga el
+  cleanup del Stream A inicial.
+
+**Estado del inventario al cierre de este ADR:**
+
+- 24 call-sites de `createServiceRoleClient()` → **16 archivos
+  autorizados** (varios archivos tenían múltiples calls; ej. `push.ts` 3,
+  `users.ts` 3, `push-fanout.ts` 3).
+- 0 bypasses pendientes en `apps/driver/src/app/route/actions.ts`.
+- 0 sospechosos sin clasificar (S-1 y S-2 cerrados).
+- Pre-condiciones técnicas de Stream A documentadas en
+  `MULTI_CUSTOMER.md` reducidas a: aplicar migration 036 en prod +
+  validar 1 mes de operación N6 estable.
+
+
+

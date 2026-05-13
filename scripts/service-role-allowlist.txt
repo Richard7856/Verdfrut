@@ -1,0 +1,22 @@
+# Archivos autorizados a usar createServiceRoleClient().
+# Cada línea es un path relativo al repo root. Ver SERVICE_ROLE_AUDIT.md
+# para la justificación de cada entrada.
+#
+# Regenerar con: ./scripts/check-service-role.sh --refresh > scripts/service-role-allowlist.txt
+
+apps/control-plane/src/lib/cp-client.ts
+apps/driver/src/app/route/stop/[id]/chat/actions.ts
+apps/driver/src/lib/push-fanout.ts
+apps/driver/src/lib/rate-limit.ts
+apps/platform/src/app/(app)/audit/chat-failures/page.tsx
+apps/platform/src/app/(app)/dispatches/actions.ts
+apps/platform/src/app/api/cron/archive-breadcrumbs/route.ts
+apps/platform/src/app/api/cron/chat-decisions-cleanup/route.ts
+apps/platform/src/app/api/cron/mark-timed-out-chats/route.ts
+apps/platform/src/app/api/cron/push-subs-cleanup/route.ts
+apps/platform/src/app/api/cron/rate-limit-cleanup/route.ts
+apps/platform/src/app/api/cron/reconcile-orphan-users/route.ts
+apps/platform/src/lib/push.ts
+apps/platform/src/lib/queries/dispatches.ts
+apps/platform/src/lib/queries/users.ts
+apps/platform/src/lib/rate-limit.ts

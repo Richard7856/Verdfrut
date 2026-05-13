@@ -6,12 +6,13 @@
 //
 // Auth: requireDriverProfile() asegura que solo el chofer logueado lo invoca.
 // RLS de stops permite UPDATE al chofer dueño de la ruta (stops_update policy).
-// El bump de routes.version requiere service_role porque routes_update es solo
-// admin/dispatcher — usamos createServiceRoleClient SOLO para esa parte.
+// El bump de routes.version + audit insert se hace via RPC
+// `bump_route_version_by_driver` SECURITY DEFINER (ADR-085 / migration 036)
+// para no exponer service_role en este flow — cierra AV-#2 / issue #63.
 
 import 'server-only';
 import { revalidatePath } from 'next/cache';
-import { createServerClient, createServiceRoleClient } from '@tripdrive/supabase/server';
+import { createServerClient } from '@tripdrive/supabase/server';
 import { todayInZone } from '@tripdrive/utils';
 import { logger } from '@tripdrive/observability';
 import { requireDriverProfile } from '@/lib/auth';
@@ -154,23 +155,19 @@ export async function reorderStopsByDriverAction(
       }
     }
 
-    // 6. Audit: bump version + insert route_versions (service_role para routes_update)
-    try {
-      const admin = createServiceRoleClient();
-      const nextVersion = (route.version as number) + 1;
-      await admin
-        .from('routes')
-        .update({ version: nextVersion, updated_at: new Date().toISOString() })
-        .eq('id', route.id);
-      await admin.from('route_versions').insert({
-        route_id: route.id,
-        version: nextVersion,
-        reason: 'Chofer reordenó paradas pendientes',
-        created_by: profile.id,
+    // 6. Audit: RPC SECURITY DEFINER hace bump de version + insert
+    // route_versions atómico, validando ownership con auth.uid() (ADR-085).
+    // Audit failure NO debe revertir el reorden — las stops ya están en
+    // orden nuevo; el bump es metadata observacional.
+    const { error: bumpErr } = await supabase.rpc('bump_route_version_by_driver', {
+      p_route_id: route.id,
+      p_reason: 'Chofer reordenó paradas pendientes',
+    });
+    if (bumpErr) {
+      await logger.warn('reorderStopsByDriver: bump RPC falló (reorden persistió igual)', {
+        err: bumpErr,
+        routeId: route.id,
       });
-    } catch (err) {
-      // Audit failure NO debe revertir el reorden (las stops ya están en orden nuevo).
-      await logger.warn('reorderStopsByDriver: audit insert falló (reorden persistió igual)', { err });
     }
 
     revalidatePath('/route');

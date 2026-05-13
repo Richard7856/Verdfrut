@@ -899,6 +899,10 @@ export type Database = {
         Args: { target_route_id: string }
         Returns: number
       }
+      bump_route_version_by_driver: {
+        Args: { p_route_id: string; p_reason: string }
+        Returns: number
+      }
     }
     Enums: {
       message_sender: "driver" | "zone_manager" | "system"
