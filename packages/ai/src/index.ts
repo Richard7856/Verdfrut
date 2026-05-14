@@ -3,3 +3,4 @@
 
 export * from './extract-ticket';
 export * from './classify-driver-message';
+export * from './enrich-vehicle';

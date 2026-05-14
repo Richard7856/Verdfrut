@@ -1003,10 +1003,16 @@ export type Database = {
           depot_id: string | null
           depot_lat: number | null
           depot_lng: number | null
+          engine_size_l: number | null
+          fuel_consumption_l_per_100km: number | null
           id: string
           is_active: boolean
+          make: string | null
+          model: string | null
+          notes: string | null
           plate: string
           status: Database["public"]["Enums"]["vehicle_status"]
+          year: number | null
           zone_id: string
         }
         Insert: {
@@ -1017,10 +1023,16 @@ export type Database = {
           depot_id?: string | null
           depot_lat?: number | null
           depot_lng?: number | null
+          engine_size_l?: number | null
+          fuel_consumption_l_per_100km?: number | null
           id?: string
           is_active?: boolean
+          make?: string | null
+          model?: string | null
+          notes?: string | null
           plate: string
           status?: Database["public"]["Enums"]["vehicle_status"]
+          year?: number | null
           zone_id: string
         }
         Update: {
@@ -1031,10 +1043,16 @@ export type Database = {
           depot_id?: string | null
           depot_lat?: number | null
           depot_lng?: number | null
+          engine_size_l?: number | null
+          fuel_consumption_l_per_100km?: number | null
           id?: string
           is_active?: boolean
+          make?: string | null
+          model?: string | null
+          notes?: string | null
           plate?: string
           status?: Database["public"]["Enums"]["vehicle_status"]
+          year?: number | null
           zone_id?: string
         }
         Relationships: []

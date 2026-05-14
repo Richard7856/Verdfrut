@@ -1,5 +1,6 @@
 // CRUD de camiones.
 
+import Link from 'next/link';
 import { Badge, DataTable, EmptyState, PageHeader, type Column, type BadgeTone } from '@tripdrive/ui';
 import type { Vehicle, VehicleStatus } from '@tripdrive/types';
 import { requireRole } from '@/lib/auth';
@@ -50,11 +51,35 @@ export default async function VehiclesPage() {
   }
 
   const columns: Column<Vehicle>[] = [
-    { key: 'plate', header: 'Placa', cell: (v) => <span className="font-mono">{v.plate}</span> },
+    {
+      key: 'plate',
+      header: 'Placa',
+      cell: (v) => (
+        <Link
+          href={`/settings/vehicles/${v.id}`}
+          className="font-mono hover:underline"
+          style={{ color: 'var(--vf-text)' }}
+        >
+          {v.plate}
+        </Link>
+      ),
+    },
     {
       key: 'alias',
       header: 'Alias',
       cell: (v) => v.alias ?? <span className="text-[var(--color-text-subtle)]">—</span>,
+    },
+    {
+      key: 'model',
+      header: 'Marca / Modelo',
+      cell: (v) =>
+        v.make || v.model ? (
+          <span className="text-xs">
+            {[v.make, v.model, v.year].filter(Boolean).join(' ')}
+          </span>
+        ) : (
+          <span className="text-[var(--color-text-subtle)]">—</span>
+        ),
     },
     {
       key: 'zone',
@@ -91,10 +116,21 @@ export default async function VehiclesPage() {
       cell: (v) => <Badge tone={STATUS_TONES[v.status]}>{STATUS_LABELS[v.status]}</Badge>,
     },
     {
-      key: 'active',
+      key: 'actions',
       header: '',
       align: 'right',
-      cell: (v) => <ToggleVehicleActiveCell vehicle={v} />,
+      cell: (v) => (
+        <div className="flex items-center justify-end gap-3">
+          <Link
+            href={`/settings/vehicles/${v.id}`}
+            className="text-xs hover:underline"
+            style={{ color: 'var(--vf-text-mute)' }}
+          >
+            Editar
+          </Link>
+          <ToggleVehicleActiveCell vehicle={v} />
+        </div>
+      ),
     },
   ];
 

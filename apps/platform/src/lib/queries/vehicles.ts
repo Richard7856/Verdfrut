@@ -18,10 +18,16 @@ interface VehicleRow {
   status: VehicleStatus;
   is_active: boolean;
   created_at: string;
+  make: string | null;
+  model: string | null;
+  year: number | null;
+  engine_size_l: number | null;
+  fuel_consumption_l_per_100km: number | null;
+  notes: string | null;
 }
 
 const VEHICLE_COLS =
-  'id, plate, alias, zone_id, capacity, depot_id, depot_lat, depot_lng, status, is_active, created_at';
+  'id, plate, alias, zone_id, capacity, depot_id, depot_lat, depot_lng, status, is_active, created_at, make, model, year, engine_size_l, fuel_consumption_l_per_100km, notes';
 
 function toVehicle(row: VehicleRow): Vehicle {
   return {
@@ -36,6 +42,15 @@ function toVehicle(row: VehicleRow): Vehicle {
     status: row.status,
     isActive: row.is_active,
     createdAt: row.created_at,
+    make: row.make,
+    model: row.model,
+    year: row.year,
+    engineSizeL: row.engine_size_l !== null ? Number(row.engine_size_l) : null,
+    fuelConsumptionLPer100km:
+      row.fuel_consumption_l_per_100km !== null
+        ? Number(row.fuel_consumption_l_per_100km)
+        : null,
+    notes: row.notes,
   };
 }
 
@@ -66,6 +81,12 @@ interface CreateVehicleInput {
   depotId?: string | null;
   depotLat?: number | null;
   depotLng?: number | null;
+  make?: string | null;
+  model?: string | null;
+  year?: number | null;
+  engineSizeL?: number | null;
+  fuelConsumptionLPer100km?: number | null;
+  notes?: string | null;
 }
 
 export async function createVehicle(input: CreateVehicleInput): Promise<Vehicle> {
@@ -81,12 +102,18 @@ export async function createVehicle(input: CreateVehicleInput): Promise<Vehicle>
       depot_lat: input.depotLat ?? null,
       depot_lng: input.depotLng ?? null,
       status: 'available',
+      make: input.make ?? null,
+      model: input.model ?? null,
+      year: input.year ?? null,
+      engine_size_l: input.engineSizeL ?? null,
+      fuel_consumption_l_per_100km: input.fuelConsumptionLPer100km ?? null,
+      notes: input.notes ?? null,
     })
     .select(VEHICLE_COLS)
     .single();
 
   if (error) throw new Error(`[vehicles.create] ${error.message}`);
-  return toVehicle(data);
+  return toVehicle(data as unknown as VehicleRow);
 }
 
 interface UpdateVehicleInput {
@@ -99,6 +126,12 @@ interface UpdateVehicleInput {
   depotLng?: number | null;
   status?: VehicleStatus;
   isActive?: boolean;
+  make?: string | null;
+  model?: string | null;
+  year?: number | null;
+  engineSizeL?: number | null;
+  fuelConsumptionLPer100km?: number | null;
+  notes?: string | null;
 }
 
 export async function updateVehicle(id: string, input: UpdateVehicleInput): Promise<Vehicle> {
@@ -113,6 +146,13 @@ export async function updateVehicle(id: string, input: UpdateVehicleInput): Prom
   if (input.depotLng !== undefined) update.depot_lng = input.depotLng;
   if (input.status !== undefined) update.status = input.status;
   if (input.isActive !== undefined) update.is_active = input.isActive;
+  if (input.make !== undefined) update.make = input.make;
+  if (input.model !== undefined) update.model = input.model;
+  if (input.year !== undefined) update.year = input.year;
+  if (input.engineSizeL !== undefined) update.engine_size_l = input.engineSizeL;
+  if (input.fuelConsumptionLPer100km !== undefined)
+    update.fuel_consumption_l_per_100km = input.fuelConsumptionLPer100km;
+  if (input.notes !== undefined) update.notes = input.notes;
 
   const { data, error } = await supabase
     .from('vehicles')
@@ -122,5 +162,16 @@ export async function updateVehicle(id: string, input: UpdateVehicleInput): Prom
     .single();
 
   if (error) throw new Error(`[vehicles.update] ${error.message}`);
-  return toVehicle(data);
+  return toVehicle(data as unknown as VehicleRow);
+}
+
+export async function getVehicle(id: string): Promise<Vehicle | null> {
+  const supabase = await createServerClient();
+  const { data, error } = await supabase
+    .from('vehicles')
+    .select(VEHICLE_COLS)
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw new Error(`[vehicles.get] ${error.message}`);
+  return data ? toVehicle(data as unknown as VehicleRow) : null;
 }

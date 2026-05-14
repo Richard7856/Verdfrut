@@ -21,4 +21,11 @@ export interface Vehicle {
   status: VehicleStatus;
   isActive: boolean;
   createdAt: string;
+  // Specs adicionales (mig 042) — opcionales, llenables con AI enrichment.
+  make: string | null;
+  model: string | null;
+  year: number | null;
+  engineSizeL: number | null;
+  fuelConsumptionLPer100km: number | null;
+  notes: string | null;
 }
