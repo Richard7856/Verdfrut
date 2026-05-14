@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Términos y Condiciones · TripDrive</title>
+  <meta name="description" content="Términos y Condiciones del servicio TripDrive.">
+  <meta name="robots" content="index, follow">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #1d2521;
+      --bg-2: #232a26;
+      --fg: #f1f4f1;
+      --fg-muted: #aab4ad;
+      --bright: oklch(0.58 0.085 150);
+      --border: rgba(255,255,255,0.08);
+      --primary: oklch(0.42 0.11 155);
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #fafaf9;
+        --bg-2: #f4f5f3;
+        --fg: #1d2521;
+        --fg-muted: #5c6660;
+        --border: rgba(0,0,0,0.08);
+      }
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { overflow-x: hidden; }
+    body {
+      background: var(--bg);
+      color: var(--fg);
+      font-family: "Geist", system-ui, sans-serif;
+      line-height: 1.6;
+      font-size: 16px;
+      -webkit-font-smoothing: antialiased;
+    }
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 18px 24px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    header a.brand { display: inline-flex; align-items: center; gap: 8px; color: var(--fg); text-decoration: none; font-weight: 600; }
+    header a.back { color: var(--fg-muted); text-decoration: none; font-size: 14px; }
+    header a.back:hover { color: var(--fg); }
+    main {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 48px 24px 96px;
+    }
+    h1 { font-size: clamp(28px, 4vw, 40px); letter-spacing: -.02em; margin-bottom: 8px; font-weight: 600; }
+    .updated { color: var(--fg-muted); font-size: 13px; margin-bottom: 32px; }
+    h2 { font-size: 20px; margin-top: 36px; margin-bottom: 12px; font-weight: 600; letter-spacing: -.01em; }
+    h3 { font-size: 16px; margin-top: 20px; margin-bottom: 8px; font-weight: 600; color: var(--fg); }
+    p { margin-bottom: 14px; color: var(--fg-muted); }
+    ul, ol { margin: 12px 0 14px 20px; color: var(--fg-muted); }
+    li { margin-bottom: 6px; }
+    strong, b { color: var(--fg); font-weight: 500; }
+    a { color: var(--bright); }
+    .callout {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px 20px;
+      margin: 18px 0;
+      font-size: 14.5px;
+    }
+    footer { border-top: 1px solid var(--border); margin-top: 64px; padding: 24px; text-align: center; color: var(--fg-muted); font-size: 13px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <a href="/" class="brand">
+    <svg width="20" height="24" viewBox="0 0 22 26" fill="none" aria-hidden="true">
+      <path d="M11 0.5C5.20101 0.5 0.5 5.20101 0.5 11C0.5 17.875 9.5 24.5 11 24.5C12.5 24.5 21.5 17.875 21.5 11C21.5 5.20101 16.799 0.5 11 0.5Z" fill="oklch(0.42 0.11 155)"></path>
+      <circle cx="11" cy="11" r="4" fill="oklch(0.92 0.04 155)"></circle>
+    </svg>
+    TripDrive
+  </a>
+  <a href="/" class="back">← Volver al sitio</a>
+</header>
+
+<main>
+
+<h1>Términos y Condiciones</h1>
+<p class="updated">Última actualización: 13 de mayo de 2026</p>
+
+<div class="callout">
+<strong>En resumen:</strong> contratar TripDrive te da acceso a la plataforma para optimizar rutas y operar tu flotilla. Pagas mensual o anual, sin contratos forzosos. Eres dueño de tu data y puedes exportarla cuando quieras. Tenemos SLA específico por plan y procesos claros cuando las cosas fallan.
+</div>
+
+<h2>1. Definiciones</h2>
+<ul>
+  <li><strong>TripDrive:</strong> el servicio prestado por [RAZÓN SOCIAL PENDIENTE], en lo sucesivo "el Proveedor".</li>
+  <li><strong>Cliente:</strong> la persona física o moral que contrata el servicio.</li>
+  <li><strong>Usuarios:</strong> personal del Cliente con acceso a la plataforma (admins, dispatchers, supervisores, choferes).</li>
+  <li><strong>Plataforma:</strong> el conjunto de aplicaciones web, móviles e infraestructura accesibles a través de los dominios <code>tripdrive.xyz</code> y subdominios derivados.</li>
+  <li><strong>Plan:</strong> el nivel de servicio contratado (Operación, Pro o Enterprise) con sus respectivas funcionalidades y límites.</li>
+  <li><strong>Cuenta operativa:</strong> entidad lógica dentro de la Plataforma que agrupa flujos, tiendas y configuración para un cliente final del Cliente.</li>
+</ul>
+
+<h2>2. Aceptación de los términos</h2>
+<p>
+  Al firmar la cotización, al realizar el primer pago, o al ingresar a la
+  Plataforma con credenciales otorgadas por el Proveedor, el Cliente
+  acepta estos Términos y Condiciones, así como el
+  <a href="/privacidad.html">Aviso de Privacidad</a> en su totalidad.
+</p>
+
+<h2>3. Descripción del servicio</h2>
+<p>TripDrive provee:</p>
+<ul>
+  <li>Software-como-servicio (SaaS) para optimización y ejecución de rutas
+    de reparto de última milla.</li>
+  <li>Aplicaciones para administradores (web), supervisores (web/móvil) y
+    choferes (web PWA y APK Android).</li>
+  <li>Almacenamiento aislado de la información operativa del Cliente
+    (multi-tenant con Row Level Security).</li>
+  <li>Soporte técnico por WhatsApp dentro del horario hábil acordado.</li>
+  <li>Funcionalidades adicionales según el plan contratado, detalladas
+    en <a href="/#precios">tripdrive.xyz/#precios</a>.</li>
+</ul>
+
+<h2>4. Planes, precios y facturación</h2>
+
+<h3>4.1. Estructura de precios</h3>
+<p>
+  El precio se compone de cuota por administrador y cuota por chofer, con
+  un mínimo por plan. La estructura vigente se publica en
+  <a href="/#precios">tripdrive.xyz/#precios</a> y se confirma en la
+  cotización firmada.
+</p>
+
+<h3>4.2. Moneda</h3>
+<p>
+  El precio se factura en Pesos Mexicanos (MXN). Aceptamos pago en USD
+  al tipo de cambio publicado por el Banco de México (DOF) en el día de
+  la emisión de la factura.
+</p>
+
+<h3>4.3. Periodicidad</h3>
+<p>
+  Mensual o anual prepagada. El cliente elige la modalidad al firmar.
+  No hay penalización por cambio de modalidad fuera de los ciclos
+  ya facturados.
+</p>
+
+<h3>4.4. Setup único</h3>
+<p>
+  Se cobra un setup único de $15,000 MXN al inicio del servicio para
+  cubrir onboarding, importación de catálogo y configuración inicial. El
+  setup es <strong>condonado</strong> en plan Enterprise y en contrato
+  anual prepagado.
+</p>
+
+<h3>4.5. Periodo de prueba</h3>
+<p>
+  El Cliente puede probar la Plataforma durante <strong>1 semana</strong>
+  sin costo y sin tarjeta de crédito antes de firmar. Durante este
+  periodo se aplican todos los términos de esta sección salvo la
+  obligación de pago.
+</p>
+
+<h3>4.6. Add-ons y conexiones a la medida</h3>
+<p>
+  Integraciones especiales (ERP, mensajería al cliente final, facturación
+  CFDI 4.0, etc.) se cotizan por proyecto separado e incluyen un setup
+  único más una mensualidad de mantenimiento, descrito en la cotización
+  específica de cada add-on.
+</p>
+
+<h3>4.7. Mora</h3>
+<p>
+  Si el pago no se recibe en los 15 días naturales posteriores a la
+  fecha de vencimiento de la factura, el Proveedor puede suspender el
+  acceso al servicio previa notificación por correo y WhatsApp con 5
+  días de anticipación. Pasados 60 días de mora, la cuenta puede ser
+  cerrada y los datos archivados conforme a la política de retención.
+</p>
+
+<h2>5. Obligaciones del Cliente</h2>
+<ol>
+  <li>Pagar puntualmente las cuotas pactadas.</li>
+  <li>Informar a sus Usuarios sobre el <a href="/privacidad.html">Aviso
+    de Privacidad</a> y obtener su consentimiento para el tratamiento
+    de datos personales.</li>
+  <li>No compartir credenciales entre múltiples personas físicas — cada
+    Usuario debe tener su propia cuenta.</li>
+  <li>No utilizar la Plataforma para fines ilícitos, fraudulentos, o
+    contrarios a la regulación aplicable en México.</li>
+  <li>Reportar al Proveedor cualquier vulnerabilidad detectada o uso
+    indebido sospechado, dentro de las 24 horas siguientes.</li>
+  <li>Mantener actualizada la información de contacto y facturación.</li>
+</ol>
+
+<h2>6. Obligaciones del Proveedor</h2>
+<ol>
+  <li>Prestar el servicio con la diligencia profesional razonable.</li>
+  <li>Mantener la disponibilidad conforme al SLA del plan contratado
+    (sección 7).</li>
+  <li>Aplicar medidas técnicas y organizativas razonables para proteger
+    la información del Cliente (cifrado en tránsito y en reposo,
+    aislamiento por tenant con RLS, autenticación de Usuarios).</li>
+  <li>Notificar al Cliente cualquier incidente de seguridad que
+    comprometa sus datos dentro de las 72 horas de identificado.</li>
+  <li>Permitir al Cliente exportar su información en formatos abiertos
+    (CSV/XLSX) en cualquier momento.</li>
+</ol>
+
+<h2>7. Nivel de servicio (SLA)</h2>
+
+<h3>7.1. Disponibilidad</h3>
+<ul>
+  <li><strong>Operación:</strong> 99.0% mensual (≈ 7 hrs de downtime/mes).</li>
+  <li><strong>Pro:</strong> 99.5% mensual (≈ 3.6 hrs de downtime/mes).</li>
+  <li><strong>Enterprise:</strong> 99.5% mensual con compromiso de
+    notificación proactiva ante incidentes.</li>
+</ul>
+<p>
+  Se excluye del cálculo: ventanas de mantenimiento programadas con 48
+  horas de aviso, caídas de proveedores de infraestructura terciaria
+  (Supabase, Vercel, Google Cloud) fuera del control razonable del
+  Proveedor, fuerza mayor.
+</p>
+
+<h3>7.2. Tiempos de respuesta de soporte</h3>
+<ul>
+  <li><strong>Crítico</strong> (servicio caído): &lt; 2 horas dentro de
+    horario hábil (Lun-Vie 9-19 hrs CST).</li>
+  <li><strong>Alto</strong> (función importante no funciona): &lt; 8 horas
+    hábiles.</li>
+  <li><strong>Normal</strong> (consulta o bug menor): &lt; 24 horas hábiles.</li>
+</ul>
+
+<h3>7.3. Créditos por incumplimiento</h3>
+<p>
+  Si el Proveedor incumple el SLA de disponibilidad de un mes
+  calendario, el Cliente recibe crédito proporcional en la siguiente
+  factura: 10% por cada 0.5% de incumplimiento, hasta máximo 50%. El
+  crédito no se canjea por efectivo y no aplica si la causa fue
+  imputable al Cliente.
+</p>
+
+<h2>8. Propiedad intelectual y datos del Cliente</h2>
+<p>
+  <strong>El Cliente es y será dueño de toda la información operativa
+  cargada en la Plataforma</strong>: catálogos, rutas históricas,
+  evidencias, reportes. El Proveedor obtiene una licencia limitada para
+  procesar dichos datos exclusivamente para prestar el servicio.
+</p>
+<p>
+  El software, marca, diseño y arquitectura de la Plataforma son
+  propiedad exclusiva del Proveedor. El Cliente no adquiere derechos
+  sobre el código fuente ni puede hacer ingeniería inversa.
+</p>
+
+<h2>9. Confidencialidad</h2>
+<p>
+  Ambas partes acuerdan mantener confidencial la información comercial,
+  técnica y operativa intercambiada en virtud del contrato, durante la
+  vigencia y por 3 años posteriores. Se excluye información de dominio
+  público, conocida previamente o desarrollada independientemente.
+</p>
+
+<h2>10. Limitación de responsabilidad</h2>
+<p>
+  En ningún caso la responsabilidad agregada del Proveedor frente al
+  Cliente, por cualquier concepto, excederá <strong>el monto total
+  pagado por el Cliente en los 12 meses anteriores al evento que origina
+  el reclamo</strong>.
+</p>
+<p>
+  El Proveedor no es responsable por:
+</p>
+<ul>
+  <li>Daños indirectos, consecuenciales, pérdida de utilidades, oportunidad
+    o reputación.</li>
+  <li>Decisiones operativas tomadas por el Cliente con base en datos
+    o sugerencias de la Plataforma — la Plataforma es una herramienta de
+    apoyo, no sustituye el juicio del personal del Cliente.</li>
+  <li>Errores o fraudes cometidos por los Usuarios del Cliente (incluido
+    falseo de ubicación por choferes).</li>
+  <li>Caída de proveedores de infraestructura terciaria fuera del control
+    razonable del Proveedor (Supabase, Vercel, Google, Railway).</li>
+  <li>Cargos derivados del uso del asistente de IA por encima de los
+    límites de uso razonable definidos en cada plan.</li>
+</ul>
+
+<h2>11. Suspensión y terminación</h2>
+
+<h3>11.1. Por parte del Cliente</h3>
+<p>
+  El Cliente puede cancelar en cualquier momento con 30 días de
+  anticipación. No hay penalización fuera de los ciclos ya facturados.
+  El Proveedor entrega los datos del Cliente en formato XLSX/CSV dentro
+  de los 15 días siguientes a la cancelación.
+</p>
+
+<h3>11.2. Por parte del Proveedor</h3>
+<p>
+  El Proveedor puede suspender o terminar el servicio si el Cliente:
+</p>
+<ul>
+  <li>Incumple el pago según la cláusula 4.7.</li>
+  <li>Utiliza el servicio con fines ilícitos.</li>
+  <li>Compromete deliberadamente la seguridad de la Plataforma o de
+    otros clientes.</li>
+  <li>Excede los límites técnicos del plan contratado en forma sostenida
+    sin acordar un upgrade.</li>
+</ul>
+
+<h3>11.3. Eliminación de datos post-terminación</h3>
+<p>
+  Pasados 60 días desde la terminación efectiva, el Proveedor procede a
+  la eliminación definitiva de los datos del Cliente, salvo los que
+  deba conservar por obligación fiscal (datos de facturación, 10 años)
+  o legal (bitácora de auditoría, 5 años).
+</p>
+
+<h2>12. Modificaciones a los términos</h2>
+<p>
+  El Proveedor puede modificar estos Términos con 30 días naturales de
+  aviso por correo electrónico al contacto registrado. Si el Cliente no
+  está de acuerdo, puede cancelar el servicio dentro de ese plazo sin
+  penalización. El uso continuado tras la entrada en vigor implica
+  aceptación de las nuevas condiciones.
+</p>
+
+<h2>13. Fuerza mayor</h2>
+<p>
+  Ninguna parte será responsable por incumplimientos derivados de
+  eventos fuera de su control razonable: caídas masivas de
+  infraestructura de internet, desastres naturales, actos de autoridad,
+  conflictos armados, pandemias.
+</p>
+
+<h2>14. Ley aplicable y jurisdicción</h2>
+<p>
+  Estos términos se rigen por las leyes de los Estados Unidos Mexicanos.
+  Cualquier controversia se someterá a los tribunales competentes de
+  la Ciudad de México, renunciando expresamente a cualquier otra
+  jurisdicción que pudiera corresponderles por sus domicilios presentes
+  o futuros.
+</p>
+
+<h2>15. Notificaciones</h2>
+<p>
+  Toda notificación se considera válida si se envía por correo
+  electrónico al contacto registrado por cada parte. El correo del
+  Proveedor para efectos legales es
+  <a href="mailto:legal@tripdrive.xyz">legal@tripdrive.xyz</a>.
+</p>
+
+<h2>16. Contacto</h2>
+<p>
+  Para dudas sobre estos términos, contacta a
+  <a href="mailto:contacto@tripdrive.xyz">contacto@tripdrive.xyz</a> o
+  vía WhatsApp al
+  <a href="https://wa.me/527298847499" target="_blank" rel="noopener noreferrer">+52 729 884 7499</a>.
+</p>
+
+</main>
+
+<footer>
+  © 2026 TripDrive · <a href="/" style="color: inherit;">tripdrive.xyz</a> · <a href="/privacidad.html" style="color: inherit;">Aviso de Privacidad</a>
+</footer>
+
+</body>
+</html>
