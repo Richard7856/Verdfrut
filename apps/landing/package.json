@@ -1,0 +1,12 @@
+{
+  "name": "@tripdrive/landing",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Public landing for tripdrive.xyz — static HTML, no build step.",
+  "scripts": {
+    "dev": "npx serve . -p 4321",
+    "build": "echo 'static landing — nothing to build'",
+    "start": "npx serve . -p 4321",
+    "type-check": "echo 'no types in static landing'"
+  }
+}

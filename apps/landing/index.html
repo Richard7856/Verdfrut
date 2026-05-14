@@ -1,0 +1,2517 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark" data-palette="forest"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TripDrive — Una plataforma. Una flotilla. Cada cuenta con su propio flujo.</title>
+<meta name="description" content="Optimiza rutas, despliega choferes y configura el flujo de la app para cada cuenta operativa que atiendes. Sin código, sin migraciones.">
+
+<!-- OpenGraph / Twitter -->
+<meta property="og:title" content="TripDrive — Una plataforma. Una flotilla. Cada cuenta con su propio flujo.">
+<meta property="og:description" content="Optimiza rutas, despliega choferes y configura el flujo de la app para cada cuenta operativa que atiendes. Sin código, sin migraciones.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://tripdrive.xyz">
+<meta property="og:image" content="https://tripdrive.xyz/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="TripDrive — Tu logística de última milla, optimizada.">
+<meta name="twitter:description" content="Optimización de rutas, app del chofer y reportes operativos en una sola plataforma.">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+
+<!-- Schema.org JSON-LD -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "name": "TripDrive",
+      "url": "https://tripdrive.xyz",
+      "logo": "https://tripdrive.xyz/tripdrive-logo-light.png",
+      "address": { "@type": "PostalAddress", "addressLocality": "Ciudad de México", "addressCountry": "MX" }
+    },
+    {
+      "@type": "SoftwareApplication",
+      "name": "TripDrive",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web, Android",
+      "offers": { "@type": "Offer", "priceCurrency": "MXN" }
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {"@type": "Question", "name": "¿Cómo migro mi catálogo actual?", "acceptedAnswer": {"@type": "Answer", "text": "CSV o importación asistida en onboarding."}},
+        {"@type": "Question", "name": "¿La app del chofer funciona sin internet?", "acceptedAnswer": {"@type": "Answer", "text": "Sí, PWA con queue offline; sincroniza al recuperar señal."}},
+        {"@type": "Question", "name": "¿Cómo se integra con mis sistemas actuales?", "acceptedAnswer": {"@type": "Answer", "text": "Webhooks salientes, n8n workflows custom, importación automática Sheets/Excel. Para SAP, Odoo o QuickBooks ofrecemos integración asistida como add-on."}},
+        {"@type": "Question", "name": "¿Puedo probar antes de pagar?", "acceptedAnswer": {"@type": "Answer", "text": "Demo de 30 min y 1 semana gratis antes de firmar para que pruebes con tu data."}},
+        {"@type": "Question", "name": "¿Quién es dueño de mis datos?", "acceptedAnswer": {"@type": "Answer", "text": "Tú. Multi-tenant aislado, exportación cuando quieras."}},
+        {"@type": "Question", "name": "¿Cuánto tarda implementar?", "acceptedAnswer": {"@type": "Answer", "text": "Operación: self-service 1–2 días. Pro: 4 hrs. Enterprise: 2 días asistido."}}
+      ]
+    }
+  ]
+}
+</script>
+
+
+
+<style>
+  :root {
+    --primary: oklch(0.42 0.11 155);
+    --bright: oklch(0.58 0.085 150);
+    --bright-2: oklch(0.64 0.090 150);
+    --radius-card: 14px;
+    --radius-btn: 8px;
+    --container: 1240px;
+    --header-h: 64px;
+    --section-y: 132px;
+    --section-y-sm: 88px;
+    --ease: cubic-bezier(.2,.7,.2,1);
+  }
+
+  /* ---------- Palette: Slate (cool steel-blue, fintech B2B) ---------- */
+  [data-palette="slate"] {
+    --primary: oklch(0.48 0.10 235);
+    --bright: oklch(0.62 0.085 230);
+    --bright-2: oklch(0.68 0.090 230);
+  }
+  [data-theme="dark"][data-palette="slate"] {
+    --bg: oklch(0.175 0.012 240);
+    --bg-2: oklch(0.21 0.013 240);
+    --bg-3: oklch(0.24 0.013 240);
+    --fg: oklch(0.96 0.008 235);
+    --fg-muted: oklch(0.72 0.012 235);
+    --fg-dim: oklch(0.56 0.012 235);
+    --border: oklch(0.30 0.014 240);
+    --border-strong: oklch(0.38 0.018 240);
+    --card: oklch(0.22 0.013 240 / 0.7);
+    --logo-tint: oklch(0.64 0.010 235);
+    --grid-line: oklch(0.28 0.014 240);
+  }
+  [data-theme="light"][data-palette="slate"] {
+    --bg-2: oklch(0.985 0.005 235);
+    --bg-3: oklch(0.965 0.007 235);
+    --fg: oklch(0.20 0.012 235);
+    --fg-muted: oklch(0.42 0.014 235);
+    --border: oklch(0.90 0.010 235);
+    --border-strong: oklch(0.82 0.013 235);
+    --logo-tint: oklch(0.50 0.012 235);
+    --grid-line: oklch(0.93 0.010 235);
+  }
+
+  /* ---------- Palette: Ivory (warm graphite + cream accent, premium) ---------- */
+  [data-palette="ivory"] {
+    --primary: oklch(0.50 0.085 75);
+    --bright: oklch(0.80 0.10 82);
+    --bright-2: oklch(0.86 0.10 82);
+  }
+  [data-theme="dark"][data-palette="ivory"] {
+    --bg: oklch(0.17 0.008 65);
+    --bg-2: oklch(0.205 0.009 65);
+    --bg-3: oklch(0.24 0.010 65);
+    --fg: oklch(0.97 0.012 75);
+    --fg-muted: oklch(0.74 0.014 70);
+    --fg-dim: oklch(0.58 0.014 70);
+    --border: oklch(0.30 0.012 65);
+    --border-strong: oklch(0.38 0.014 65);
+    --card: oklch(0.215 0.010 65 / 0.7);
+    --logo-tint: oklch(0.66 0.014 75);
+    --grid-line: oklch(0.28 0.012 65);
+  }
+  [data-theme="light"][data-palette="ivory"] {
+    --bg: oklch(0.985 0.010 80);
+    --bg-2: oklch(0.97 0.012 80);
+    --bg-3: oklch(0.95 0.014 80);
+    --fg: oklch(0.20 0.012 70);
+    --fg-muted: oklch(0.42 0.014 70);
+    --fg-dim: oklch(0.58 0.014 70);
+    --border: oklch(0.89 0.012 75);
+    --border-strong: oklch(0.80 0.014 75);
+    --logo-tint: oklch(0.50 0.014 70);
+    --grid-line: oklch(0.92 0.012 75);
+  }
+
+  /* Dark (default) */
+  [data-theme="dark"] {
+    --bg: oklch(0.18 0.012 155);
+    --bg-2: oklch(0.21 0.014 155);
+    --bg-3: oklch(0.24 0.014 155);
+    --fg: oklch(0.96 0.008 155);
+    --fg-muted: oklch(0.72 0.012 155);
+    --fg-dim: oklch(0.56 0.012 155);
+    --border: oklch(0.30 0.014 155);
+    --border-strong: oklch(0.38 0.018 155);
+    --card: oklch(0.22 0.014 155 / 0.7);
+    --logo-tint: oklch(0.62 0.010 155);
+    --grid-line: oklch(0.28 0.014 155);
+  }
+  /* Light */
+  [data-theme="light"] {
+    --bg: #ffffff;
+    --bg-2: oklch(0.985 0.004 155);
+    --bg-3: oklch(0.965 0.006 155);
+    --fg: oklch(0.20 0.01 155);
+    --fg-muted: oklch(0.42 0.012 155);
+    --fg-dim: oklch(0.58 0.012 155);
+    --border: oklch(0.90 0.008 155);
+    --border-strong: oklch(0.82 0.012 155);
+    --card: #ffffff;
+    --logo-tint: oklch(0.55 0.010 155);
+    --grid-line: oklch(0.93 0.008 155);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: "Geist", system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    font-size: 16px;
+    line-height: 1.6;
+    transition: background-color .25s var(--ease), color .25s var(--ease);
+    font-feature-settings: "ss01", "cv11";
+  }
+  .mono { font-family: "Geist Mono", ui-monospace, "SF Mono", monospace; font-feature-settings: "ss01","cv11"; }
+  a { color: inherit; text-decoration: none; }
+  ::selection { background: var(--bright); color: oklch(0.16 0.01 155); }
+
+  .container {
+    max-width: var(--container);
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  /* ---------- Header ---------- */
+  .site-header {
+    position: sticky; top: 0; z-index: 50;
+    height: var(--header-h);
+    backdrop-filter: saturate(140%) blur(10px);
+    -webkit-backdrop-filter: saturate(140%) blur(10px);
+    background: color-mix(in oklab, var(--bg) 78%, transparent);
+    border-bottom: 1px solid transparent;
+    transition: transform .3s var(--ease), border-color .25s var(--ease), background-color .25s var(--ease);
+  }
+  .site-header.scrolled { border-bottom-color: var(--border); }
+  .site-header.hidden { transform: translateY(-100%); }
+  .site-header .container {
+    display: flex; align-items: center; height: 100%;
+    gap: 32px;
+  }
+  .logo {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-weight: 600; letter-spacing: -0.01em; font-size: 17px;
+  }
+  .logo svg { display: block; }
+  .nav { display: flex; gap: 28px; align-items: center; }
+  .nav a {
+    color: var(--fg-muted); font-size: 14px; font-weight: 500;
+    transition: color .15s var(--ease);
+  }
+  .nav a:hover { color: var(--fg); }
+  .header-spacer { flex: 1; }
+  .header-actions { display: flex; align-items: center; gap: 8px; }
+
+  .theme-toggle {
+    width: 34px; height: 34px; border-radius: 8px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--fg-muted);
+    cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: color .15s var(--ease), border-color .15s var(--ease), background-color .15s var(--ease);
+  }
+  .theme-toggle:hover { color: var(--fg); border-color: var(--border-strong); }
+  .theme-toggle .icon-sun { display: none; }
+  [data-theme="light"] .theme-toggle .icon-moon { display: none; }
+  [data-theme="light"] .theme-toggle .icon-sun  { display: block; }
+
+  /* ---------- Buttons ---------- */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-radius: var(--radius-btn);
+    font-weight: 500;
+    font-size: 14px;
+    line-height: 1;
+    border: 1px solid transparent;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color .15s var(--ease), color .15s var(--ease), border-color .15s var(--ease), transform .1s var(--ease);
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn-primary {
+    background: var(--bright);
+    color: oklch(0.14 0.01 155);
+    font-weight: 600;
+  }
+  .btn-primary:hover { background: var(--bright-2); }
+  .btn-ghost {
+    background: transparent;
+    color: var(--fg);
+    border-color: var(--border-strong);
+  }
+  .btn-ghost:hover { background: color-mix(in oklab, var(--fg) 5%, transparent); }
+  .btn-lg { padding: 14px 22px; font-size: 15px; border-radius: 8px; }
+  .btn-sm { padding: 7px 12px; font-size: 13px; }
+  .btn-block { width: 100%; }
+
+  /* ---------- Hero ---------- */
+  .hero {
+    position: relative;
+    padding-top: 96px;
+    padding-bottom: 120px;
+    overflow: hidden;
+  }
+  .hero .container { position: relative; }
+  .hero-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr);
+    gap: 64px;
+    align-items: center;
+  }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 5px 10px 5px 8px;
+    border: 1px solid var(--border);
+    background: color-mix(in oklab, var(--bright) 8%, transparent);
+    border-radius: 100px;
+    font-size: 12px; font-weight: 500;
+    color: var(--fg-muted);
+  }
+  .eyebrow .dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--bright);
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--bright) 25%, transparent);
+  }
+  h1.hero-title {
+    margin: 24px 0 22px;
+    font-size: clamp(48px, 7.5vw, 104px);
+    line-height: 0.97;
+    letter-spacing: -0.042em;
+    font-weight: 500;
+    text-wrap: balance;
+  }
+  h1.hero-title em {
+    font-style: normal;
+    color: var(--bright);
+  }
+  .hero-sub {
+    color: var(--fg-muted);
+    font-size: 20px;
+    line-height: 1.5;
+    max-width: 560px;
+    text-wrap: pretty;
+  }
+  .hero-ctas {
+    display: flex; gap: 12px; margin-top: 28px;
+    flex-wrap: wrap;
+  }
+  .hero-meta {
+    display: flex; gap: 24px; margin-top: 28px;
+    color: var(--fg-dim); font-size: 13px;
+  }
+  .hero-meta li { display: flex; align-items: center; gap: 8px; }
+  .hero-meta ul { list-style: none; padding: 0; margin: 0; display: contents; }
+  .check {
+    width: 14px; height: 14px; color: var(--bright); flex: none;
+  }
+
+  /* Hero visual: dashboard mock */
+  .hero-visual {
+    position: relative;
+    aspect-ratio: 5 / 4;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg,
+      color-mix(in oklab, var(--bg-2) 100%, transparent),
+      color-mix(in oklab, var(--bg-3) 100%, transparent));
+    overflow: hidden;
+    box-shadow:
+      0 1px 0 0 color-mix(in oklab, var(--fg) 8%, transparent) inset,
+      0 24px 50px -24px rgba(0,0,0,.5),
+      0 8px 20px -10px rgba(0,0,0,.35);
+  }
+  .hv-chrome {
+    display: flex; align-items: center; gap: 6px;
+    height: 32px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in oklab, var(--bg-2) 60%, transparent);
+  }
+  .hv-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--border-strong); }
+  .hv-title { margin-left: 10px; font-size: 11px; color: var(--fg-dim); font-family: "Geist Mono", monospace; }
+  .hv-body {
+    display: grid;
+    grid-template-columns: 168px 1fr;
+    height: calc(100% - 32px);
+  }
+  .hv-side {
+    border-right: 1px solid var(--border);
+    padding: 12px 10px;
+    display: flex; flex-direction: column; gap: 4px;
+    background: color-mix(in oklab, var(--bg-2) 50%, transparent);
+  }
+  .hv-side .sec { font-size: 10px; color: var(--fg-dim); text-transform: uppercase; letter-spacing: .08em; margin: 10px 6px 4px; font-family: "Geist Mono", monospace; }
+  .hv-side .it { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; font-size: 12px; color: var(--fg-muted); }
+  .hv-side .it.active { background: color-mix(in oklab, var(--bright) 14%, transparent); color: var(--fg); }
+  .hv-side .it i { width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); display: inline-block; }
+  .hv-side .it.active i { background: var(--bright); }
+  .hv-main { position: relative; padding: 14px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+  .hv-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .hv-stat {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: color-mix(in oklab, var(--bg) 50%, transparent);
+  }
+  .hv-stat .k { font-size: 10px; color: var(--fg-dim); font-family: "Geist Mono", monospace; letter-spacing: .03em; }
+  .hv-stat .v { font-family: "Geist Mono", monospace; font-size: 16px; font-weight: 600; margin-top: 2px; letter-spacing: -.01em; }
+  .hv-stat .v.up { color: var(--bright); }
+  .hv-map {
+    position: relative;
+    flex: 1;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 30% 40%, color-mix(in oklab, var(--bright) 8%, transparent), transparent 60%),
+      color-mix(in oklab, var(--bg) 70%, transparent);
+  }
+  .hv-map svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  /* ---------- Section base ---------- */
+  section.s { padding: var(--section-y) 0; }
+  section.s-tight { padding: var(--section-y-sm) 0; }
+  .section-head {
+    max-width: 760px;
+    margin: 0 auto 64px;
+    text-align: center;
+  }
+  .section-head.left { text-align: left; margin: 0 0 56px; }
+  .section-eyebrow {
+    font-family: "Geist Mono", monospace;
+    color: var(--bright);
+    text-transform: uppercase;
+    letter-spacing: .14em;
+    font-size: 11.5px;
+    font-weight: 500;
+  }
+  h2.section-title {
+    margin: 16px 0 14px;
+    font-size: clamp(34px, 4.8vw, 60px);
+    line-height: 1.04;
+    letter-spacing: -0.032em;
+    font-weight: 500;
+    text-wrap: balance;
+  }
+  .section-sub {
+    color: var(--fg-muted);
+    font-size: 18px;
+    line-height: 1.55;
+    text-wrap: pretty;
+    max-width: 600px;
+  }
+  .section-head:not(.left) .section-sub { margin-left: auto; margin-right: auto; }
+
+  /* ---------- Multi-cuenta deep-dive ---------- */
+  .deepdive { padding-top: var(--section-y); padding-bottom: var(--section-y); }
+  .dd-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    gap: 64px;
+    align-items: center;
+  }
+  .dd-text .section-title { margin-top: 14px; }
+  .dd-lead {
+    color: var(--fg-muted);
+    font-size: 18px;
+    line-height: 1.55;
+    max-width: 500px;
+    margin: 24px 0 28px;
+    text-wrap: pretty;
+  }
+  .dd-bullets {
+    list-style: none; padding: 0; margin: 0 0 32px;
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .dd-bullets li {
+    font-size: 15px;
+    color: var(--fg-muted);
+    line-height: 1.55;
+    padding-left: 18px;
+    position: relative;
+  }
+  .dd-bullets li::before {
+    content: ""; position: absolute; left: 0; top: 9px;
+    width: 6px; height: 6px;
+    background: var(--bright);
+    border-radius: 50%;
+  }
+  .dd-bullets strong { color: var(--fg); font-weight: 500; }
+  .dd-cta { display: flex; gap: 10px; }
+
+  .dd-visual {
+    position: relative;
+    display: flex; flex-direction: column; gap: 20px;
+  }
+  .composer {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-2);
+    padding: 0;
+    overflow: hidden;
+    box-shadow: 0 18px 40px -20px rgba(0,0,0,.45);
+  }
+  .composer-head {
+    display: flex; align-items: center; gap: 6px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in oklab, var(--bg-2) 70%, transparent);
+  }
+  .cmp-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--border-strong); }
+  .cmp-title {
+    margin-left: 10px;
+    font-size: 11px;
+    color: var(--fg-dim);
+    letter-spacing: .02em;
+  }
+  .composer-body {
+    padding: 14px;
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  }
+  .cmp-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: color-mix(in oklab, var(--bg) 50%, transparent);
+    font-size: 13px;
+    color: var(--fg-muted);
+  }
+  .cmp-tog {
+    width: 26px; height: 14px;
+    border-radius: 100px;
+    background: var(--border-strong);
+    position: relative;
+    flex: none;
+    transition: background .2s var(--ease);
+  }
+  .cmp-tog::after {
+    content: ""; position: absolute;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--fg);
+    top: 2px; left: 2px;
+    transition: left .2s var(--ease);
+  }
+  .cmp-row.on { color: var(--fg); border-color: color-mix(in oklab, var(--bright) 35%, var(--border)); }
+  .cmp-row.on .cmp-tog { background: var(--bright); }
+  .cmp-row.on .cmp-tog::after { left: 14px; background: oklch(0.14 0.01 155); }
+  .cmp-row.off { opacity: .55; }
+  .cmp-tag {
+    margin-left: auto;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--fg-dim);
+  }
+  .cmp-row.on .cmp-tag { color: var(--bright); }
+
+  .dd-phones {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+    margin-top: 6px;
+  }
+  .phone {
+    position: relative;
+    border: 1px solid var(--border-strong);
+    border-radius: 28px;
+    padding: 8px;
+    background: oklch(0.10 0.01 var(--p-hue, 240));
+    aspect-ratio: 9 / 17;
+    box-shadow: 0 24px 50px -20px rgba(0,0,0,.55);
+  }
+  .phone-notch {
+    position: absolute;
+    top: 12px; left: 50%;
+    transform: translateX(-50%);
+    width: 50px; height: 14px;
+    background: oklch(0.06 0.01 240);
+    border-radius: 100px;
+    z-index: 2;
+  }
+  .phone-screen {
+    height: 100%;
+    background: var(--bg);
+    border-radius: 22px;
+    padding: 28px 14px 14px;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .ph-head {
+    font-size: 9.5px;
+    color: var(--bright);
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+  .ph-stop {
+    font-size: 13px;
+    color: var(--fg);
+    letter-spacing: -.005em;
+    margin-bottom: 14px;
+    line-height: 1.3;
+    padding-bottom: 12px;
+    border-bottom: 1px dashed var(--border-strong);
+  }
+  .ph-steps {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column; gap: 6px;
+    counter-reset: step;
+    font-size: 11.5px;
+  }
+  .ph-steps li {
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    color: var(--fg-dim);
+    counter-increment: step;
+    display: flex; gap: 8px;
+    align-items: center;
+  }
+  .ph-steps li::before {
+    content: counter(step);
+    font-family: "Geist Mono", monospace;
+    font-size: 9.5px;
+    color: var(--fg-dim);
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: color-mix(in oklab, var(--fg) 6%, transparent);
+    display: inline-flex; align-items: center; justify-content: center;
+    flex: none;
+  }
+  .ph-steps li.done {
+    color: var(--fg-muted);
+    text-decoration: line-through;
+    text-decoration-color: color-mix(in oklab, var(--fg-dim) 50%, transparent);
+  }
+  .ph-steps li.done::before {
+    background: var(--bright);
+    color: oklch(0.14 0.01 155);
+    content: "✓";
+  }
+  .ph-steps li.active {
+    color: var(--fg);
+    border-color: color-mix(in oklab, var(--bright) 40%, var(--border));
+    background: color-mix(in oklab, var(--bright) 8%, transparent);
+  }
+  .ph-steps li.active::before {
+    background: var(--bright);
+    color: oklch(0.14 0.01 155);
+  }
+
+  @media (max-width: 1024px) {
+    .dd-grid { grid-template-columns: 1fr; gap: 40px; }
+    .composer-body { grid-template-columns: 1fr; }
+    .dd-phones { max-width: 460px; }
+  }
+  @media (max-width: 640px) {
+    .dd-phones { grid-template-columns: 1fr; }
+    .phone { max-width: 280px; margin: 0 auto; }
+  }
+  .contrast { padding-top: var(--section-y); padding-bottom: var(--section-y); }
+  .contrast-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    background: var(--card);
+  }
+  .ct-col {
+    padding: 36px 40px;
+  }
+  .ct-before {
+    border-right: 1px solid var(--border);
+    background: color-mix(in oklab, var(--bg) 50%, transparent);
+  }
+  .ct-after {
+    background:
+      linear-gradient(180deg,
+        color-mix(in oklab, var(--bright) 6%, transparent),
+        color-mix(in oklab, var(--bright) 0%, transparent) 70%),
+      transparent;
+  }
+  .ct-tag {
+    font-size: 11px;
+    color: var(--fg-dim);
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    margin-bottom: 24px;
+  }
+  .ct-tag-bright { color: var(--bright); }
+  .ct-col ul {
+    list-style: none; padding: 0; margin: 0;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .ct-col li {
+    display: flex; gap: 14px;
+    color: var(--fg-muted);
+    font-size: 15.5px;
+    line-height: 1.5;
+  }
+  .ct-col li b { color: var(--fg); font-weight: 500; }
+  .ct-bullet {
+    flex: none;
+    color: var(--fg-dim);
+    font-family: "Geist Mono", monospace;
+    font-weight: 500;
+    margin-top: 1px;
+  }
+  .ct-before li { color: var(--fg-dim); }
+  .ct-before li b { color: var(--fg-muted); font-weight: 500; }
+  .ct-after li svg {
+    flex: none;
+    width: 16px; height: 16px;
+    color: var(--bright);
+    margin-top: 3px;
+  }
+  @media (max-width: 768px) {
+    .contrast-grid { grid-template-columns: 1fr; }
+    .ct-before { border-right: 0; border-bottom: 1px solid var(--border); }
+    .ct-col { padding: 28px 24px; }
+  }
+  .proof {
+    padding: 72px 0;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    background:
+      radial-gradient(ellipse 80% 40% at 50% 0%, color-mix(in oklab, var(--bright) 5%, transparent), transparent 60%),
+      var(--bg);
+  }
+  .proof-head {
+    text-align: center;
+    margin: 0 auto 36px;
+    max-width: 640px;
+  }
+  .proof-label {
+    color: var(--bright);
+    font-size: 12px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .proof-title {
+    margin: 0;
+    font-size: clamp(20px, 2.4vw, 26px);
+    font-weight: 500;
+    letter-spacing: -.015em;
+    color: var(--fg-muted);
+    text-wrap: balance;
+    line-height: 1.35;
+  }
+  .proof-grid { display: none; }
+
+  .logo-wall {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    overflow: hidden;
+    background: var(--card);
+  }
+  .lw-cell {
+    display: flex; align-items: center; justify-content: center;
+    padding: 40px 22px;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    min-height: 124px;
+    transition: background-color .15s var(--ease);
+  }
+  .lw-cell:nth-child(4n) { border-right: 0; }
+  .lw-cell:nth-last-child(-n+4) { border-bottom: 0; }
+  .lw-cell:hover { background: color-mix(in oklab, var(--fg) 3%, transparent); }
+  .logo-mark {
+    color: var(--logo-tint);
+    transition: color .2s var(--ease);
+    white-space: nowrap;
+    user-select: none;
+  }
+  .lw-cell:hover .logo-mark { color: var(--fg); }
+  /* Distinct wordmark treatments */
+  .lm-1 { font-weight: 700; letter-spacing: .035em; font-size: 16px; }
+  .lm-2 { font-family: "Geist Mono", monospace; font-weight: 500; font-size: 16px; letter-spacing: -.015em; }
+  .lm-3 { font-weight: 300; letter-spacing: .22em; font-size: 13.5px; }
+  .lm-4 { font-weight: 600; font-style: italic; font-size: 22px; letter-spacing: -.025em; }
+  .lm-5 { font-weight: 400; font-size: 19px; letter-spacing: -.005em; }
+  .lm-6 { font-family: "Geist Mono", monospace; font-weight: 500; font-size: 13px; letter-spacing: .08em; }
+  .lm-7 { font-weight: 700; letter-spacing: -.025em; font-size: 19px; }
+  .lm-8 { font-weight: 500; letter-spacing: .14em; font-size: 13px; }
+  @media (max-width: 1024px) {
+    .logo-wall { grid-template-columns: repeat(2, 1fr); }
+    .lw-cell { border-right: 1px solid var(--border); }
+    .lw-cell:nth-child(4n) { border-right: 1px solid var(--border); }
+    .lw-cell:nth-child(2n) { border-right: 0; }
+    .lw-cell:nth-last-child(-n+4) { border-bottom: 1px solid var(--border); }
+    .lw-cell:nth-last-child(-n+2) { border-bottom: 0; }
+  }
+  @media (max-width: 640px) {
+    .logo-wall { grid-template-columns: 1fr; }
+    .lw-cell { border-right: 0 !important; border-bottom: 1px solid var(--border) !important; }
+    .lw-cell:last-child { border-bottom: 0 !important; }
+  }
+  .proof-foot {
+    text-align: center;
+    margin: 28px 0 0;
+    color: var(--fg-dim);
+    font-size: 12px;
+    letter-spacing: .02em;
+  }
+  .proof-foot a {
+    color: var(--bright);
+    border-bottom: 1px solid color-mix(in oklab, var(--bright) 40%, transparent);
+    padding-bottom: 1px;
+  }
+  .proof-foot a:hover { border-bottom-color: var(--bright); }
+
+  /* ---------- Reasons (3 cards) ---------- */
+  .grid-3 {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+  .card {
+    border: 1px solid var(--border);
+    background: var(--card);
+    border-radius: var(--radius-card);
+    padding: 32px;
+    transition: border-color .15s var(--ease), transform .2s var(--ease);
+  }
+  .card:hover { border-color: var(--border-strong); }
+  .card-icon {
+    width: 44px; height: 44px; border-radius: 10px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: color-mix(in oklab, var(--bright) 12%, transparent);
+    color: var(--bright);
+    margin-bottom: 24px;
+  }
+  .card h3 {
+    margin: 0 0 10px;
+    font-size: 20px; font-weight: 600; letter-spacing: -0.015em;
+    line-height: 1.25;
+  }
+  .card p {
+    margin: 0;
+    color: var(--fg-muted);
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  .chips {
+    margin-top: 18px;
+    display: flex; flex-wrap: wrap; gap: 6px;
+  }
+  .chip {
+    font-family: "Geist Mono", monospace;
+    font-size: 11.5px;
+    padding: 4px 9px;
+    border-radius: 100px;
+    border: 1px solid var(--border);
+    background: color-mix(in oklab, var(--bg) 40%, transparent);
+    color: var(--fg-muted);
+    letter-spacing: -.005em;
+  }
+  .card-flow .chip:nth-child(odd) {
+    border-color: color-mix(in oklab, var(--bright) 35%, var(--border));
+    color: var(--fg);
+  }
+
+  /* ---------- How it works ---------- */
+  .steps {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    position: relative;
+  }
+  .steps::before {
+    content: "";
+    position: absolute;
+    top: 22px; left: 12.5%; right: 12.5%;
+    height: 1px;
+    background: repeating-linear-gradient(90deg, var(--border-strong) 0 6px, transparent 6px 12px);
+  }
+  .step { padding: 0 20px; position: relative; }
+  .step-num {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    background: var(--bg-2);
+    border: 1px solid var(--border-strong);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-family: "Geist Mono", monospace;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--bright);
+    margin-bottom: 18px;
+    position: relative;
+    z-index: 1;
+  }
+  .step h4 {
+    margin: 0 0 6px;
+    font-size: 16px; font-weight: 600; letter-spacing: -0.01em;
+  }
+  .step p {
+    margin: 0;
+    color: var(--fg-muted);
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  .step-mini {
+    margin-top: 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: color-mix(in oklab, var(--bg-2) 50%, transparent);
+    padding: 10px 12px;
+    font-family: "Geist Mono", monospace;
+    font-size: 11.5px;
+    color: var(--fg-muted);
+    line-height: 1.5;
+    min-height: 64px;
+  }
+  .step-mini .ln { display: block; }
+  .step-mini .ln + .ln { margin-top: 4px; }
+  .step-mini .tag {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: color-mix(in oklab, var(--bright) 16%, transparent);
+    color: var(--bright);
+    font-size: 10.5px;
+    letter-spacing: .03em;
+  }
+
+  /* ---------- Target ---------- */
+  .grid-4 {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+  .target-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    padding: 22px;
+    background: var(--card);
+    display: flex; flex-direction: column; gap: 10px;
+    transition: border-color .15s var(--ease);
+  }
+  .target-card:hover { border-color: var(--border-strong); }
+  .target-card .tag {
+    align-self: flex-start;
+    font-family: "Geist Mono", monospace;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--bright);
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: color-mix(in oklab, var(--bright) 12%, transparent);
+  }
+  .target-card h4 {
+    margin: 4px 0 4px;
+    font-size: 16px; font-weight: 600; letter-spacing: -.01em;
+  }
+  .target-card p { margin: 0; color: var(--fg-muted); font-size: 13.5px; line-height: 1.55; }
+
+  .target-callout {
+    margin-top: 28px;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 18px;
+    align-items: start;
+    padding: 22px 26px;
+    border-radius: var(--radius-card);
+    border: 1px solid color-mix(in oklab, var(--bright) 36%, var(--border));
+    background:
+      linear-gradient(180deg,
+        color-mix(in oklab, var(--bright) 9%, transparent),
+        color-mix(in oklab, var(--bright) 0%, transparent) 70%),
+      var(--card);
+  }
+  .target-callout .tc-glyph {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: color-mix(in oklab, var(--bright) 18%, transparent);
+    color: var(--bright);
+    flex: none;
+  }
+  .target-callout h4 {
+    margin: 0 0 6px;
+    font-size: 17px; font-weight: 600; letter-spacing: -0.01em;
+  }
+  .target-callout p {
+    margin: 0;
+    color: var(--fg-muted);
+    font-size: 14.5px;
+    line-height: 1.6;
+    max-width: 680px;
+  }
+  @media (max-width: 640px) {
+    .target-callout { grid-template-columns: 1fr; padding: 18px 20px; }
+  }
+
+  .custom-strip {
+    margin-top: 14px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 18px;
+    padding: 18px 24px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    background: var(--card);
+  }
+  .custom-strip .cs-label {
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    font-size: 11px;
+    color: var(--bright);
+    margin-bottom: 4px;
+  }
+  .custom-strip .cs-text {
+    color: var(--fg-muted);
+    font-size: 14.5px;
+  }
+  @media (max-width: 640px) {
+    .custom-strip { flex-direction: column; align-items: flex-start; padding: 16px 18px; }
+  }
+
+  /* ---------- Pricing ---------- */
+  .pricing {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    align-items: stretch;
+  }
+  .plan {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 32px 28px;
+    background: var(--card);
+    display: flex; flex-direction: column;
+    position: relative;
+  }
+  .plan.featured {
+    border-color: var(--bright);
+    background: var(--card);
+    box-shadow:
+      0 0 0 1px var(--bright),
+      0 20px 50px -28px color-mix(in oklab, var(--bright) 40%, transparent);
+  }
+  .plan.featured::before {
+    content: "";
+    position: absolute; inset: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    background: linear-gradient(180deg,
+      color-mix(in oklab, var(--bright) 5%, transparent),
+      transparent 36%);
+  }
+  .plan-badge {
+    position: absolute;
+    top: -10px; right: 24px;
+    background: var(--bright);
+    color: oklch(0.14 0.01 155);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 100px;
+    font-family: "Geist Mono", monospace;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+  }
+  .plan h3 {
+    margin: 0;
+    font-size: 16px; font-weight: 500;
+    color: var(--fg-muted);
+    letter-spacing: 0;
+  }
+  .plan .price {
+    margin: 12px 0 4px;
+    display: flex; align-items: baseline; gap: 6px;
+  }
+  .plan .price .amount {
+    font-family: "Geist Mono", monospace;
+    font-size: 36px;
+    font-weight: 600;
+    letter-spacing: -.02em;
+    color: var(--fg);
+  }
+  .plan .price .cur { font-family: "Geist Mono", monospace; font-size: 13px; color: var(--fg-dim); }
+  .plan .price .per { font-size: 13px; color: var(--fg-dim); margin-left: 4px; }
+  .plan .min {
+    font-family: "Geist Mono", monospace;
+    color: var(--fg-dim);
+    font-size: 12px;
+    margin: 0 0 22px;
+  }
+  .plan ul {
+    list-style: none; padding: 0; margin: 0 0 24px;
+    display: flex; flex-direction: column; gap: 10px;
+    font-size: 14px;
+    flex: 1;
+  }
+  .plan ul li { display: flex; gap: 10px; color: var(--fg-muted); }
+  .plan ul li strong { color: var(--fg); font-weight: 500; }
+  .plan ul li svg { flex: none; margin-top: 4px; color: var(--bright); }
+  .plan .cta { margin-top: auto; }
+  .pricing-foot {
+    margin-top: 32px;
+    text-align: center;
+    color: var(--fg-dim);
+    font-size: 14px;
+  }
+
+  /* ---------- Add-ons ---------- */
+  .addons {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  .addon {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    background: var(--card);
+    display: flex; flex-direction: column; gap: 8px;
+    transition: border-color .15s var(--ease);
+  }
+  .addon:hover { border-color: var(--border-strong); }
+  .addon .name { font-size: 14px; font-weight: 500; letter-spacing: -.005em; }
+  .addon .price { font-family: "Geist Mono", monospace; font-size: 12.5px; color: var(--fg-dim); }
+  .addon .price b { color: var(--bright); font-weight: 500; }
+  .addon .ext-tag {
+    font-family: "Geist Mono", monospace;
+    font-size: 11px;
+    color: var(--fg-dim);
+    letter-spacing: .01em;
+  }
+
+  /* ---------- Integrations ---------- */
+  .integ-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+  }
+  .integ-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-card);
+    padding: 22px 24px;
+    background: var(--card);
+    display: flex; flex-direction: column; gap: 12px;
+    transition: border-color .15s var(--ease);
+  }
+  .integ-card:hover { border-color: var(--border-strong); }
+  .integ-grid-3 { grid-template-columns: repeat(3, 1fr) !important; }
+  @media (max-width: 980px) { .integ-grid-3 { grid-template-columns: repeat(2, 1fr) !important; } }
+  @media (max-width: 720px) { .integ-grid-3 { grid-template-columns: 1fr !important; } }
+  .ic-head { display: flex; align-items: center; gap: 12px; }
+  .ic-icon {
+    width: 34px; height: 34px;
+    border-radius: 8px;
+    background: color-mix(in oklab, var(--bright) 14%, transparent);
+    color: var(--bright);
+    display: inline-flex; align-items: center; justify-content: center;
+    flex: none;
+  }
+  .integ-card h4 {
+    margin: 0;
+    font-size: 16px; font-weight: 600; letter-spacing: -.01em;
+  }
+  .integ-card p {
+    margin: 0;
+    color: var(--fg-muted);
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  .ic-tags {
+    list-style: none; padding: 0; margin: auto 0 0;
+    display: flex; flex-wrap: wrap; gap: 6px;
+    padding-top: 6px;
+  }
+  .ic-tags li {
+    font-family: "Geist Mono", monospace;
+    font-size: 11.5px;
+    padding: 4px 10px;
+    border-radius: 100px;
+    border: 1px solid var(--border);
+    color: var(--fg-muted);
+    background: color-mix(in oklab, var(--bg) 30%, transparent);
+  }
+
+  /* ---------- FAQ ---------- */
+  .faq {
+    max-width: 800px; margin: 0 auto;
+    border-top: 1px solid var(--border);
+  }
+  .faq details {
+    border-bottom: 1px solid var(--border);
+  }
+  .faq summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 22px 0;
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 16.5px; font-weight: 500; letter-spacing: -.01em;
+  }
+  .faq summary::-webkit-details-marker { display: none; }
+  .faq summary .plus {
+    width: 22px; height: 22px;
+    position: relative;
+    flex: none;
+    color: var(--fg-muted);
+    transition: color .15s var(--ease), transform .25s var(--ease);
+  }
+  .faq summary .plus::before,
+  .faq summary .plus::after {
+    content: "";
+    position: absolute;
+    background: currentColor;
+    border-radius: 2px;
+    transition: transform .25s var(--ease), opacity .2s var(--ease);
+  }
+  .faq summary .plus::before {
+    top: 50%; left: 0; right: 0; height: 1.5px; transform: translateY(-50%);
+  }
+  .faq summary .plus::after {
+    left: 50%; top: 0; bottom: 0; width: 1.5px; transform: translateX(-50%);
+  }
+  .faq details[open] summary .plus::after { transform: translateX(-50%) rotate(90deg); opacity: 0; }
+  .faq details[open] summary .plus { color: var(--bright); }
+  .faq .answer {
+    padding: 0 0 22px;
+    color: var(--fg-muted);
+    font-size: 15px;
+    line-height: 1.65;
+    max-width: 640px;
+  }
+
+  /* ---------- CTA final ---------- */
+  .cta-final {
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    background:
+      radial-gradient(ellipse 50% 60% at 50% 100%, color-mix(in oklab, var(--bright) 10%, transparent), transparent 70%),
+      var(--bg);
+    text-align: center;
+    padding: 132px 0;
+  }
+  .cta-final h2 {
+    margin: 0 0 16px;
+    font-size: clamp(38px, 5.5vw, 72px);
+    line-height: 1.02;
+    letter-spacing: -.038em; font-weight: 500;
+    text-wrap: balance;
+  }
+  .cta-final p {
+    margin: 0 auto 36px;
+    max-width: 540px;
+    color: var(--fg-muted);
+    font-size: 18px;
+    text-wrap: pretty;
+  }
+
+  /* ---------- Footer ---------- */
+  footer {
+    padding: 64px 0 32px;
+    color: var(--fg-muted);
+    font-size: 14px;
+  }
+  .foot-grid {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 1fr 1fr;
+    gap: 40px;
+  }
+  .foot-grid h5 {
+    margin: 0 0 14px;
+    font-size: 12px;
+    font-family: "Geist Mono", monospace;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: var(--fg-dim);
+    font-weight: 500;
+  }
+  .foot-grid ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .foot-grid a:hover { color: var(--fg); }
+  .foot-brand p { color: var(--fg-dim); margin: 12px 0 0; max-width: 320px; }
+  .foot-bottom {
+    margin-top: 56px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    display: flex; justify-content: space-between; gap: 20px;
+    color: var(--fg-dim);
+    font-size: 13px;
+    flex-wrap: wrap;
+  }
+  .foot-bottom .legal { display: flex; gap: 18px; }
+
+  /* ---------- Demo modal ---------- */
+  .modal-backdrop {
+    position: fixed; inset: 0;
+    background: color-mix(in oklab, oklch(0.05 0 0) 72%, transparent);
+    backdrop-filter: blur(4px);
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 100;
+    padding: 24px;
+  }
+  .modal-backdrop[data-open="true"] { display: flex; }
+  .modal {
+    width: 100%; max-width: 480px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px;
+    box-shadow: 0 30px 70px -20px rgba(0,0,0,.6);
+  }
+  .modal h3 {
+    margin: 0 0 6px; font-size: 20px; letter-spacing: -.015em; font-weight: 600;
+  }
+  .modal .sub { color: var(--fg-muted); font-size: 14px; margin: 0 0 20px; }
+  .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+  .field label { font-size: 12px; color: var(--fg-muted); font-family: "Geist Mono", monospace; letter-spacing: .02em; }
+  .field input, .field textarea, .field select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--fg);
+    padding: 10px 12px;
+    border-radius: 6px;
+    font: inherit;
+    font-size: 14px;
+    outline: none;
+    transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+  }
+  .field input:focus, .field textarea:focus, .field select:focus {
+    border-color: var(--bright);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--bright) 25%, transparent);
+  }
+  .field .err { font-size: 12px; color: oklch(0.65 0.18 25); display: none; }
+  .field.invalid input, .field.invalid select, .field.invalid textarea { border-color: oklch(0.65 0.18 25); }
+  .field.invalid .err { display: block; }
+  .row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+  .modal .success {
+    text-align: center; padding: 16px 0;
+  }
+  .modal .success svg { color: var(--bright); }
+  .modal .success h4 { margin: 12px 0 4px; font-size: 18px; font-weight: 600; }
+  .modal .success p { color: var(--fg-muted); margin: 0; font-size: 14px; }
+
+  /* ---------- Tweaks panel ---------- */
+  .tweaks {
+    position: fixed; right: 20px; bottom: 20px;
+    width: 280px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 18px 18px 16px;
+    box-shadow: 0 24px 50px -20px rgba(0,0,0,.5);
+    z-index: 70;
+    display: none;
+    font-size: 13px;
+  }
+  .tweaks[data-open="true"] { display: block; }
+  .tweaks-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .tweaks-head h6 {
+    margin: 0;
+    font-size: 13px;
+    letter-spacing: -.005em;
+    font-weight: 600;
+  }
+  .tweaks-close {
+    width: 26px; height: 26px;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--fg-muted);
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center;
+    transition: color .15s var(--ease), border-color .15s var(--ease);
+  }
+  .tweaks-close:hover { color: var(--fg); border-color: var(--border-strong); }
+  .tweaks-section .label {
+    font-family: "Geist Mono", monospace;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: .1em;
+    color: var(--fg-dim);
+    margin-bottom: 10px;
+  }
+  .palette-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .palette-swatch {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 8px;
+    cursor: pointer;
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    transition: border-color .15s var(--ease), background-color .15s var(--ease);
+  }
+  .palette-swatch:hover { border-color: var(--border-strong); }
+  .palette-swatch[aria-pressed="true"] {
+    border-color: var(--bright);
+    background: color-mix(in oklab, var(--bright) 8%, transparent);
+  }
+  .palette-swatch .chips-mini {
+    display: flex; gap: 3px;
+  }
+  .palette-swatch .chips-mini i {
+    display: inline-block;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    border: 1px solid color-mix(in oklab, var(--fg) 10%, transparent);
+  }
+  .palette-swatch .name {
+    font-size: 11.5px;
+    color: var(--fg-muted);
+    font-weight: 500;
+  }
+  .palette-swatch[aria-pressed="true"] .name { color: var(--fg); }
+  @media (max-width: 640px) {
+    .tweaks { left: 12px; right: 12px; width: auto; bottom: 12px; }
+  }
+
+  /* ---------- Cookie banner ---------- */
+  .cookies {
+    position: fixed; left: 16px; right: 16px; bottom: 16px;
+    max-width: 560px; margin: 0 auto;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px;
+    font-size: 13px;
+    color: var(--fg-muted);
+    z-index: 60;
+    box-shadow: 0 10px 30px -10px rgba(0,0,0,.5);
+  }
+  .cookies[data-hide="true"] { display: none; }
+  .cookies .cookie-actions { display: flex; gap: 6px; }
+
+  /* ---------- Reveal on scroll ---------- */
+  .reveal {
+    opacity: 0; transform: translateY(12px);
+    transition: opacity .6s var(--ease), transform .6s var(--ease);
+  }
+  .reveal.in { opacity: 1; transform: none; }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width: 1024px) {
+    .hero-grid { grid-template-columns: 1fr; gap: 40px; }
+    .hero-visual { max-width: 640px; }
+    .grid-3 { grid-template-columns: 1fr; }
+    .grid-4 { grid-template-columns: repeat(2, 1fr); }
+    .pricing { grid-template-columns: 1fr; }
+    .steps { grid-template-columns: repeat(2, 1fr); gap: 32px; }
+    .steps::before { display: none; }
+    .addons { grid-template-columns: repeat(2, 1fr); }
+    .integ-grid { grid-template-columns: 1fr; }
+    .proof-grid { grid-template-columns: repeat(2, 1fr); row-gap: 14px; }
+    .foot-grid { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 640px) {
+    .nav { display: none; }
+    section.s { padding: 64px 0; }
+    .hero { padding-top: 40px; padding-bottom: 64px; }
+    h1.hero-title { font-size: 38px; }
+    .grid-4 { grid-template-columns: 1fr; }
+    .steps { grid-template-columns: 1fr; }
+    .addons { grid-template-columns: 1fr; }
+    .proof-grid { grid-template-columns: repeat(2, 1fr); }
+    .foot-grid { grid-template-columns: 1fr; gap: 32px; }
+    .foot-bottom { flex-direction: column; align-items: flex-start; }
+    .cookies { flex-direction: column; align-items: stretch; }
+    .row-2 { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<!-- =================== Header =================== -->
+<header class="site-header" id="header" data-screen-label="Header">
+  <div class="container">
+    <a href="#" class="logo" aria-label="TripDrive inicio">
+      <svg width="22" height="26" viewBox="0 0 22 26" fill="none" aria-hidden="true">
+        <path d="M11 0.5C5.20101 0.5 0.5 5.20101 0.5 11C0.5 17.875 9.5 24.5 11 24.5C12.5 24.5 21.5 17.875 21.5 11C21.5 5.20101 16.799 0.5 11 0.5Z" fill="oklch(0.42 0.11 155)"></path>
+        <circle cx="11" cy="11" r="4" fill="oklch(0.92 0.04 155)"></circle>
+        <rect x="2" y="22.5" width="18" height="2.5" rx="1.25" fill="oklch(0.78 0.012 155)"></rect>
+      </svg>
+      <span>TripDrive</span>
+    </a>
+    <nav class="nav" aria-label="Principal">
+      <a href="#producto">Producto</a>
+      <a href="#agente">Asistente AI</a>
+      <a href="#precios">Precios</a>
+      <a href="#recursos">Recursos</a>
+    </nav>
+    <div class="header-spacer"></div>
+    <div class="header-actions">
+      <a href="https://app.tripdrive.xyz" class="btn btn-ghost btn-sm" style="border-color: transparent;">Iniciar sesión</a>
+      <a href="#" class="btn btn-primary btn-sm" data-open-demo="">Agendar demo</a>
+      <button class="theme-toggle" id="themeToggle" aria-label="Cambiar tema">
+        <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+        <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"></path></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- =================== Hero =================== -->
+<section class="hero" id="producto">
+  <div class="container">
+    <div class="hero-grid">
+      <div class="reveal">
+        <h1 class="hero-title" style="font-size: 90px">Una plataforma.<br>Una flotilla. <em>Cada cuenta con su propio flujo.</em></h1>
+        <p class="hero-sub">Optimiza rutas, despliega choferes y configura el flujo de la app para cada cuenta operativa que atiendes. Habla con el asistente AI o usa la UI — sin código, sin migraciones.</p>
+        <div class="hero-ctas">
+          <a href="#" class="btn btn-primary btn-lg" data-open-demo="">Agendar demo de 30 min →</a>
+          <a href="#precios" class="btn btn-ghost btn-lg">Ver precios</a>
+        </div>
+        <ul class="hero-meta">
+          <li><svg class="check" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>1 semana gratis antes de firmar</span></li>
+          <li><svg class="check" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Sin tarjeta de crédito</span></li>
+          <li><svg class="check" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Onboarding asistido</span></li>
+        </ul>
+      </div>
+
+      <div class="hero-visual reveal" aria-hidden="true">
+        <div class="hv-chrome">
+          <span class="hv-dot"></span><span class="hv-dot"></span><span class="hv-dot"></span>
+          <span class="hv-title">tripdrive.app · operación · 12 may 2026</span>
+        </div>
+        <div class="hv-body">
+          <aside class="hv-side">
+            <div class="sec">Operación</div>
+            <div class="it active"><i></i> Tiros del día</div>
+            <div class="it"><i></i> Rutas</div>
+            <div class="it"><i></i> Choferes</div>
+            <div class="it"><i></i> Incidencias</div>
+            <div class="sec">Catálogo</div>
+            <div class="it"><i></i> Tiendas</div>
+            <div class="it"><i></i> CEDIS</div>
+            <div class="it"><i></i> Camionetas</div>
+          </aside>
+          <main class="hv-main">
+            <div class="hv-stats">
+              <div class="hv-stat"><div class="k">ENTREGAS</div><div class="v">348</div></div>
+              <div class="hv-stat"><div class="k">RUTAS</div><div class="v">12</div></div>
+              <div class="hv-stat"><div class="k">ETA PROM</div><div class="v up">−18%</div></div>
+            </div>
+            <div class="hv-map">
+              <svg viewBox="0 0 320 220" preserveAspectRatio="none">
+                <defs>
+                  <pattern id="g" width="20" height="20" patternUnits="userSpaceOnUse">
+                    <path d="M20 0H0V20" fill="none" stroke="var(--grid-line)" stroke-width="0.5"></path>
+                  </pattern>
+                  <filter id="glow"><feGaussianBlur stdDeviation="2"></feGaussianBlur></filter>
+                </defs>
+                <rect width="320" height="220" fill="url(#g)"></rect>
+                <path d="M 0 130 C 80 120, 160 150, 320 110" stroke="var(--border-strong)" stroke-width="1" fill="none" opacity=".55"></path>
+                <path d="M 70 0 C 80 80, 130 140, 100 220" stroke="var(--border-strong)" stroke-width="1" fill="none" opacity=".55"></path>
+                <path d="M 220 0 C 200 100, 240 160, 270 220" stroke="var(--border-strong)" stroke-width="1" fill="none" opacity=".55"></path>
+                <g filter="url(#glow)" opacity=".55">
+                  <path d="M 70 110 Q 130 60 200 70 T 285 50" stroke="var(--bright)" stroke-width="3" fill="none"></path>
+                  <path d="M 70 110 Q 110 150 150 160 T 250 175" stroke="var(--bright)" stroke-width="3" fill="none"></path>
+                  <path d="M 70 110 Q 40 80 50 50 T 130 25" stroke="var(--bright)" stroke-width="3" fill="none"></path>
+                </g>
+                <g fill="none" stroke="var(--bright)" stroke-width="1.6" stroke-linecap="round">
+                  <path d="M 70 110 Q 130 60 200 70 T 285 50"></path>
+                  <path d="M 70 110 Q 110 150 150 160 T 250 175"></path>
+                  <path d="M 70 110 Q 40 80 50 50 T 130 25"></path>
+                </g>
+                <g>
+                  <circle cx="200" cy="70" r="3" fill="var(--bright)"></circle>
+                  <circle cx="285" cy="50" r="3" fill="var(--bright)"></circle>
+                  <circle cx="150" cy="160" r="3" fill="var(--bright)"></circle>
+                  <circle cx="250" cy="175" r="3" fill="var(--bright)"></circle>
+                  <circle cx="50" cy="50" r="3" fill="var(--bright)"></circle>
+                  <circle cx="130" cy="25" r="3" fill="var(--bright)"></circle>
+                </g>
+                <g>
+                  <rect x="62" y="102" width="16" height="16" rx="3" fill="var(--bg)" stroke="var(--bright)" stroke-width="1.5"></rect>
+                  <text x="84" y="113" font-family="Geist Mono, monospace" font-size="8" fill="var(--fg-muted)">CEDIS</text>
+                </g>
+                <g>
+                  <circle cx="170" cy="80" r="4" fill="var(--bright)">
+                    <animate attributeName="r" values="4;8;4" dur="2.4s" repeatCount="indefinite"></animate>
+                    <animate attributeName="opacity" values="1;0.2;1" dur="2.4s" repeatCount="indefinite"></animate>
+                  </circle>
+                  <circle cx="170" cy="80" r="2.5" fill="white" stroke="var(--bright)" stroke-width="1.2"></circle>
+                </g>
+              </svg>
+            </div>
+          </main>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =================== Contrast (vs plataformas existentes) =================== -->
+<section class="s contrast" data-screen-label="Cómo cambia">
+  <div class="container">
+    <div class="section-head left">
+      <div class="section-eyebrow">Qué cambia para tu operación</div>
+      <h2 class="section-title">Lo que tu plataforma actual<br>no resuelve.</h2>
+    </div>
+
+    <div class="contrast-grid">
+      <div class="ct-col ct-before">
+        <div class="ct-tag mono">Plataformas tradicionales</div>
+        <ul>
+          <li><span class="ct-bullet">—</span><span>Software <b>cobrado en dólares</b>, contratos anuales obligatorios, renovaciones forzadas</span></li>
+          <li><span class="ct-bullet">—</span><span>Una sola app del chofer, <b>sin adaptación</b> por cuenta operativa</span></li>
+          <li><span class="ct-bullet">—</span><span>Re-ruteo <b>lento o manual</b> cuando cae un chofer o llega una urgencia</span></li>
+          <li><span class="ct-bullet">—</span><span>Reportes <b>armados a mano</b> combinando exports de varios módulos</span></li>
+          <li><span class="ct-bullet">—</span><span>Cargar 200 tiendas nuevas: <b>una semana</b> entre captura y validación</span></li>
+          <li><span class="ct-bullet">—</span><span>Soporte que responde en <b>días</b>, a veces semanas</span></li>
+        </ul>
+      </div>
+      <div class="ct-col ct-after">
+        <div class="ct-tag mono ct-tag-bright">Con TripDrive</div>
+        <ul>
+          <li><svg viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg><span>Precio en <b>pesos</b>, mensual o anual, sin sorpresas por tipo de cambio</span></li>
+          <li><svg viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg><span>Una app que se <b>adapta sola</b> al cargar la entrega del día</span></li>
+          <li><svg viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span><b>Re-optimización en vivo</b> en segundos — o pídeselo al asistente: <span class="mono" style="opacity:.85">"reordena la ruta 4"</span></span></li>
+          <li><svg viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg><span>Dashboard con <b>drill-down</b> y KPIs por cuenta · exportable</span></li>
+          <li><svg viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg><span><b>Sube un XLSX al chat</b> y el asistente crea las 200 tiendas — con preview antes de aplicar</span></li>
+          <li><svg viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg><span>Soporte <b>WhatsApp</b> con respuesta en horas — no días</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =================== Resultados típicos (replaces logo wall) =================== -->
+<section class="proof" data-screen-label="Resultados">
+  <div class="container">
+    <div class="proof-head">
+      <div class="proof-label mono">Resultados típicos del primer mes</div>
+      <h3 class="proof-title">Lo que tu operación puede esperar.</h3>
+    </div>
+
+    <div class="grid-4" style="margin-top: 24px;">
+      <div class="target-card reveal" style="text-align: center;">
+        <div style="font-size: 38px; font-weight: 600; color: var(--bright); letter-spacing: -1px;">−18%</div>
+        <div style="font-size: 13px; color: var(--fg-muted); margin-top: 4px;">tiempo promedio de ruta</div>
+      </div>
+      <div class="target-card reveal" style="text-align: center;">
+        <div style="font-size: 38px; font-weight: 600; color: var(--bright); letter-spacing: -1px;">2 hrs</div>
+        <div style="font-size: 13px; color: var(--fg-muted); margin-top: 4px;">menos armando tiros al día</div>
+      </div>
+      <div class="target-card reveal" style="text-align: center;">
+        <div style="font-size: 38px; font-weight: 600; color: var(--bright); letter-spacing: -1px;">0</div>
+        <div style="font-size: 13px; color: var(--fg-muted); margin-top: 4px;">capturas manuales en reportes</div>
+      </div>
+      <div class="target-card reveal" style="text-align: center;">
+        <div style="font-size: 38px; font-weight: 600; color: var(--bright); letter-spacing: -1px;">&lt; 5s</div>
+        <div style="font-size: 13px; color: var(--fg-muted); margin-top: 4px;">re-optimizar tras una urgencia</div>
+      </div>
+    </div>
+
+    <p class="proof-foot mono" style="margin-top: 32px;">Métricas observadas en pilotos durante el primer mes — varían según operación. <a href="#" data-open-demo="">Pídenos un cálculo basado en tu data →</a></p>
+  </div>
+</section>
+
+<!-- =================== Reasons =================== -->
+<section class="s" data-screen-label="Razones">
+  <div class="container">
+    <div class="section-head">
+      <div class="section-eyebrow">Por qué TripDrive</div>
+      <h2 class="section-title">Tres razones por las que existe.</h2>
+      <p class="section-sub">No es otra plantilla ni un dashboard genérico. Es la herramienta que tu equipo de operaciones está armando a mano todos los días.</p>
+    </div>
+
+    <div class="grid-3">
+      <div class="card reveal card-flow">
+        <div class="card-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v6a4 4 0 0 0 4 4h4a4 4 0 0 1 4 4v4"></path><path d="M6 21v-6"></path><circle cx="6" cy="3" r="1.5"></circle><circle cx="18" cy="21" r="1.5"></circle><circle cx="6" cy="21" r="1.5"></circle></svg>
+        </div>
+        <h3>Una app, un flujo distinto por cuenta.</h3>
+        <p>Desde el dashboard armas el flujo del chofer para cada cuenta: qué pantallas ve, en qué orden, qué validaciones aplican. Cada cuenta lleva su KPI propio; tu equipo ve además el general.</p>
+        <div class="chips" aria-label="Pantallas componibles">
+          <span class="chip">Foto de tickets</span>
+          <span class="chip">Foto en góndola</span>
+          <span class="chip">OCR de remisión</span>
+          <span class="chip">Chat con encargado</span>
+          <span class="chip">Reportar incidencia</span>
+          <span class="chip">Evidencia de entrega</span>
+          <span class="chip">Firma del cliente</span>
+          <span class="chip">Validación geo</span>
+        </div>
+      </div>
+
+      <div class="card reveal">
+        <div class="card-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M16 8l-2 6-6 2 2-6z"></path></svg>
+        </div>
+        <h3>Optimización con tráfico en vivo.</h3>
+        <p>Motor de optimización propio que resuelve la asignación con ventanas horarias, capacidad y restricciones. Matriz de distancias y ETAs <b>con tráfico real-time</b>, no estimaciones genéricas. Re-optimiza un tiro en segundos cuando cae un chofer o entra una urgencia.</p>
+        <div class="chips" style="margin-top: 14px;">
+          <span class="chip mono">Optimizador propio</span>
+          <span class="chip mono">Tráfico vivo</span>
+          <span class="chip mono">Re-opt &lt; 5s</span>
+        </div>
+      </div>
+
+      <div class="card reveal">
+        <div class="card-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12c0 4.97-4.03 9-9 9-1.6 0-3.1-.42-4.4-1.16L3 21l1.16-4.6C3.42 15.1 3 13.6 3 12c0-4.97 4.03-9 9-9s9 4.03 9 9z"></path></svg>
+        </div>
+        <h3>Asistente AI que ejecuta, no solo conversa.</h3>
+        <p>19 herramientas que actúan sobre tu data: arma tiros, optimiza rutas, geocodifica tiendas, sube tu XLSX y crea registros — siempre con preview y confirmación antes de aplicar cambios. Incluido <b>sin límite</b> en planes Pro y Enterprise.</p>
+        <div class="chips" style="margin-top: 14px;">
+          <span class="chip mono">19 herramientas</span>
+          <span class="chip mono">Ilimitado en Pro+</span>
+          <span class="chip mono">Costo visible</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =================== Multi-cuenta deep-dive =================== -->
+<section class="s deepdive" data-screen-label="Multi-cuenta">
+  <div class="container">
+    <div class="dd-grid">
+      <div class="dd-text">
+        <div class="section-eyebrow">El diferenciador</div>
+        <h2 class="section-title">Una flotilla.<br>Tantos flujos como cuentas tengas.</h2>
+        <p class="dd-lead">Cada cliente al que entregas tiene sus propios requerimientos: una cadena pide foto en góndola, otra OCR de remisión, una dark kitchen solo necesita firma. Compones el flujo del chofer desde el dashboard — y la app se reconfigura sola cuando el chofer abre la entrega.</p>
+        <ul class="dd-bullets">
+          <li><strong>Aislamiento real</strong> · cada cuenta vive en su propio espacio con seguridad a nivel base de datos.</li>
+          <li><strong>Sin código</strong> · activas o apagas pantallas con un toggle visual.</li>
+          <li><strong>Sin app por cliente</strong> · una sola PWA + APK para toda tu flotilla.</li>
+          <li><strong>KPIs propios</strong> por cuenta + dashboard general consolidado.</li>
+        </ul>
+        <div class="dd-cta">
+          <a href="#" class="btn btn-primary" data-open-demo="">Verlo en una demo →</a>
+        </div>
+      </div>
+
+      <div class="dd-visual" aria-hidden="true">
+        <div class="composer">
+          <div class="composer-head">
+            <span class="cmp-dot"></span><span class="cmp-dot"></span><span class="cmp-dot"></span>
+            <span class="cmp-title mono">configurador · cuenta: cliente norte</span>
+          </div>
+          <div class="composer-body">
+            <div class="cmp-row on"><span class="cmp-tog"></span>Foto de tickets<span class="cmp-tag mono">req</span></div>
+            <div class="cmp-row on"><span class="cmp-tog"></span>Foto en góndola<span class="cmp-tag mono">req</span></div>
+            <div class="cmp-row on"><span class="cmp-tog"></span>OCR de remisión<span class="cmp-tag mono">opt</span></div>
+            <div class="cmp-row off"><span class="cmp-tog"></span>Firma del cliente<span class="cmp-tag mono">off</span></div>
+            <div class="cmp-row on"><span class="cmp-tog"></span>Chat con encargado<span class="cmp-tag mono">opt</span></div>
+            <div class="cmp-row on"><span class="cmp-tog"></span>Reportar incidencia<span class="cmp-tag mono">req</span></div>
+          </div>
+        </div>
+
+        <div class="dd-phones">
+          <div class="phone">
+            <div class="phone-notch"></div>
+            <div class="phone-screen">
+              <div class="ph-head mono">Cuenta · Cliente Norte</div>
+              <div class="ph-stop">Stop 14 · Sucursal #214</div>
+              <ol class="ph-steps">
+                <li class="done">Foto de tickets</li>
+                <li class="done">Foto en góndola</li>
+                <li class="active">OCR de remisión</li>
+                <li>Chat con encargado</li>
+                <li>Reportar incidencia</li>
+              </ol>
+            </div>
+          </div>
+          <div class="phone">
+            <div class="phone-notch"></div>
+            <div class="phone-screen">
+              <div class="ph-head mono">Cuenta · Última Milla</div>
+              <div class="ph-stop">Stop 7 · Colonia Centro</div>
+              <ol class="ph-steps">
+                <li class="done">Foto de evidencia</li>
+                <li class="active">Firma del cliente</li>
+                <li>Confirmar entrega</li>
+              </ol>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =================== Asistente AI =================== -->
+<section class="s deepdive" id="agente" data-screen-label="Asistente AI" style="background: var(--bg-2); border-top:1px solid var(--border); border-bottom:1px solid var(--border);">
+  <div class="container">
+    <div class="dd-grid" style="grid-template-columns: 1.1fr 1fr;">
+      <div class="dd-text">
+        <div class="section-eyebrow">Asistente AI · incluido sin límite</div>
+        <h2 class="section-title">Habla con tu operación.<br><em>El asistente ejecuta.</em></h2>
+        <p class="dd-lead">No es un chatbot que te da links. Es un agente con <b>19 herramientas reales</b> sobre tu data: arma tiros, optimiza rutas, geocodifica tiendas, sube tu XLSX y crea registros — siempre con preview y confirmación antes de aplicar cambios destructivos.</p>
+        <ul class="dd-bullets">
+          <li><strong>5 herramientas de lectura</strong> · status de tiros, rutas, choferes en vivo, KPIs del día.</li>
+          <li><strong>8 herramientas de escritura</strong> · crear tiendas, asignar choferes, publicar rutas — con confirmación.</li>
+          <li><strong>3 herramientas de mapas</strong> · geocoding, búsqueda y creación de tiendas con coords.</li>
+          <li><strong>2 herramientas de imports</strong> · sube un XLSX, el asistente parsea, valida y crea en bulk.</li>
+          <li><strong>1 herramienta de optimización</strong> · "optimiza el tiro de hoy" en menos de 5 segundos.</li>
+        </ul>
+        <p class="dd-lead" style="margin-top: 18px; font-size: 14px;"><span class="mono" style="background: var(--bg-3, var(--bg-2)); padding: 3px 8px; border-radius: 6px; border: 1px solid var(--border);">∞ Ilimitado</span> en Pro y Enterprise · sin contador de mensajes, sin sorpresas en factura.</p>
+        <div class="dd-cta">
+          <a href="#" class="btn btn-primary" data-open-demo="">Probar el asistente →</a>
+        </div>
+      </div>
+
+      <div class="dd-visual" aria-hidden="true">
+        <div class="composer" style="max-width: 460px; margin-left: auto;">
+          <div class="composer-head">
+            <span class="cmp-dot"></span><span class="cmp-dot"></span><span class="cmp-dot"></span>
+            <span class="cmp-title mono">asistente · sesión #481</span>
+          </div>
+          <div class="composer-body" style="gap: 14px; padding: 18px;">
+            <div style="display: flex; gap: 10px; align-items: flex-start;">
+              <div style="background: var(--primary); color: #fff; width: 26px; height: 26px; border-radius: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 600;">YO</div>
+              <div style="font-size: 14px; line-height: 1.5; color: var(--fg);">Sube esta tabla con 47 sucursales nuevas, geocodifícalas y créalas en mi cuenta de Cliente Norte.</div>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: flex-start;">
+              <div style="background: var(--bright); color: var(--bg); width: 26px; height: 26px; border-radius: 13px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; font-weight: 600;">AI</div>
+              <div style="font-size: 14px; line-height: 1.5; color: var(--fg);">
+                <div style="margin-bottom: 8px;">Parseé el XLSX: <b>47 filas válidas</b>, 2 con direcciones ambiguas.</div>
+                <div class="mono" style="background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 11.5px; color: var(--fg-muted); margin-bottom: 8px;">
+                  <div>✓ parse_xlsx · 47 filas</div>
+                  <div>✓ geocode · 47/47 ubicaciones</div>
+                  <div>→ bulk_create_stores · <span style="color: var(--bright);">esperando confirmación</span></div>
+                </div>
+                <div style="margin-bottom: 4px; font-size: 13px;">¿Confirmo creación de 45 sucursales? (2 dudosas las marco para revisión manual)</div>
+              </div>
+            </div>
+            <div style="display: flex; gap: 8px; padding-left: 36px;">
+              <button style="background: var(--bright); color: var(--bg); border: 0; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 500; cursor: pointer;">Confirmar 45</button>
+              <button style="background: transparent; color: var(--fg-muted); border: 1px solid var(--border); border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer;">Ver detalle</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top: 22px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+          <div class="chip mono" style="text-align: center; padding: 8px;">list_dispatches</div>
+          <div class="chip mono" style="text-align: center; padding: 8px;">optimize_dispatch</div>
+          <div class="chip mono" style="text-align: center; padding: 8px;">parse_xlsx</div>
+          <div class="chip mono" style="text-align: center; padding: 8px;">bulk_create_stores</div>
+          <div class="chip mono" style="text-align: center; padding: 8px;">geocode_address</div>
+          <div class="chip mono" style="text-align: center; padding: 8px;">create_dispatch</div>
+          <div class="chip mono" style="text-align: center; padding: 8px;">assign_driver</div>
+          <div class="chip mono" style="text-align: center; padding: 8px;">publish_route</div>
+          <div class="chip mono" style="text-align: center; padding: 8px;">+11 más</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =================== How it works =================== -->
+<section class="s" style="background: var(--bg-2); border-top:1px solid var(--border); border-bottom:1px solid var(--border);" data-screen-label="Cómo funciona">
+  <div class="container">
+    <div class="section-head">
+      <div class="section-eyebrow">Cómo funciona</div>
+      <h2 class="section-title">Del catálogo al cierre del día, en 4 pasos.</h2>
+      <p class="section-sub">Cada paso lo puedes hacer en la UI o pedírselo al asistente AI.</p>
+    </div>
+
+    <div class="steps">
+      <div class="step reveal">
+        <div class="step-num">01</div>
+        <h4>Cargas tu catálogo</h4>
+        <p>Tiendas, CEDIS, camionetas y choferes. CSV, captura manual, o XLSX vía asistente.</p>
+        <div class="step-mini mono">
+          <span class="ln"><span class="tag">XLSX</span> sucursales.xlsx → <b style="color:var(--bright)">412 rows</b></span>
+          <span class="ln">geocode + bulk_create</span>
+        </div>
+      </div>
+      <div class="step reveal">
+        <div class="step-num">02</div>
+        <h4>Armas el tiro del día</h4>
+        <p>Eliges tiendas, camionetas y choferes. Optimizamos automáticamente con tráfico en vivo.</p>
+        <div class="step-mini mono">
+          <span class="ln">tiros/2026-05-12</span>
+          <span class="ln"><span class="tag">OPT</span> 12 rutas · 348 stops · 4.2 s</span>
+        </div>
+      </div>
+      <div class="step reveal">
+        <div class="step-num">03</div>
+        <h4>Chofer ejecuta</h4>
+        <p>Recibe la ruta en su app (PWA o APK Android), reporta entregas con foto y OCR. Supervisor ve todo en vivo.</p>
+        <div class="step-mini mono">
+          <span class="ln">app/driver · OFFLINE-OK</span>
+          <span class="ln">11:42 · stop #14 · <b style="color:var(--bright)">entregado</b></span>
+        </div>
+      </div>
+      <div class="step reveal">
+        <div class="step-num">04</div>
+        <h4>Cierras el día</h4>
+        <p>Reportes operativos automáticos. Exportable. Listo para facturación.</p>
+        <div class="step-mini mono">
+          <span class="ln">reportes/2026-05-12.xlsx</span>
+          <span class="ln">SLA 96% · ETA −18% · 0 incidencias</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =================== Target =================== -->
+<section class="s" data-screen-label="Para quién">
+  <div class="container">
+    <div class="section-head">
+      <div class="section-eyebrow">Para quién es</div>
+      <h2 class="section-title">Operaciones que ya pagan software de rutas — y quieren más.</h2>
+      <p class="section-sub">Si hoy pagas tu plataforma en dólares, tu ERP te dio un módulo que tu equipo ignora, o necesitas multi-cuenta y nadie te lo da, esto es para ti.</p>
+    </div>
+
+    <div class="grid-4">
+      <article class="target-card reveal">
+        <span class="tag">Alimentaria</span>
+        <h4>Distribución alimentaria</h4>
+        <p>Cadena fría, frutas y verduras, abarrotes. Entregas diarias con ventanas horarias estrictas.</p>
+      </article>
+      <article class="target-card reveal">
+        <span class="tag">Última milla</span>
+        <h4>E-commerce y mensajería</h4>
+        <p>Multi-stop con ventanas horarias. Paquetería, e-commerce, devoluciones.</p>
+      </article>
+      <article class="target-card reveal">
+        <span class="tag">Restaurantes</span>
+        <h4>Restaurantes y dark kitchens</h4>
+        <p>Coordinación de flotilla propia o externa. Picos de demanda en cocina y reparto.</p>
+      </article>
+      <article class="target-card reveal">
+        <span class="tag">Industrial</span>
+        <h4>Distribución industrial</h4>
+        <p>Refacciones, materiales, B2B routing con ventanas estrictas y volúmenes mixtos.</p>
+      </article>
+    </div>
+
+    <div class="target-callout reveal" role="note">
+      <div class="tc-glyph" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3v6a4 4 0 0 0 4 4h4a4 4 0 0 1 4 4v4"></path><path d="M6 21v-6"></path><circle cx="6" cy="3" r="1.5"></circle><circle cx="18" cy="21" r="1.5"></circle><circle cx="6" cy="21" r="1.5"></circle></svg>
+      </div>
+      <div>
+        <h4>¿Atiendes a más de una cadena con la misma flotilla?</h4>
+        <p>Configura un flujo independiente para cada cuenta. La app del chofer se adapta automáticamente al cargar la entrega del día — sin "mode switching" manual, sin apps separadas, sin dudas del chofer.</p>
+      </div>
+    </div>
+
+    <div class="custom-strip reveal">
+      <div>
+        <div class="cs-label mono">Operaciones grandes</div>
+        <div class="cs-text">¿Más de 50 choferes o necesitas integraciones a la medida? Te armamos un plan con onboarding asistido y SLA dedicado.</div>
+      </div>
+      <a href="#" class="btn btn-ghost" data-open-demo="">Hablar con ventas →</a>
+    </div>
+  </div>
+</section>
+
+<!-- =================== Pricing =================== -->
+<section class="s" id="precios" data-screen-label="Pricing">
+  <div class="container">
+    <div class="section-head">
+      <div class="section-eyebrow">Precios en pesos</div>
+      <h2 class="section-title">Pricing transparente.<br>Pagas por admin y por chofer.</h2>
+      <p class="section-sub">Tres planes para crecer contigo. Todos incluyen optimización propia con tráfico vivo, app del chofer (PWA + APK), tracking GPS, OCR de evidencias y reportes operativos.</p>
+    </div>
+
+    <div class="pricing">
+      <!-- Operación -->
+      <div class="plan reveal">
+        <h3>Operación</h3>
+        <div style="display: flex; flex-direction: column; gap: 10px; margin: 18px 0 16px;">
+          <div style="display: flex; align-items: baseline; gap: 8px; justify-content: center;">
+            <span class="cur" style="font-size: 16px;">$</span><span class="amount" style="font-size: 38px;">1,500</span><span class="cur" style="font-size: 13px;">MXN</span>
+            <span class="per" style="font-size: 12px;">/admin/mes</span>
+          </div>
+          <div style="display: flex; align-items: baseline; gap: 8px; justify-content: center;">
+            <span style="font-size: 12px; color: var(--fg-muted);">+</span><span class="cur" style="font-size: 14px;">$</span><span class="amount" style="font-size: 28px;">590</span><span class="cur" style="font-size: 12px;">MXN</span>
+            <span class="per" style="font-size: 12px;">/chofer/mes</span>
+          </div>
+        </div>
+        <p class="min">mínimo 1 admin + 3 choferes · desde $3,270/mes</p>
+        <ul>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Multi-tenant aislado</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>App driver PWA + APK Android</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span><strong>1 cuenta operativa</strong> · hasta 150 tiendas</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Optimizador con tráfico en vivo</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Tracking GPS realtime</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>OCR de tickets · evidencia fotográfica</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Reportes mensuales exportables</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Soporte por WhatsApp</span></li>
+          <li style="opacity: .5;"><svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5l10 10M15 5L5 15"></path></svg> <span>Asistente AI <em>(no incluido)</em></span></li>
+        </ul>
+        <a href="#" class="btn btn-ghost btn-block" data-open-demo="">Solicitar acceso</a>
+      </div>
+
+      <!-- Pro (featured) -->
+      <div class="plan featured reveal">
+        <span class="plan-badge">Más popular</span>
+        <h3>Pro</h3>
+        <div style="display: flex; flex-direction: column; gap: 10px; margin: 18px 0 16px;">
+          <div style="display: flex; align-items: baseline; gap: 8px; justify-content: center;">
+            <span class="cur" style="font-size: 16px;">$</span><span class="amount" style="font-size: 38px;">3,200</span><span class="cur" style="font-size: 13px;">MXN</span>
+            <span class="per" style="font-size: 12px;">/admin/mes</span>
+          </div>
+          <div style="display: flex; align-items: baseline; gap: 8px; justify-content: center;">
+            <span style="font-size: 12px; color: var(--fg-muted);">+</span><span class="cur" style="font-size: 14px;">$</span><span class="amount" style="font-size: 28px;">590</span><span class="cur" style="font-size: 12px;">MXN</span>
+            <span class="per" style="font-size: 12px;">/chofer/mes</span>
+          </div>
+        </div>
+        <p class="min">mínimo 2 admin + 5 choferes · desde $9,350/mes</p>
+        <ul>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Todo de <strong>Operación</strong></span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span><strong>Hasta 3 cuentas operativas</strong> con flujos independientes</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Hasta <strong>600 tiendas</strong> por cuenta</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span><strong>Asistente AI · ilimitado</strong> · 19 herramientas</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Import XLSX vía chat · bulk create con preview</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Mapa interactivo · drag-to-edit tiendas</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>ETAs con tráfico vivo · re-opt en vivo</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Subdominio propio (<span class="mono">empresa.tripdrive.xyz</span>)</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Reportes con drill-down · KPIs por cuenta</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Push notifications · web + Android</span></li>
+        </ul>
+        <a href="#" class="btn btn-primary btn-block" data-open-demo="">Solicitar demo</a>
+      </div>
+
+      <!-- Enterprise -->
+      <div class="plan reveal">
+        <h3>Enterprise</h3>
+        <div style="display: flex; flex-direction: column; gap: 10px; margin: 18px 0 16px;">
+          <div style="display: flex; align-items: baseline; gap: 8px; justify-content: center;">
+            <span class="cur" style="font-size: 16px;">$</span><span class="amount" style="font-size: 38px;">4,500</span><span class="cur" style="font-size: 13px;">MXN</span>
+            <span class="per" style="font-size: 12px;">/admin/mes</span>
+          </div>
+          <div style="display: flex; align-items: baseline; gap: 8px; justify-content: center;">
+            <span style="font-size: 12px; color: var(--fg-muted);">+</span><span class="cur" style="font-size: 14px;">$</span><span class="amount" style="font-size: 28px;">690</span><span class="cur" style="font-size: 12px;">MXN</span>
+            <span class="per" style="font-size: 12px;">/chofer/mes</span>
+          </div>
+        </div>
+        <p class="min">mínimo 2 admin + 5 choferes · desde $12,450/mes</p>
+        <ul>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Todo de <strong>Pro</strong></span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span><strong>Cuentas operativas ilimitadas</strong></span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span><strong>Tiendas ilimitadas</strong> por cuenta</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Flujo configurable visual por cuenta</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Analytics avanzado · auditoría completa</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Dominio propio del cliente (<span class="mono">app.tuempresa.com</span>)</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Branding personalizado (logo, colores)</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span>Descuento del 30% en integraciones a la medida</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span><strong>SLA 99.5%</strong> · setup waived</span></li>
+          <li><svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M4 10.5l4 4 8-9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"></path></svg> <span><strong>CSM dedicado</strong> + onboarding asistido</span></li>
+        </ul>
+        <a href="#" class="btn btn-ghost btn-block" data-open-demo="">Hablar con ventas</a>
+      </div>
+    </div>
+
+    <p class="pricing-foot">
+      <strong>Setup único:</strong> $15,000 MXN (waived en Enterprise y en contrato anual prepagado).<br>
+      <strong>Conexiones a la medida</strong> (ERP, mensajería al cliente, CFDI) se cotizan por proyecto — vienen con setup + mantenimiento mensual. <a href="#">Ver detalle ↓</a><br>
+      Aceptamos pago en MXN o USD al tipo de cambio del día. Mensual o anual — sin contratos forzosos.
+    </p>
+  </div>
+</section>
+
+<!-- =================== Integrations =================== -->
+<section class="s" data-screen-label="Integraciones">
+  <div class="container">
+    <div class="section-head left">
+      <div class="section-eyebrow">Integraciones</div>
+      <h2 class="section-title" style="font-size: clamp(24px, 3vw, 32px);">Se conecta con tu stack.</h2>
+      <p class="section-sub" style="margin-top: 8px;">Las herramientas básicas vienen incluidas. Las que requieren mantener APIs de terceros las construimos y mantenemos por ti como add-ons cotizados.</p>
+    </div>
+
+    <!-- Incluidas -->
+    <div style="display: flex; align-items: center; gap: 10px; margin: 16px 0 14px;">
+      <span style="display: inline-block; width: 8px; height: 8px; background: var(--bright); border-radius: 50%;"></span>
+      <h3 style="font-size: 14px; font-weight: 500; color: var(--fg); margin: 0; text-transform: uppercase; letter-spacing: 0.04em;">Incluidas en todos los planes</h3>
+    </div>
+
+    <div class="integ-grid integ-grid-3">
+      <article class="integ-card">
+        <div class="ic-head">
+          <span class="ic-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="10" r="3"></circle><path d="M12 22s-7-6-7-12a7 7 0 0 1 14 0c0 6-7 12-7 12z"></path></svg>
+          </span>
+          <h4>Mapas &amp; geocoding</h4>
+          <span style="margin-left: auto; font-size: 11px; font-weight: 500; padding: 3px 8px; border-radius: 100px; background: color-mix(in oklch, var(--bright) 18%, transparent); color: var(--bright); text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap;">Incluida</span>
+        </div>
+        <p>ETAs reales con tráfico vivo, geocoding y búsqueda de direcciones — desde la UI o pidiéndoselo al asistente AI.</p>
+        <ul class="ic-tags">
+          <li>Tráfico vivo</li><li>Geocoding</li><li>Búsqueda</li>
+        </ul>
+      </article>
+
+      <article class="integ-card">
+        <div class="ic-head">
+          <span class="ic-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M9 3v18M3 9h18"></path></svg>
+          </span>
+          <h4>Imports &amp; exports</h4>
+          <span style="margin-left: auto; font-size: 11px; font-weight: 500; padding: 3px 8px; border-radius: 100px; background: color-mix(in oklch, var(--bright) 18%, transparent); color: var(--bright); text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap;">Incluida</span>
+        </div>
+        <p>Sube XLSX o CSV directo al chat del asistente: valida fila por fila, geocodifica y crea en bulk — con preview antes de aplicar.</p>
+        <ul class="ic-tags">
+          <li>XLSX</li><li>CSV</li><li>Bulk + preview</li>
+        </ul>
+      </article>
+
+      <article class="integ-card">
+        <div class="ic-head">
+          <span class="ic-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"></circle><circle cx="18" cy="6" r="2.5"></circle><circle cx="6" cy="18" r="2.5"></circle><circle cx="18" cy="18" r="2.5"></circle><path d="M8.5 6h7M6 8.5v7M18 8.5v7M8.5 18h7"></path></svg>
+          </span>
+          <h4>Webhooks &amp; API</h4>
+          <span style="margin-left: auto; font-size: 11px; font-weight: 500; padding: 3px 8px; border-radius: 100px; background: color-mix(in oklch, var(--bright) 18%, transparent); color: var(--bright); text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap;">Incluida</span>
+        </div>
+        <p>Webhooks salientes en cada evento operativo (entrega, incidencia, cierre) + API REST para que tu equipo dev consuma tu data en sus dashboards o BI.</p>
+        <ul class="ic-tags">
+          <li>Webhooks</li><li>API REST</li><li>Eventos en tiempo real</li>
+        </ul>
+      </article>
+    </div>
+
+    <!-- Add-ons -->
+    <div style="display: flex; align-items: center; gap: 10px; margin: 36px 0 14px;">
+      <span style="display: inline-block; width: 8px; height: 8px; background: var(--fg-muted); border-radius: 50%;"></span>
+      <h3 style="font-size: 14px; font-weight: 500; color: var(--fg); margin: 0; text-transform: uppercase; letter-spacing: 0.04em;">Conexiones a la medida · cotizadas por proyecto</h3>
+    </div>
+    <p style="color: var(--fg-muted); font-size: 13.5px; margin: 0 0 18px; max-width: 720px;">Estas integraciones requieren mantener APIs de terceros que cambian con el tiempo. Las construimos, las mantenemos y respondemos por ellas — por eso van como proyecto separado, no incluidas en el suscriptor base.</p>
+
+    <div class="integ-grid integ-grid-3">
+      <article class="integ-card">
+        <div class="ic-head">
+          <span class="ic-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l9-4 9 4-9 4-9-4z"></path><path d="M3 12l9 4 9-4"></path><path d="M3 17l9 4 9-4"></path></svg>
+          </span>
+          <h4>ERP &amp; Inventario</h4>
+          <span style="margin-left: auto; font-size: 11px; font-weight: 500; padding: 3px 8px; border-radius: 100px; background: color-mix(in oklch, var(--fg-muted) 18%, transparent); color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap;">Add-on</span>
+        </div>
+        <p>Sincroniza catálogo, órdenes del día y stock con tu ERP en ambos sentidos — sin re-capturar pedidos. Construimos el conector, lo mantenemos al día y respondemos cuando el ERP cambia su API.</p>
+        <ul class="ic-tags">
+          <li>ERP empresarial</li><li>ERP open-source</li><li>Custom</li>
+        </ul>
+      </article>
+
+      <article class="integ-card">
+        <div class="ic-head">
+          <span class="ic-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12c0 4.97-4.03 9-9 9-1.6 0-3.1-.42-4.4-1.16L3 21l1.16-4.6C3.42 15.1 3 13.6 3 12c0-4.97 4.03-9 9-9s9 4.03 9 9z"></path></svg>
+          </span>
+          <h4>Notificación al cliente</h4>
+          <span style="margin-left: auto; font-size: 11px; font-weight: 500; padding: 3px 8px; border-radius: 100px; background: color-mix(in oklch, var(--fg-muted) 18%, transparent); color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap;">Add-on</span>
+        </div>
+        <p>Avisos automáticos al cliente final de ETA, "en ruta" y "entregado" con foto de evidencia. Baja la carga del call center. Setup + uso medido.</p>
+        <ul class="ic-tags">
+          <li>Mensajería</li><li>SMS</li><li>Email</li>
+        </ul>
+      </article>
+
+      <article class="integ-card">
+        <div class="ic-head">
+          <span class="ic-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5M2 12l10 5 10-5"></path></svg>
+          </span>
+          <h4>Facturación &amp; CFDI</h4>
+          <span style="margin-left: auto; font-size: 11px; font-weight: 500; padding: 3px 8px; border-radius: 100px; background: color-mix(in oklch, var(--fg-muted) 18%, transparent); color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap;">Add-on</span>
+        </div>
+        <p>Exportes listos para facturación o conexión directa a tu PAC para emitir CFDI 4.0 automáticamente desde cada entrega cerrada. Evita capturas dobles.</p>
+        <ul class="ic-tags">
+          <li>CFDI 4.0</li><li>Conexión PAC</li><li>Conciliación</li>
+        </ul>
+      </article>
+    </div>
+
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-top: 36px; padding: 18px 22px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-2);">
+      <div style="color: var(--fg-muted); font-size: 14px; flex: 1; min-width: 280px;">
+        <strong style="color: var(--fg); font-weight: 500;">¿Necesitas conectar algo que no está en la lista?</strong> Cotizamos integraciones custom por proyecto. <span style="color: var(--fg-muted);">Setup desde $25,000 MXN + mensualidad por mantenimiento.</span>
+      </div>
+      <a href="#" class="btn btn-ghost btn-sm" data-open-demo="">Pedir cotización →</a>
+    </div>
+  </div>
+</section>
+
+<!-- =================== FAQ =================== -->
+<section class="s" id="recursos" style="background: var(--bg-2); border-top:1px solid var(--border); border-bottom:1px solid var(--border);" data-screen-label="FAQ">
+  <div class="container">
+    <div class="section-head">
+      <div class="section-eyebrow">FAQ</div>
+      <h2 class="section-title">Preguntas frecuentes.</h2>
+    </div>
+
+    <div class="faq">
+      <details>
+        <summary>¿Qué hace exactamente el asistente AI? <span class="plus" aria-hidden="true"></span></summary>
+        <div class="answer">Es un agente conversacional con 19 herramientas que actúan sobre tu data real: lee estado de tiros, optimiza rutas con tráfico vivo, geocodifica direcciones, parsea XLSX y crea registros en bulk. Cualquier acción destructiva pasa por preview + confirmación antes de aplicarse. No es un chatbot que te da links — ejecuta tareas reales sobre tu operación.</div>
+      </details>
+      <details>
+        <summary>¿El asistente AI tiene límite de uso? <span class="plus" aria-hidden="true"></span></summary>
+        <div class="answer">En Pro y Enterprise: <b>ilimitado</b>. Sin contador de mensajes, sin extras en factura. Aplica política de uso razonable para evitar automatizaciones tipo bot, pero un equipo humano de 2 admins nunca la alcanza. Operación no incluye AI — es el principal motivo para subir a Pro.</div>
+      </details>
+      <details>
+        <summary>¿Cómo migro mi catálogo actual? <span class="plus" aria-hidden="true"></span></summary>
+        <div class="answer">Tres opciones: (1) CSV con plantilla descargable, (2) XLSX directo al chat del asistente — parsea, geocodifica y crea en bulk con preview, (3) importación asistida en onboarding. Para Enterprise hacemos la migración nosotros.</div>
+      </details>
+      <details>
+        <summary>¿La app del chofer funciona sin internet? <span class="plus" aria-hidden="true"></span></summary>
+        <div class="answer">Sí. Ofrecemos PWA con queue offline y APK Android con outbox local + cache offline del mapa. Registra entregas, fotos y OCR aún sin señal y sincroniza al recuperar conexión. Probada en zonas industriales con cobertura intermitente.</div>
+      </details>
+      <details>
+        <summary>¿Cómo se integra con mis sistemas actuales? <span class="plus" aria-hidden="true"></span></summary>
+        <div class="answer">Las herramientas básicas vienen incluidas en todos los planes: webhooks salientes en cada evento operativo, API REST para tu equipo dev, e imports XLSX/CSV vía el asistente. Las conexiones que requieren mantener APIs de terceros (ERP, mensajería al cliente final, CFDI 4.0) se cotizan por proyecto — nosotros las construimos y mantenemos, tú solo pagas el setup y la mensualidad por mantenimiento. Es más honesto que prometer "todo gratis" y dejar la integración rota cuando el proveedor cambie su API.</div>
+      </details>
+      <details>
+        <summary>¿Por qué algunas integraciones son add-on y no vienen incluidas? <span class="plus" aria-hidden="true"></span></summary>
+        <div class="answer">Porque mantenerlas cuesta. Un conector a SAP o a un PAC de CFDI no es código que escribes una vez — el proveedor cambia su API cada cierto tiempo y alguien tiene que ajustar. Si lo regalamos, terminamos quitándole tiempo al producto base que sí usas todos los días. Las cobramos para responder por ellas con un SLA real. Si quieres conectar tú mismo vía webhook + tu propio middleware, eso sí está incluido sin costo extra.</div>
+      </details>
+      <details>
+        <summary>¿Puedo probar antes de pagar? <span class="plus" aria-hidden="true"></span></summary>
+        <div class="answer">Demo de 30 minutos con un caso real basado en tu operación, y 1 semana gratis antes de firmar para que pruebes con tu data — sin tarjeta de crédito.</div>
+      </details>
+      <details>
+        <summary>¿Aceptan pago en USD o solo MXN? <span class="plus" aria-hidden="true"></span></summary>
+        <div class="answer">Ambas. El precio listado es en MXN; aceptamos USD al tipo de cambio del día de la factura. No hay contratos forzados — facturación mensual o anual prepagada (con descuento) según prefieras.</div>
+      </details>
+      <details>
+        <summary>¿Quién es dueño de mis datos? <span class="plus" aria-hidden="true"></span></summary>
+        <div class="answer">Tú. Cada cuenta vive en su propio espacio aislado a nivel base de datos. Exportación a CSV/XLSX o vía API cuando quieras. Nada queda en una base compartida con otras empresas.</div>
+      </details>
+      <details>
+        <summary>¿Cuánto tarda implementar? <span class="plus" aria-hidden="true"></span></summary>
+        <div class="answer">Operación: self-service en 1–2 días. Pro: 4 horas con onboarding ligero (incluye configurar flujos por cuenta). Enterprise: 2 días asistido con tu equipo de ops, branding y dominio propio configurados. Las conexiones a la medida (ERP, CFDI) corren en paralelo según alcance — típicamente 2–4 semanas adicionales.</div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- =================== Final CTA =================== -->
+<section class="cta-final" data-screen-label="CTA final">
+  <div class="container">
+    <h2>Empieza a optimizar tus rutas hoy.</h2>
+    <p>Agenda una demo de 30 minutos. Te mostramos cómo funciona con un ejemplo real basado en tu operación — y dejamos que el asistente AI haga el cierre del día frente a ti.</p>
+    <a href="#" class="btn btn-primary btn-lg" data-open-demo="">Agendar demo →</a>
+  </div>
+</section>
+
+<!-- =================== Footer =================== -->
+<footer data-screen-label="Footer">
+  <div class="container">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <a href="#" class="logo">
+          <svg width="22" height="26" viewBox="0 0 22 26" fill="none" aria-hidden="true">
+            <path d="M11 0.5C5.20101 0.5 0.5 5.20101 0.5 11C0.5 17.875 9.5 24.5 11 24.5C12.5 24.5 21.5 17.875 21.5 11C21.5 5.20101 16.799 0.5 11 0.5Z" fill="oklch(0.42 0.11 155)"></path>
+            <circle cx="11" cy="11" r="4" fill="oklch(0.92 0.04 155)"></circle>
+            <rect x="2" y="22.5" width="18" height="2.5" rx="1.25" fill="oklch(0.78 0.012 155)"></rect>
+          </svg>
+          <span>TripDrive</span>
+        </a>
+        <p>Software para operaciones de logística de última milla. Optimización, asistente AI y app del chofer en una sola plataforma.</p>
+        <p class="mono" style="font-size:12px; margin-top: 14px;">© 2026 TripDrive</p>
+      </div>
+      <div>
+        <h5>Producto</h5>
+        <ul>
+          <li><a href="#producto">Funciones</a></li>
+          <li><a href="#agente">Asistente AI</a></li>
+          <li><a href="#precios">Pricing</a></li>
+          <li><a href="#">Integraciones</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Recursos</h5>
+        <ul>
+          <li><a href="#">Documentación</a></li>
+          <li><a href="#">Cambios</a></li>
+          <li><a href="#">Estado</a></li>
+          <li><a href="#">Privacidad</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Contacto</h5>
+        <ul>
+          <li><a href="mailto:contacto@tripdrive.xyz">contacto@tripdrive.xyz</a></li>
+          <li><a href="https://wa.me/527298847499" target="_blank" rel="noopener">WhatsApp · 729 884 7499</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <div>© 2026 TripDrive. Todos los derechos reservados.</div>
+      <div class="legal">
+        <a href="#">Términos</a>
+        <a href="#">Privacidad</a>
+        <a href="#">Aviso de privacidad</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<!-- =================== Demo modal =================== -->
+<div class="modal-backdrop" id="demoModal" role="dialog" aria-modal="true" aria-labelledby="demoTitle">
+  <div class="modal">
+    <div id="demoFormWrap">
+      <h3 id="demoTitle">Agendar demo de 30 min</h3>
+      <p class="sub">Cuéntanos rápido tu operación. Al enviar te abrimos WhatsApp con la info pre-cargada para que coordinemos contigo.</p>
+      <form id="demoForm" novalidate="">
+        <div class="row-2">
+          <div class="field">
+            <label for="nombre">Nombre</label>
+            <input id="nombre" name="nombre" type="text" required="" placeholder="María García">
+            <span class="err">Tu nombre, porfa.</span>
+          </div>
+          <div class="field">
+            <label for="email">Email de trabajo</label>
+            <input id="email" name="email" type="email" required="" placeholder="maria@empresa.mx">
+            <span class="err">Email válido, porfa.</span>
+          </div>
+        </div>
+        <div class="row-2">
+          <div class="field">
+            <label for="empresa">Empresa</label>
+            <input id="empresa" name="empresa" type="text" required="" placeholder="Distribuidora ...">
+            <span class="err">¿En qué empresa estás?</span>
+          </div>
+          <div class="field">
+            <label for="choferes"># choferes</label>
+            <select id="choferes" name="choferes" required="">
+              <option value="">Selecciona...</option>
+              <option>1 – 9</option>
+              <option>10 – 50</option>
+              <option>51 – 200</option>
+              <option>200+</option>
+            </select>
+            <span class="err">Elige un rango.</span>
+          </div>
+        </div>
+        <div class="field">
+          <label for="mensaje">Mensaje (opcional)</label>
+          <textarea id="mensaje" name="mensaje" rows="3" placeholder="¿Qué problema buscas resolver?"></textarea>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" data-close-demo="">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Enviar por WhatsApp →</button>
+        </div>
+      </form>
+    </div>
+    <div id="demoSuccess" class="success" style="display:none">
+      <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M8 12.5l3 3 5-6"></path></svg>
+      <h4>¡Listo!</h4>
+      <p>Abrimos WhatsApp en otra pestaña con tu info pre-cargada. Mándanos el mensaje y te respondemos con horarios disponibles.</p>
+      <div class="modal-actions" style="justify-content:center; margin-top:18px;">
+        <button class="btn btn-ghost" data-close-demo="">Cerrar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- =================== Cookies =================== -->
+<div class="cookies" id="cookies" data-hide="false">
+  <div>Usamos cookies para medir uso del sitio. Sin trackers de terceros invasivos.</div>
+  <div class="cookie-actions">
+    <button class="btn btn-ghost btn-sm" id="cookieReject">Solo esenciales</button>
+    <button class="btn btn-primary btn-sm" id="cookieAccept">Aceptar</button>
+  </div>
+</div>
+
+
+<!-- =================== Tweaks panel =================== -->
+<aside class="tweaks" id="tweaks" data-open="false" aria-label="Tweaks">
+  <div class="tweaks-head">
+    <h6>Tweaks</h6>
+    <button class="tweaks-close" id="tweaksClose" aria-label="Cerrar">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 5l14 14M19 5l-14 14"></path></svg>
+    </button>
+  </div>
+  <div class="tweaks-section">
+    <div class="label">Paleta</div>
+    <div class="palette-row" id="paletteRow">
+      <button class="palette-swatch" data-palette="forest" aria-pressed="true">
+        <span class="chips-mini">
+          <i style="background:oklch(0.18 0.012 155)"></i>
+          <i style="background:oklch(0.42 0.11 155)"></i>
+          <i style="background:oklch(0.58 0.085 150)"></i>
+        </span>
+        <span class="name">Forest</span>
+      </button>
+      <button class="palette-swatch" data-palette="slate" aria-pressed="false">
+        <span class="chips-mini">
+          <i style="background:oklch(0.175 0.012 240)"></i>
+          <i style="background:oklch(0.48 0.10 235)"></i>
+          <i style="background:oklch(0.62 0.085 230)"></i>
+        </span>
+        <span class="name">Slate</span>
+      </button>
+      <button class="palette-swatch" data-palette="ivory" aria-pressed="false">
+        <span class="chips-mini">
+          <i style="background:oklch(0.17 0.008 65)"></i>
+          <i style="background:oklch(0.50 0.085 75)"></i>
+          <i style="background:oklch(0.80 0.10 82)"></i>
+        </span>
+        <span class="name">Ivory</span>
+      </button>
+    </div>
+  </div>
+</aside>
+<script>
+  // ---------- Theme toggle ----------
+  (function(){
+    const saved = localStorage.getItem('td-theme');
+    if (saved) document.documentElement.setAttribute('data-theme', saved);
+    document.getElementById('themeToggle').addEventListener('click', () => {
+      const cur = document.documentElement.getAttribute('data-theme') || 'dark';
+      const next = cur === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('td-theme', next);
+    });
+  })();
+
+  // ---------- Header hide on scroll-down ----------
+  (function(){
+    const h = document.getElementById('header');
+    let last = 0;
+    window.addEventListener('scroll', () => {
+      const y = window.scrollY;
+      h.classList.toggle('scrolled', y > 8);
+      if (y > last && y > 120) h.classList.add('hidden');
+      else h.classList.remove('hidden');
+      last = y;
+    }, { passive: true });
+  })();
+
+  // ---------- Reveal on scroll ----------
+  (function(){
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(e => {
+        if (e.isIntersecting) {
+          e.target.classList.add('in');
+          io.unobserve(e.target);
+        }
+      });
+    }, { threshold: 0.12, rootMargin: '0px 0px -60px 0px' });
+    document.querySelectorAll('.reveal').forEach(el => io.observe(el));
+  })();
+
+  // ---------- Demo modal ----------
+  (function(){
+    const modal = document.getElementById('demoModal');
+    const form = document.getElementById('demoForm');
+    const formWrap = document.getElementById('demoFormWrap');
+    const success = document.getElementById('demoSuccess');
+    const open = () => {
+      modal.dataset.open = 'true';
+      formWrap.style.display = '';
+      success.style.display = 'none';
+      form.reset();
+      form.querySelectorAll('.field.invalid').forEach(f => f.classList.remove('invalid'));
+      setTimeout(() => form.querySelector('input')?.focus(), 80);
+    };
+    const close = () => { modal.dataset.open = 'false'; };
+    document.querySelectorAll('[data-open-demo]').forEach(b => b.addEventListener('click', e => { e.preventDefault(); open(); }));
+    document.querySelectorAll('[data-close-demo]').forEach(b => b.addEventListener('click', close));
+    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal.dataset.open === 'true') close(); });
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      let ok = true;
+      const required = ['nombre','email','empresa','choferes'];
+      required.forEach(name => {
+        const input = form.querySelector(`[name="${name}"]`);
+        const field = input.closest('.field');
+        let valid = !!input.value.trim();
+        if (valid && name === 'email') valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.value);
+        field.classList.toggle('invalid', !valid);
+        if (!valid) ok = false;
+      });
+      if (!ok) return;
+      // Build a WhatsApp message with the form data and open wa.me in a new tab.
+      // Why this approach: no backend, works on web + mobile, the prospect lands
+      // directly in our WhatsApp inbox with the context already filled.
+      const data = Object.fromEntries(new FormData(form));
+      const lines = [
+        'Hola, quiero agendar una demo de TripDrive.',
+        '',
+        'Nombre: ' + data.nombre,
+        'Email: ' + data.email,
+        'Empresa: ' + data.empresa,
+        '# choferes: ' + data.choferes,
+      ];
+      if (data.mensaje && String(data.mensaje).trim()) {
+        lines.push('Mensaje: ' + data.mensaje);
+      }
+      lines.push('', 'Vengo desde tripdrive.xyz');
+      const waUrl = 'https://wa.me/527298847499?text=' + encodeURIComponent(lines.join('\n'));
+      // Open in a new tab — the user keeps the success screen behind.
+      window.open(waUrl, '_blank', 'noopener,noreferrer');
+      formWrap.style.display = 'none';
+      success.style.display = '';
+    });
+  })();
+
+  // ---------- Cookies ----------
+  (function(){
+    const c = document.getElementById('cookies');
+    if (localStorage.getItem('td-cookies')) c.dataset.hide = 'true';
+    const dismiss = (v) => { localStorage.setItem('td-cookies', v); c.dataset.hide = 'true'; };
+    document.getElementById('cookieAccept').addEventListener('click', () => dismiss('accept'));
+    document.getElementById('cookieReject').addEventListener('click', () => dismiss('reject'));
+  })();
+
+  // ---------- Tweaks panel (palette switcher) ----------
+  (function(){
+    const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+      "palette": "forest"
+    }/*EDITMODE-END*/;
+    const panel = document.getElementById('tweaks');
+    const row = document.getElementById('paletteRow');
+    const closeBtn = document.getElementById('tweaksClose');
+
+    const applyPalette = (p) => {
+      document.documentElement.setAttribute('data-palette', p);
+      row.querySelectorAll('.palette-swatch').forEach(b => {
+        b.setAttribute('aria-pressed', b.dataset.palette === p ? 'true' : 'false');
+      });
+    };
+    applyPalette(TWEAK_DEFAULTS.palette || 'forest');
+
+    // Listen BEFORE announcing availability
+    window.addEventListener('message', (e) => {
+      const msg = e.data;
+      if (!msg || typeof msg !== 'object') return;
+      if (msg.type === '__activate_edit_mode')   panel.dataset.open = 'true';
+      if (msg.type === '__deactivate_edit_mode') panel.dataset.open = 'false';
+    });
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+
+    row.addEventListener('click', (e) => {
+      const btn = e.target.closest('.palette-swatch');
+      if (!btn) return;
+      const p = btn.dataset.palette;
+      applyPalette(p);
+      window.parent.postMessage({ type: '__edit_mode_set_keys', edits: { palette: p } }, '*');
+    });
+
+    closeBtn.addEventListener('click', () => {
+      panel.dataset.open = 'false';
+      window.parent.postMessage({ type: '__edit_mode_dismissed' }, '*');
+    });
+  })();
+</script>
+
+</body>
+</html>
