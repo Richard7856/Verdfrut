@@ -10,12 +10,13 @@
 //   - Pin color = status del stop (ver theme/colors.ts).
 //   - onPressPin sube el id para que la pantalla scrollee a esa StopCard.
 //
-// Limitación N2: con >30 pines en mismo bounds el rendering puede arrastrar FPS
-// en gama baja. Mitigación deferida — clustering entra si el cliente reporta
-// (issue para abrir en review).
+// HARDENING APK-2026-05-13: si el módulo nativo de Google Maps falla en init
+// (API key vacía, módulo no linkeado, OOM) la app entera crasheaba al renderear
+// el componente. Ahora envuelto en ErrorBoundary → si el map falla, el resto
+// de la pantalla (header + cards de paradas) sigue funcional con un placeholder.
 
-import { useEffect, useRef } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { Component, useEffect, useRef, type ErrorInfo, type ReactNode } from 'react';
+import { StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import type { Depot } from '@tripdrive/types';
 import { colors } from '@/theme/colors';
@@ -25,6 +26,48 @@ interface RouteMapProps {
   stops: StopWithStore[];
   depot: Depot | null;
   onPressStop?: (stopId: string) => void;
+}
+
+/**
+ * Error Boundary alrededor del MapView nativo.
+ *
+ * react-native-maps con PROVIDER_GOOGLE puede crashear el render si el SDK
+ * de Android Maps no está disponible (API key faltante, módulo native no
+ * linkeado en el APK). El crash sin boundary tumba el árbol entero — incluso
+ * cards de paradas que NO usan el mapa.
+ *
+ * Con este wrapper, capturamos el error a nivel React y mostramos un
+ * placeholder. El chofer puede seguir trabajando con la lista; el mapa se
+ * recupera en el próximo build que tenga la key.
+ */
+class MapErrorBoundary extends Component<
+  { fallback: ReactNode; children: ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError(): { hasError: boolean } {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.warn('[RouteMap] MapView falló al renderear:', error.message, info.componentStack);
+  }
+
+  render() {
+    return this.state.hasError ? this.props.fallback : this.props.children;
+  }
+}
+
+function MapFallback({ stopCount }: { stopCount: number }) {
+  return (
+    <View style={[styles.container, styles.fallback]}>
+      <Text style={styles.fallbackTitle}>Mapa no disponible</Text>
+      <Text style={styles.fallbackSubtitle}>
+        Continúa con la lista de paradas abajo · {stopCount} stops en ruta
+      </Text>
+    </View>
+  );
 }
 
 function pinColorForStatus(status: StopWithStore['stop']['status']): string {
@@ -42,6 +85,14 @@ function pinColorForStatus(status: StopWithStore['stop']['status']): string {
 }
 
 export function RouteMap({ stops, depot, onPressStop }: RouteMapProps) {
+  return (
+    <MapErrorBoundary fallback={<MapFallback stopCount={stops.length} />}>
+      <RouteMapInner stops={stops} depot={depot} onPressStop={onPressStop} />
+    </MapErrorBoundary>
+  );
+}
+
+function RouteMapInner({ stops, depot, onPressStop }: RouteMapProps) {
   const mapRef = useRef<MapView | null>(null);
 
   // Construimos la lista de coords una sola vez por cambio en stops/depot.
@@ -121,5 +172,21 @@ const styles = StyleSheet.create({
   },
   map: {
     flex: 1,
+  },
+  fallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  fallbackTitle: {
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  fallbackSubtitle: {
+    color: colors.textMuted,
+    fontSize: 13,
+    textAlign: 'center',
   },
 });
