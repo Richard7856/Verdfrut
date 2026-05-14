@@ -13,6 +13,7 @@
   "dependencies": {
     "@sentry/nextjs": "^8.55.2",
     "@tripdrive/observability": "workspace:*",
+    "@tripdrive/plans": "workspace:*",
     "@tripdrive/supabase": "workspace:*",
     "@tripdrive/types": "workspace:*",
     "@tripdrive/ui": "workspace:*",

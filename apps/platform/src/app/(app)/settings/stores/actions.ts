@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { logger } from '@tripdrive/observability';
 import { requireRole } from '@/lib/auth';
+import { requireRoomForStores } from '@/lib/plans-gate';
 import { createStore, updateStore, getStore } from '@/lib/queries/stores';
 import {
   optionalString,
@@ -21,6 +22,11 @@ export async function createStoreAction(formData: FormData): Promise<ActionResul
   await requireRole('admin', 'dispatcher');
 
   return runAction(async () => {
+    // ADR-095. Gate por límite de tiendas del plan. Va dentro de runAction
+    // para que el error de límite se devuelva como ActionResult.error en vez
+    // de bubblar a un 500.
+    await requireRoomForStores(1);
+
     const code = requireString('código', formData.get('code'), {
       maxLength: 32,
       pattern: /^[A-Z0-9-]+$/,

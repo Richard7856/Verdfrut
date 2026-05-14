@@ -8,6 +8,7 @@
 import 'server-only';
 import { createServiceRoleClient } from '@tripdrive/supabase/server';
 import type { TableUpdate } from '@tripdrive/supabase';
+import { sanitizeFeatureOverrides, type PlanFeatures } from '@tripdrive/plans';
 
 export type CustomerStatus = 'active' | 'paused' | 'churned' | 'demo';
 export type CustomerTier = 'starter' | 'pro' | 'enterprise';
@@ -28,6 +29,8 @@ export interface Customer {
   contractStartedAt: string | null;
   contractEndsAt: string | null;
   notes: string | null;
+  /** ADR-095. Sanitizado: sólo keys que matchean PlanFeatures. */
+  featureOverrides: Partial<PlanFeatures>;
   createdAt: string;
   updatedAt: string;
 }
@@ -48,6 +51,7 @@ interface CustomerRow {
   contract_started_at: string | null;
   contract_ends_at: string | null;
   notes: string | null;
+  feature_overrides: unknown;
   created_at: string;
   updated_at: string;
 }
@@ -57,7 +61,7 @@ const CUSTOMER_COLS = `
   brand_color_primary, brand_logo_url,
   monthly_fee_mxn, per_driver_fee_mxn,
   contract_started_at, contract_ends_at,
-  notes, created_at, updated_at
+  notes, feature_overrides, created_at, updated_at
 `;
 
 function toCustomer(row: CustomerRow): Customer {
@@ -77,6 +81,7 @@ function toCustomer(row: CustomerRow): Customer {
     contractStartedAt: row.contract_started_at,
     contractEndsAt: row.contract_ends_at,
     notes: row.notes,
+    featureOverrides: sanitizeFeatureOverrides(row.feature_overrides),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -619,6 +624,7 @@ export interface CreateCustomerInput {
   contractStartedAt?: string | null;
   contractEndsAt?: string | null;
   notes?: string | null;
+  featureOverrides?: Partial<PlanFeatures>;
 }
 
 // slug: lowercase, alfanumérico + guiones, 2-40 chars. Es el subdomain.
@@ -651,6 +657,7 @@ export async function createCustomer(input: CreateCustomerInput): Promise<Custom
       contract_started_at: input.contractStartedAt ?? null,
       contract_ends_at: input.contractEndsAt ?? null,
       notes: input.notes ?? null,
+      feature_overrides: input.featureOverrides ?? {},
     })
     .select(CUSTOMER_COLS)
     .single();
@@ -680,6 +687,7 @@ export interface UpdateCustomerInput {
   contractStartedAt?: string | null;
   contractEndsAt?: string | null;
   notes?: string | null;
+  featureOverrides?: Partial<PlanFeatures>;
 }
 
 export async function updateCustomer(id: string, input: UpdateCustomerInput): Promise<Customer> {
@@ -702,6 +710,7 @@ export async function updateCustomer(id: string, input: UpdateCustomerInput): Pr
   if (input.contractStartedAt !== undefined) update.contract_started_at = input.contractStartedAt;
   if (input.contractEndsAt !== undefined) update.contract_ends_at = input.contractEndsAt;
   if (input.notes !== undefined) update.notes = input.notes;
+  if (input.featureOverrides !== undefined) update.feature_overrides = input.featureOverrides;
 
   const { data, error } = await createServiceRoleClient()
     .from('customers')

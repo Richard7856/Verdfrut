@@ -18,6 +18,7 @@ import {
   type ToolContext,
   type AnthropicMessageParam,
 } from '@tripdrive/orchestrator';
+import { hasFeature, PLAN_LABELS } from '@tripdrive/plans';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -59,21 +60,53 @@ export async function POST(req: Request) {
   const sessionClient = await createServerClient();
   const admin = createServiceRoleClient();
 
-  // Resolver customer_id + timezone del caller.
+  // Resolver customer_id + timezone + tier/status/overrides para gate.
+  // ADR-095: el asistente AI requiere `ai` habilitado. Es la decisión
+  // de gate más importante porque cada turn cuesta tokens — sin gate,
+  // un Operación consume Claude API sin pagar el delta.
   const { data: callerProfile } = await sessionClient
     .from('user_profiles')
-    .select('customer_id, customers:customer_id ( timezone )')
+    .select(
+      'customer_id, customers:customer_id ( timezone, tier, status, feature_overrides )',
+    )
     .eq('id', profile.id)
     .single();
 
   const callerRow = callerProfile as unknown as {
     customer_id: string;
-    customers: { timezone: string } | null;
+    customers: {
+      timezone: string;
+      tier: 'starter' | 'pro' | 'enterprise';
+      status: 'active' | 'demo' | 'paused' | 'churned';
+      feature_overrides: unknown;
+    } | null;
   } | null;
-  if (!callerRow?.customer_id) {
+  if (!callerRow?.customer_id || !callerRow.customers) {
     return Response.json(
       { error: 'No se pudo resolver el customer del usuario.' },
       { status: 500 },
+    );
+  }
+
+  // Gate del asistente AI por plan.
+  const aiAllowed = hasFeature(
+    {
+      tier: callerRow.customers.tier,
+      status: callerRow.customers.status,
+      feature_overrides: callerRow.customers.feature_overrides,
+    },
+    'ai',
+  );
+  if (!aiAllowed) {
+    return Response.json(
+      {
+        error:
+          `El asistente AI no está incluido en el plan ${PLAN_LABELS[callerRow.customers.tier]} de tu organización. ` +
+          'Habla con TripDrive para activarlo o subir a Pro.',
+        code: 'feature_not_available',
+        feature: 'ai',
+      },
+      { status: 403 },
     );
   }
 

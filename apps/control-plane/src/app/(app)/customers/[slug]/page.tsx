@@ -16,6 +16,13 @@ import {
   type ActiveRouteRow,
   type PendingDispatchRow,
 } from '@/lib/queries/customers';
+import {
+  PLAN_FEATURES,
+  PLAN_LABELS,
+  TOGGLEABLE_FEATURE_KEYS,
+  getEffectiveFeatures,
+  type FeatureKey,
+} from '@tripdrive/plans';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,10 +49,18 @@ const STATUS_LABEL: Record<CustomerStatus, string> = {
   paused: 'Pausado',
   churned: 'Churned',
 };
-const TIER_LABEL: Record<CustomerTier, string> = {
-  starter: 'Starter',
-  pro: 'Pro',
-  enterprise: 'Enterprise',
+const TIER_LABEL: Record<CustomerTier, string> = PLAN_LABELS;
+
+const FEATURE_LABEL_SHORT: Record<FeatureKey, string> = {
+  ai: 'Asistente AI',
+  maxAccounts: 'Cuentas operativas',
+  maxStoresPerAccount: 'Tiendas por cuenta',
+  customDomain: 'Dominio propio',
+  customBranding: 'Branding propio',
+  xlsxImport: 'Import XLSX',
+  dragEditMap: 'Mapa drag-to-edit',
+  pushNotifications: 'Push notifications',
+  liveReOpt: 'Re-opt en vivo',
 };
 
 interface PageProps {
@@ -109,6 +124,22 @@ export default async function CustomerDetailPage({ params }: PageProps) {
           Timezone: <code className="font-mono">{customer.timezone}</code>
         </span>
       </div>
+
+      {/* ADR-095: Features efectivas — qué tiene este customer hoy. */}
+      <Card className="mb-6">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-[var(--color-text)]">
+            Features habilitadas
+          </h2>
+          <span className="text-xs text-[var(--color-text-muted)]">
+            Plan: <strong>{TIER_LABEL[customer.tier]}</strong>
+            {customer.status !== 'active' && customer.status !== 'demo' && (
+              <> · <span className="text-[var(--vf-warn,#d97706)]">{STATUS_LABEL[customer.status]} (features mínimas)</span></>
+            )}
+          </span>
+        </div>
+        <FeaturesGrid customer={customer} />
+      </Card>
 
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
@@ -395,6 +426,77 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
         {label}
       </span>
       <span className="text-right text-sm text-[var(--color-text)]">{value}</span>
+    </div>
+  );
+}
+
+/**
+ * Grid de features efectivas — read-only.
+ *
+ * Para cada feature toggleable muestra: ✓ (on) / × (off), y un mini-marcador
+ * si está sobrescrita vs heredada del tier. Los límites numéricos
+ * (maxAccounts, maxStores) se muestran como número.
+ */
+function FeaturesGrid({
+  customer,
+}: {
+  customer: {
+    tier: CustomerTier;
+    status: CustomerStatus;
+    featureOverrides: Record<string, unknown>;
+  };
+}) {
+  const effective = getEffectiveFeatures({
+    tier: customer.tier,
+    status: customer.status,
+    feature_overrides: customer.featureOverrides,
+  });
+  const tierBase = PLAN_FEATURES[customer.tier];
+
+  return (
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+      {TOGGLEABLE_FEATURE_KEYS.map((key) => {
+        const on = Boolean(effective[key]);
+        const overridden = customer.featureOverrides[String(key)] !== undefined;
+        const tierDefault = Boolean(tierBase[key]);
+        return (
+          <div
+            key={String(key)}
+            className="flex items-center justify-between gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm"
+          >
+            <div className="flex flex-col">
+              <span className="text-[var(--color-text)]">{FEATURE_LABEL_SHORT[key]}</span>
+              {overridden && (
+                <span className="text-[10px] text-[var(--vf-warn,#d97706)]">
+                  override · tier default {tierDefault ? 'on' : 'off'}
+                </span>
+              )}
+            </div>
+            <span
+              className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold ${
+                on
+                  ? 'bg-[color-mix(in_oklch,var(--color-success,#10b981)_20%,transparent)] text-[var(--color-success,#10b981)]'
+                  : 'bg-[var(--color-surface-muted,#1f2421)] text-[var(--color-text-muted)]'
+              }`}
+              aria-label={on ? 'habilitada' : 'deshabilitada'}
+            >
+              {on ? '✓' : '×'}
+            </span>
+          </div>
+        );
+      })}
+      <div className="flex items-center justify-between gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm">
+        <span className="text-[var(--color-text)]">Cuentas operativas (máx)</span>
+        <span className="font-mono text-[var(--color-text)]">
+          {effective.maxAccounts === Infinity ? '∞' : effective.maxAccounts}
+        </span>
+      </div>
+      <div className="flex items-center justify-between gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm">
+        <span className="text-[var(--color-text)]">Tiendas por cuenta (máx)</span>
+        <span className="font-mono text-[var(--color-text)]">
+          {effective.maxStoresPerAccount === Infinity ? '∞' : effective.maxStoresPerAccount}
+        </span>
+      </div>
     </div>
   );
 }

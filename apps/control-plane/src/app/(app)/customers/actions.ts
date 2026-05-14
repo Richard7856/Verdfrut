@@ -13,6 +13,7 @@ import {
   type CustomerStatus,
   type CustomerTier,
 } from '@/lib/queries/customers';
+import { TOGGLEABLE_FEATURE_KEYS, type PlanFeatures } from '@tripdrive/plans';
 
 interface ActionResult {
   ok: boolean;
@@ -48,6 +49,24 @@ function dateOrNull(raw: FormDataEntryValue | null): string | null {
   return v;
 }
 
+/**
+ * Lee el form 3-estado por feature: 'default' (no override) | 'on' | 'off'.
+ * Sólo escribe la key al objeto si el admin explícitamente puso on/off.
+ *
+ * El name del input es `override_<key>`. Los radios deben tener los tres
+ * values: '', 'true', 'false'.
+ */
+function parseFeatureOverrides(formData: FormData): Partial<PlanFeatures> {
+  const out: Partial<PlanFeatures> = {};
+  for (const key of TOGGLEABLE_FEATURE_KEYS) {
+    const raw = formData.get(`override_${String(key)}`)?.toString() ?? '';
+    if (raw === 'true') (out as Record<string, unknown>)[key] = true;
+    else if (raw === 'false') (out as Record<string, unknown>)[key] = false;
+    // default vacío → no agrega la key → hereda del tier.
+  }
+  return out;
+}
+
 export async function createCustomerAction(formData: FormData): Promise<ActionResult> {
   try {
     const slug = (formData.get('slug') ?? '').toString().trim().toLowerCase();
@@ -70,6 +89,7 @@ export async function createCustomerAction(formData: FormData): Promise<ActionRe
       contractStartedAt: dateOrNull(formData.get('contractStartedAt')),
       contractEndsAt: dateOrNull(formData.get('contractEndsAt')),
       notes: strOrNull(formData.get('notes')),
+      featureOverrides: parseFeatureOverrides(formData),
     });
 
     revalidatePath('/customers');
@@ -105,6 +125,7 @@ export async function updateCustomerAction(
       contractStartedAt: dateOrNull(formData.get('contractStartedAt')),
       contractEndsAt: dateOrNull(formData.get('contractEndsAt')),
       notes: strOrNull(formData.get('notes')),
+      featureOverrides: parseFeatureOverrides(formData),
     });
 
     revalidatePath('/customers');

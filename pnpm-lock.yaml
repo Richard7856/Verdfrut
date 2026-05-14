@@ -29,6 +29,9 @@ importers:
       '@tripdrive/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@tripdrive/plans':
+        specifier: workspace:*
+        version: link:../../packages/plans
       '@tripdrive/supabase':
         specifier: workspace:*
         version: link:../../packages/supabase
@@ -279,6 +282,8 @@ importers:
         specifier: ~5.6.0
         version: 5.6.3
 
+  apps/landing: {}
+
   apps/platform:
     dependencies:
       '@dnd-kit/core':
@@ -305,6 +310,9 @@ importers:
       '@tripdrive/orchestrator':
         specifier: workspace:*
         version: link:../../packages/orchestrator
+      '@tripdrive/plans':
+        specifier: workspace:*
+        version: link:../../packages/plans
       '@tripdrive/supabase':
         specifier: workspace:*
         version: link:../../packages/supabase
@@ -430,6 +438,12 @@ importers:
       '@tripdrive/utils':
         specifier: workspace:*
         version: link:../utils
+    devDependencies:
+      typescript:
+        specifier: ^5.6.2
+        version: 5.6.3
+
+  packages/plans:
     devDependencies:
       typescript:
         specifier: ^5.6.2

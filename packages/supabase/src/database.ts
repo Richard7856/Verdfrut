@@ -184,6 +184,8 @@ export type Database = {
           contract_ends_at: string | null
           notes: string | null
           metadata: Json
+          /** ADR-095. Overrides de features por customer (jsonb). */
+          feature_overrides: Json
           created_at: string
           updated_at: string
         }
@@ -209,6 +211,7 @@ export type Database = {
           contract_ends_at?: string | null
           notes?: string | null
           metadata?: Json
+          feature_overrides?: Json
           created_at?: string
           updated_at?: string
         }
@@ -234,6 +237,7 @@ export type Database = {
           contract_ends_at?: string | null
           notes?: string | null
           metadata?: Json
+          feature_overrides?: Json
           created_at?: string
           updated_at?: string
         }

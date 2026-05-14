@@ -5063,6 +5063,121 @@ ahorró kilómetros y tiempo. Defiende valor del Pro tier.
      reestructurado en vivo
   4. Agente reporta: "Optimizado: -12% distancia, -8% tiempo"
 
+---
+
+## [2026-05-13] ADR-095: Feature gating por plan + overrides per-customer
+
+**Contexto:**
+La landing pública (commit `9f3c1e6`) promete 3 tiers con sets de features
+diferentes: AI ilimitado en Pro+, dominio propio en Enterprise, límites
+de cuentas/tiendas escalonados. Hoy el código corre todas las features
+para todo customer sin enforcement — VerdFrut tiene acceso al mismo
+set que tendría un Pro futuro. Antes de cobrar a NETO o cualquier
+piloto, necesitamos un mecanismo que:
+
+1. Mapee `customer.tier` → set de features habilitadas.
+2. Permita override puntual por customer (ej: regalar AI a un Operación
+   durante el piloto).
+3. Sea fácil de checkear en código (gates de un solo line).
+4. Tenga UI en Control Plane para activar/desactivar sin tocar BD.
+
+**Decisión: 3 piezas mínimas**
+
+### 1. Schema (migración 043)
+
+Sólo agregar `feature_overrides JSONB DEFAULT '{}'` a `customers`.
+Todo lo demás ya existe (`tier`, `status`, `monthly_fee_mxn`,
+`contract_started_at`, `contract_ends_at`).
+
+Por qué no renombrar `starter` → `operacion`: el enum `customer_tier`
+está referenciado en código, RLS y datos seed. Mantener compatibilidad
+y mapear `starter` → "Operación" sólo en labels de UI. Bajo riesgo,
+zero breaking change.
+
+### 2. Package `@tripdrive/plans`
+
+Constantes y helpers puros (sin Supabase dependency directa):
+
+```ts
+export const PLAN_FEATURES = {
+  starter:    { ai: false, maxAccounts: 1,   maxStoresPerAccount: 150,
+                customDomain: false, customBranding: false,
+                xlsxImport: false, dragEditMap: false },
+  pro:        { ai: true,  maxAccounts: 3,   maxStoresPerAccount: 600,
+                customDomain: false, customBranding: false,
+                xlsxImport: true,  dragEditMap: true  },
+  enterprise: { ai: true,  maxAccounts: Infinity, maxStoresPerAccount: Infinity,
+                customDomain: true, customBranding: true,
+                xlsxImport: true,  dragEditMap: true  },
+};
+
+export const PLAN_LABELS = {
+  starter: 'Operación', pro: 'Pro', enterprise: 'Enterprise',
+};
+
+export function getEffectiveFeatures(customer: {
+  tier: CustomerTier; status: CustomerStatus; feature_overrides: Record<string, unknown>
+}): PlanFeatures {
+  // status='churned' o 'paused' → features mínimas (read-only).
+  // Lo demás: merge plan + overrides.
+}
+
+export async function requireFeature(...): Promise<void>  // throws 403
+```
+
+### 3. Aplicación de gates (cirugía mínima)
+
+| Punto | Gate | Behavior si falla |
+|---|---|---|
+| `POST /api/orchestrator/chat` | `requireFeature(c, 'ai')` | 403 con mensaje "Tu plan no incluye asistente AI" |
+| `create_customer` action | check `maxAccounts` count | error en el form |
+| `create_store` + `bulk_create_stores` tool | check `maxStoresPerAccount` | confirmación con sugerencia de upgrade |
+| UI sidebar (control-plane) | hide "Asistente AI" si !ai | menos opciones para starter |
+
+**Alternativas consideradas:**
+
+- **Stripe-style entitlements service**: prematuro — tendríamos
+  1 cliente pagando. La complejidad no compensa.
+- **Feature flags genéricos (Unleash/Flagsmith)**: sobre-engineering
+  para 3 tiers fijos. Constants + jsonb override basta.
+- **Renombrar starter → operacion en enum**: alto riesgo, gana
+  consistencia mínima. Diferido.
+- **Multiple Supabase projects per tenant**: ya descartado en
+  ADR-086 — el modelo es shared DB con RLS.
+
+**Riesgos/Limitaciones:**
+
+- `feature_overrides` es jsonb sin schema validation a nivel BD.
+  El package `@tripdrive/plans` valida en TS, pero alguien podría
+  insertar overrides inválidos vía MCP. Mitigación: validación
+  estricta en el form, doc clara, y `getEffectiveFeatures` ignora
+  keys que no conoce.
+- No tracking de cuándo se activó una feature por override (audit
+  log). Si esto crece, agregar tabla `customer_feature_audit`.
+- "Fair use" del AI ilimitado no está medido — un admin abusivo
+  podría generar costo alto. Mitigación V1: monitoreo manual de
+  costos en `orchestrator_messages`. V2 (Issue #268): rate limit
+  blando por customer.
+
+**Oportunidades de mejora:**
+
+- Issue #268 — rate limit blando del AI por customer.
+- Issue #269 — audit log de cambios en `feature_overrides`.
+- Issue #270 — UI "preview" del plan: cuando admin ve detail
+  page, mostrar "lo que tendrías si subes a Pro".
+- Issue #271 — Stripe/Conekta integration cuando haya 3+
+  customers pagando.
+
+**Status al cierre de ADR-095:**
+
+- Migración 043 aplicada (feature_overrides JSONB).
+- Package `@tripdrive/plans` creado y wireado en platform + control-plane.
+- UI de edit en control-plane con dropdowns Status/Tier + toggles de overrides.
+- Gates aplicados en chat orchestrator + create_store + bulk_create.
+- Type-check verde.
+- VerdFrut queda con `tier='pro'`, `status='active'`, sin overrides
+  (paga el Pro completo).
+
 
 
 

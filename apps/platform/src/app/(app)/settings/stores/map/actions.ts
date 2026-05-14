@@ -6,6 +6,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { requireRole } from '@/lib/auth';
+import { requireRoomForStores } from '@/lib/plans-gate';
 import { updateStore, createStore } from '@/lib/queries/stores';
 
 interface UpdateLocationInput {
@@ -58,6 +59,8 @@ export async function createStoreFromPlaceAction(
 ): Promise<{ ok: boolean; storeId?: string; error?: string }> {
   try {
     await requireRole('admin', 'dispatcher');
+    // ADR-095. Gate por límite de tiendas del plan.
+    await requireRoomForStores(1);
 
     const code = input.code.toUpperCase().trim();
     if (!/^[A-Z0-9-]{2,30}$/.test(code)) {
