@@ -27,9 +27,15 @@ interface OptimizeBody {
   driver_ids?: Array<string | null>;
   /** false (default) = solo calcular plan. true = aplicar via RPC. */
   apply?: boolean;
-  /** Identidad del caller — el user del orquestador que dispara la acción. */
+  /**
+   * Identidad del caller — solo `caller_user_id` es trusted.
+   *
+   * ADR-095 / HARDENING C1: el `customer_id` NUNCA se acepta del body —
+   * lo derivamos server-side desde `user_profiles` para evitar que un
+   * atacante con `INTERNAL_AGENT_TOKEN` reescriba dispatches de tenants
+   * arbitrarios. Si el body trae `caller_customer_id`, se ignora.
+   */
   caller_user_id: string;
-  caller_customer_id: string;
 }
 
 export async function POST(req: Request) {
@@ -51,18 +57,33 @@ export async function POST(req: Request) {
   if (!dispatchId || !/^[0-9a-f-]{36}$/i.test(dispatchId)) {
     return Response.json({ error: 'dispatch_id inválido' }, { status: 400 });
   }
-  if (!body.caller_customer_id || !body.caller_user_id) {
-    return Response.json({ error: 'identidad del caller requerida' }, { status: 400 });
+  if (!body.caller_user_id || !/^[0-9a-f-]{36}$/i.test(body.caller_user_id)) {
+    return Response.json({ error: 'caller_user_id requerido' }, { status: 400 });
   }
 
   const admin = createServiceRoleClient();
 
-  // 2. Cargar dispatch + rutas vivas + stores únicos.
+  // 2. HARDENING C1: derivar customer_id desde user_profiles del caller.
+  // Esto blinda contra request forging del customer_id en el body.
+  const { data: callerProfile } = await admin
+    .from('user_profiles')
+    .select('customer_id, role, is_active')
+    .eq('id', body.caller_user_id)
+    .maybeSingle();
+  if (!callerProfile || !callerProfile.is_active) {
+    return Response.json({ error: 'caller no autorizado' }, { status: 403 });
+  }
+  if (!['admin', 'dispatcher'].includes(callerProfile.role as string)) {
+    return Response.json({ error: 'caller sin permisos para optimizar' }, { status: 403 });
+  }
+  const callerCustomerId = callerProfile.customer_id as string;
+
+  // 3. Cargar dispatch + rutas vivas + stores únicos.
   const { data: dispatch } = await admin
     .from('dispatches')
     .select('id, name, date, zone_id, status')
     .eq('id', dispatchId)
-    .eq('customer_id', body.caller_customer_id)
+    .eq('customer_id', callerCustomerId)
     .maybeSingle();
   if (!dispatch) {
     return Response.json({ error: 'tiro no encontrado' }, { status: 404 });
@@ -77,7 +98,7 @@ export async function POST(req: Request) {
   const { data: routes } = await admin
     .from('routes')
     .select('id, name, vehicle_id, driver_id, status, depot_override_id, total_distance_meters, total_duration_seconds')
-    .eq('customer_id', body.caller_customer_id)
+    .eq('customer_id', callerCustomerId)
     .eq('dispatch_id', dispatchId)
     .not('status', 'in', '(CANCELLED)');
 

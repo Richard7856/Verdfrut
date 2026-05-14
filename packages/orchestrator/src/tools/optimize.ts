@@ -121,8 +121,9 @@ const optimize_dispatch: ToolDefinition<OptimizeDispatchArgs, OptimizeResult> = 
           vehicle_ids: args.vehicle_ids,
           driver_ids: args.driver_ids,
           apply: args.apply ?? false,
+          // HARDENING C1: solo mandamos caller_user_id. El endpoint deriva el
+          // customer_id desde user_profiles para evitar request forging.
           caller_user_id: ctx.userId,
-          caller_customer_id: ctx.customerId,
         }),
         signal: AbortSignal.timeout(60_000),
       });
