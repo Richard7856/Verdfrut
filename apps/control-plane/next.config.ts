@@ -9,6 +9,7 @@ const nextConfig: NextConfig = {
   },
   transpilePackages: [
     '@tripdrive/observability',
+    '@tripdrive/plans',
     '@tripdrive/supabase',
     '@tripdrive/types',
     '@tripdrive/ui',
