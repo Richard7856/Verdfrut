@@ -18,4 +18,9 @@ export interface Dispatch {
    * NULL = compartir deshabilitado.
    */
   publicShareToken: string | null;
+  /**
+   * HARDENING C2: fecha de expiración ISO del enlace público. Por defecto
+   * 7 días desde que se activa. El endpoint público filtra `expires_at > NOW()`.
+   */
+  publicShareExpiresAt: string | null;
 }

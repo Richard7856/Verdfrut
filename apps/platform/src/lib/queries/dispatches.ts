@@ -16,10 +16,11 @@ interface DispatchRow {
   created_at: string;
   updated_at: string;
   public_share_token: string | null;
+  public_share_expires_at: string | null;
 }
 
 const DISPATCH_COLS =
-  'id, name, date, zone_id, status, notes, created_by, created_at, updated_at, public_share_token';
+  'id, name, date, zone_id, status, notes, created_by, created_at, updated_at, public_share_token, public_share_expires_at';
 
 function toDispatch(row: DispatchRow): Dispatch {
   return {
@@ -33,6 +34,7 @@ function toDispatch(row: DispatchRow): Dispatch {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     publicShareToken: row.public_share_token,
+    publicShareExpiresAt: row.public_share_expires_at,
   };
 }
 
@@ -131,54 +133,84 @@ export async function listDispatchSummaries(opts?: {
 }
 
 /**
- * ADR-046: lookup público de dispatch por token. Usado por /share/dispatch/[token].
- * Usa service_role para bypass de RLS — el visitante anónimo no tiene sesión.
- * NULL si el token no existe o el dispatch no tiene `public_share_token` set.
+ * ADR-046 / HARDENING C2: lookup público de dispatch por token.
+ *
+ * Usado por /share/dispatch/[token]. service_role bypass RLS — el
+ * visitante anónimo no tiene sesión.
+ *
+ * Devuelve NULL si:
+ *   - el token no existe o el dispatch no tiene `public_share_token` set.
+ *   - el link expiró (`public_share_expires_at` <= NOW()).
+ *   - el dispatch está `completed` o `cancelled` (no tiene sentido seguir
+ *     mostrando rutas históricas con coordenadas vivas).
  */
 export async function getDispatchByPublicToken(token: string): Promise<Dispatch | null> {
-  // Validación básica del UUID antes de query (defensa contra tokens malformados).
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(token)) {
     return null;
   }
-  // service_role bypass RLS — necesario para vista pública (sin sesión).
   const { createServiceRoleClient } = await import('@tripdrive/supabase/server');
   const admin = createServiceRoleClient();
+  const nowIso = new Date().toISOString();
   const { data, error } = await admin
     .from('dispatches')
     .select(DISPATCH_COLS)
     .eq('public_share_token', token)
+    .gt('public_share_expires_at', nowIso)
+    .not('status', 'in', '(completed,cancelled)')
     .maybeSingle();
   if (error || !data) return null;
   return toDispatch(data as DispatchRow);
 }
 
+/** Default TTL para nuevos shares: 7 días. */
+const SHARE_DEFAULT_TTL_DAYS = 7;
+
 /**
- * ADR-046: habilita compartir el dispatch generando un nuevo token UUID.
- * Si ya tenía token, lo regenera (revoca enlaces previos).
+ * ADR-046 / HARDENING C2: habilita compartir el dispatch.
+ *
+ * Genera un nuevo UUID + expira el link a `now() + ttlDays` (default 7).
+ * Si ya tenía token, lo regenera (revoca enlaces previos al cambiar el
+ * token); el expiry también se resetea al nuevo TTL.
+ *
+ * Para ampliar el plazo en el futuro, llamar de nuevo con un `ttlDays`
+ * más largo — siempre se sobrescribe el expiry, no se acumula.
  */
-export async function enableDispatchSharing(dispatchId: string): Promise<string> {
+export async function enableDispatchSharing(
+  dispatchId: string,
+  ttlDays: number = SHARE_DEFAULT_TTL_DAYS,
+): Promise<{ token: string; expiresAt: string }> {
   const supabase = await createServerClient();
+  const expiresAt = new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await supabase
     .from('dispatches')
-    .update({ public_share_token: crypto.randomUUID() })
+    .update({
+      public_share_token: crypto.randomUUID(),
+      public_share_expires_at: expiresAt,
+    })
     .eq('id', dispatchId)
-    .select('public_share_token')
+    .select('public_share_token, public_share_expires_at')
     .single();
-  if (error || !data?.public_share_token) {
+  if (error || !data?.public_share_token || !data.public_share_expires_at) {
     throw new Error(`[dispatches.enableSharing] ${error?.message ?? 'no token'}`);
   }
-  return data.public_share_token as string;
+  return {
+    token: data.public_share_token as string,
+    expiresAt: data.public_share_expires_at as string,
+  };
 }
 
 /**
- * ADR-046: revoca el enlace público (set NULL). Cualquier persona con el link
- * viejo deja de tener acceso inmediatamente.
+ * ADR-046: revoca el enlace público (set NULL en token y expires_at).
+ * Cualquier persona con el link viejo deja de tener acceso inmediatamente.
  */
 export async function disableDispatchSharing(dispatchId: string): Promise<void> {
   const supabase = await createServerClient();
   const { error } = await supabase
     .from('dispatches')
-    .update({ public_share_token: null })
+    .update({
+      public_share_token: null,
+      public_share_expires_at: null,
+    })
     .eq('id', dispatchId);
   if (error) throw new Error(`[dispatches.disableSharing] ${error.message}`);
 }

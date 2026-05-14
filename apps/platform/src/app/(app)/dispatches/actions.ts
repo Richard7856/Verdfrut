@@ -341,6 +341,8 @@ export async function deleteDispatchAction(
 export interface ShareLinkResult extends ActionResult {
   token?: string;
   path?: string;
+  /** HARDENING C2: ISO timestamp cuando expira el link (default 7d). */
+  expiresAt?: string;
 }
 
 export async function enableDispatchSharingAction(
@@ -350,9 +352,9 @@ export async function enableDispatchSharingAction(
   try {
     const id = requireUuid('dispatchId', dispatchId);
     const { enableDispatchSharing } = await import('@/lib/queries/dispatches');
-    const token = await enableDispatchSharing(id);
+    const { token, expiresAt } = await enableDispatchSharing(id);
     revalidatePath(`/dispatches/${id}`);
-    return { ok: true, token, path: `/share/dispatch/${token}` };
+    return { ok: true, token, expiresAt, path: `/share/dispatch/${token}` };
   } catch (err) {
     if (err instanceof ValidationError) {
       return { ok: false, error: err.message };

@@ -304,6 +304,8 @@ export type Database = {
           created_at: string
           updated_at: string
           public_share_token: string | null
+          /** HARDENING C2. Expira el acceso público al link. */
+          public_share_expires_at: string | null
         }
         Insert: {
           id?: string
@@ -317,6 +319,7 @@ export type Database = {
           created_at?: string
           updated_at?: string
           public_share_token?: string | null
+          public_share_expires_at?: string | null
         }
         Update: {
           id?: string
@@ -330,6 +333,7 @@ export type Database = {
           created_at?: string
           updated_at?: string
           public_share_token?: string | null
+          public_share_expires_at?: string | null
         }
         Relationships: []
       }
