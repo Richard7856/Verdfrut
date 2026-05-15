@@ -40,8 +40,9 @@ Las 3 apps (`tripdrive-platform`, `tripdrive-driver`, `tripdrive-control-plane`)
 | `TENANT_BBOX_LNG_MAX` | `-86.5` (default) | No |
 | **`STRIPE_SECRET_KEY`** | `sk_test_...` o `sk_live_...` desde Stripe Dashboard → Developers → API keys | ⚠ **Sí para billing.** Sin esto, /settings/billing muestra warning y syncSeats es no-op silencioso. Resto del sistema sigue funcionando. |
 | **`STRIPE_WEBHOOK_SECRET`** | `whsec_...` desde el endpoint del webhook en Stripe Dashboard | ⚠ **Sí para procesar eventos** (confirmación de pago, renovaciones). Si falta, el webhook rechaza con 503 y Stripe reintenta hasta darse por vencido. |
-| **`STRIPE_PRICE_ID_ADMIN`** | `price_...` del Product "TripDrive - Admin seat" (recurring monthly MXN) | ⚠ Sí — checkout falla con 500 si no está |
-| **`STRIPE_PRICE_ID_DRIVER`** | `price_...` del Product "TripDrive - Driver seat" (recurring monthly MXN) | ⚠ Sí — checkout falla con 500 si no está |
+| **`STRIPE_PRICE_ID_BASE`** | `price_...` del Product "TripDrive Pro — Licencia base" ($9,350 MXN/mes, recurring monthly) | ⚠ Sí — checkout falla con 500 si no está |
+| **`STRIPE_PRICE_ID_EXTRA_ADMIN`** | `price_...` del Product "TripDrive Pro — Admin extra" ($3,200 MXN/mes, recurring monthly) | ⚠ Sí — syncSeats falla si hay extras y no está |
+| **`STRIPE_PRICE_ID_EXTRA_DRIVER`** | `price_...` del Product "TripDrive Pro — Chofer extra" ($590 MXN/mes, recurring monthly) | ⚠ Sí — syncSeats falla si hay extras y no está |
 | `NEXT_PUBLIC_BILLING_RETURN_URL` | Base URL para retorno desde Stripe checkout (ej. `https://tripdrive.xyz`). Si falta, cae a `NEXT_PUBLIC_PLATFORM_URL` o localhost | No (default funciona en prod si hay PLATFORM_URL) |
 
 ### Driver (`tripdrive-driver`)
@@ -72,19 +73,33 @@ Las 3 apps (`tripdrive-platform`, `tripdrive-driver`, `tripdrive-control-plane`)
 
 Antes de cobrar al primer cliente, configurar en https://dashboard.stripe.com:
 
-### 1. Crear los 2 Products (uno por tipo de seat)
+### 1. Crear los 3 Products del plan Pro
 
-**Product 1: "TripDrive Pro — Admin seat"**
-- Tipo: Recurring
-- Billing period: Monthly
-- Currency: MXN
-- Precio: el que decidas (ej. $499/mes/admin)
-- Después de crear: copia el `price_id` (`price_...`) → eso va en `STRIPE_PRICE_ID_ADMIN`
+**Modelo**: una sola Subscription con 3 line items por customer:
+- Licencia base (siempre × 1) — piso comercial que incluye 2 admins + 5 choferes
+- Admin extra (× N) — por cada admin/dispatcher arriba de 2
+- Chofer extra (× N) — por cada chofer arriba de 5
 
-**Product 2: "TripDrive Pro — Driver seat"**
-- Mismo setup, currency MXN, monthly
-- Precio: el que decidas (ej. $199/mes/chofer)
-- Copia el `price_id` → `STRIPE_PRICE_ID_DRIVER`
+El minimum (2 admin + 5 driver) vive como constante en código
+(`PRO_LICENSE_MIN_ADMINS`, `PRO_LICENSE_MIN_DRIVERS` en `lib/stripe/client.ts`),
+NO en Stripe — si quieres cambiarlo, edita ahí y al siguiente cambio de seats
+todo se recalcula con proration.
+
+**Product 1: "TripDrive Pro — Licencia base"**
+- Tipo: Recurring · Billing: Monthly · Currency: MXN
+- Precio: **$9,350 MXN** (= 2 × $3,200 admin + 5 × $590 chofer; mínimo de la landing)
+- Description (opcional): "Incluye 2 admins + 5 choferes. Extras se cobran aparte."
+- → copia el `price_id` (`price_...`) → `STRIPE_PRICE_ID_BASE`
+
+**Product 2: "TripDrive Pro — Admin extra"**
+- Tipo: Recurring · Billing: Monthly · Currency: MXN
+- Precio: **$3,200 MXN** por seat
+- → copia el `price_id` → `STRIPE_PRICE_ID_EXTRA_ADMIN`
+
+**Product 3: "TripDrive Pro — Chofer extra"**
+- Tipo: Recurring · Billing: Monthly · Currency: MXN
+- Precio: **$590 MXN** por seat
+- → copia el `price_id` → `STRIPE_PRICE_ID_EXTRA_DRIVER`
 
 ### 2. Crear webhook endpoint
 

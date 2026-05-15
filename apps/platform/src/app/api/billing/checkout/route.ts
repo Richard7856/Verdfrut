@@ -22,6 +22,7 @@ import {
   requireStripe,
   requirePriceIds,
   getReturnUrls,
+  computeExtrasFromSeats,
 } from '@/lib/stripe/client';
 
 export const runtime = 'nodejs';
@@ -124,7 +125,8 @@ export async function POST(): Promise<NextResponse> {
     }
   }
 
-  // 4. Contar seats actuales — quantity inicial del checkout.
+  // 4. Contar seats actuales y derivar EXTRAS sobre el mínimo incluido en
+  //    la licencia Pro base (2 admins + 5 choferes incluidos sin costo extra).
   const [adminRes, driverRes] = await Promise.all([
     admin
       .from('user_profiles')
@@ -138,17 +140,21 @@ export async function POST(): Promise<NextResponse> {
       .eq('customer_id', customer.id)
       .eq('is_active', true),
   ]);
-  const adminQty = Math.max(adminRes.count ?? 1, 1);
-  const driverQty = Math.max(driverRes.count ?? 0, 0);
+  const { extraAdmins, extraDrivers } = computeExtrasFromSeats(
+    adminRes.count ?? 0,
+    driverRes.count ?? 0,
+  );
 
-  // 5. Crear Checkout Session subscription mode.
+  // 5. Crear Checkout Session subscription mode con 3 line items: base
+  //    (siempre × 1) + extras (× N sobre el mínimo).
   try {
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       customer: stripeCustomerId,
       line_items: [
-        { price: priceIds.admin, quantity: adminQty },
-        { price: priceIds.driver, quantity: driverQty },
+        { price: priceIds.base, quantity: 1 },
+        { price: priceIds.extraAdmin, quantity: extraAdmins },
+        { price: priceIds.extraDriver, quantity: extraDrivers },
       ],
       success_url: urls.success,
       cancel_url: urls.cancel,

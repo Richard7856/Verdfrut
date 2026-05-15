@@ -139,16 +139,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 
-  // Crear Checkout Session. Por ahora todos los planes van con admin_price ×
-  // 1 (asumimos 1 admin inicial + 0 drivers). El admin agrega drivers después
-  // y syncSeats hace el ajuste de quantity con proration.
+  // Crear Checkout Session. Signup nuevo arranca con la licencia base sola
+  // (sin extras) — el cliente paga el piso y va invitando admins/choferes
+  // según necesite. Apenas cruce el mínimo (2 admins + 5 choferes), el
+  // syncSeats post-invite ajusta extras automáticamente con proration.
   try {
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       customer: stripeCustomerId,
       line_items: [
-        { price: priceIds.admin, quantity: 1 },
-        { price: priceIds.driver, quantity: 0 },
+        { price: priceIds.base, quantity: 1 },
+        { price: priceIds.extraAdmin, quantity: 0 },
+        { price: priceIds.extraDriver, quantity: 0 },
       ],
       success_url: `${urls.success.replace('/settings/billing?success=1', '/empezar?success=1')}`,
       cancel_url: `${urls.cancel.replace('/settings/billing?canceled=1', '/empezar?canceled=1')}`,

@@ -60,24 +60,60 @@ export function requireStripe(): StripeNS {
 }
 
 /**
- * IDs de precio para los dos tipos de seat. Validar al inicio del flow
- * de checkout para que el error sea predictivo en vez de "Stripe dice 400".
+ * Modelo de precios Pro tier (ADR-103):
+ *  - `base`: licencia Pro mensual que incluye `MIN_ADMINS_INCLUDED` admins
+ *    + `MIN_DRIVERS_INCLUDED` choferes. El cliente paga la base aunque tenga
+ *    solo 1 admin — es el piso comercial ("desde $9,350/mes" en landing).
+ *  - `extraAdmin`: por cada admin/dispatcher activo arriba del mínimo.
+ *  - `extraDriver`: por cada chofer activo arriba del mínimo.
+ *
+ * IMPORTANTE: el "minimum included" NO vive en Stripe — vive en estas
+ * constantes. Si decides cambiar el bundle (ej. base incluye 1 admin + 3
+ * choferes en lugar de 2+5), actualizas acá y syncSeats recalcula extras
+ * en el próximo cambio sin migración.
  */
-export function getPriceIds(): { admin: string; driver: string } | null {
-  const admin = process.env.STRIPE_PRICE_ID_ADMIN;
-  const driver = process.env.STRIPE_PRICE_ID_DRIVER;
-  if (!admin || !driver) return null;
-  return { admin, driver };
+export const PRO_LICENSE_MIN_ADMINS = 2;
+export const PRO_LICENSE_MIN_DRIVERS = 5;
+
+export interface ProPriceIds {
+  base: string;
+  extraAdmin: string;
+  extraDriver: string;
 }
 
-export function requirePriceIds(): { admin: string; driver: string } {
+export function getPriceIds(): ProPriceIds | null {
+  const base = process.env.STRIPE_PRICE_ID_BASE;
+  const extraAdmin = process.env.STRIPE_PRICE_ID_EXTRA_ADMIN;
+  const extraDriver = process.env.STRIPE_PRICE_ID_EXTRA_DRIVER;
+  if (!base || !extraAdmin || !extraDriver) return null;
+  return { base, extraAdmin, extraDriver };
+}
+
+export function requirePriceIds(): ProPriceIds {
   const ids = getPriceIds();
   if (!ids) {
     throw new Error(
-      'Faltan STRIPE_PRICE_ID_ADMIN o STRIPE_PRICE_ID_DRIVER en las env vars.',
+      'Faltan price IDs en env vars: STRIPE_PRICE_ID_BASE, ' +
+        'STRIPE_PRICE_ID_EXTRA_ADMIN, STRIPE_PRICE_ID_EXTRA_DRIVER.',
     );
   }
   return ids;
+}
+
+/**
+ * Calcula extras a cobrar sobre el mínimo incluido en la base. Math.max
+ * evita quantities negativas si por alguna razón hay menos seats activos
+ * que el mínimo (ej. customer desactivó todos sus drivers, sigue pagando
+ * el piso pero no debe cobrarse extras adicionales).
+ */
+export function computeExtrasFromSeats(adminCount: number, driverCount: number): {
+  extraAdmins: number;
+  extraDrivers: number;
+} {
+  return {
+    extraAdmins: Math.max(0, adminCount - PRO_LICENSE_MIN_ADMINS),
+    extraDrivers: Math.max(0, driverCount - PRO_LICENSE_MIN_DRIVERS),
+  };
 }
 
 /**

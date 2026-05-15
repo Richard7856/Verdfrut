@@ -17,7 +17,7 @@ import 'server-only';
 
 import { createServiceRoleClient } from '@tripdrive/supabase/server';
 import { logger } from '@tripdrive/observability';
-import { getStripe, getPriceIds } from './client';
+import { getStripe, getPriceIds, computeExtrasFromSeats } from './client';
 
 export type SyncReason =
   | 'driver_created'
@@ -128,27 +128,34 @@ export async function syncSeats(opts: SyncSeatsOptions): Promise<SyncSeatsResult
     };
   }
 
-  // 3. Fetch subscription para conocer los item IDs (Stripe pide el item.id
-  //    en el update, no el price.id). Cacheamos esto en BD podría ser
-  //    optimización pero por ahora es 1 RTT extra aceptable.
+  // 3. Calcular EXTRAS sobre el mínimo incluido en la licencia base.
+  //    El customer paga el piso aunque tenga menos seats; solo los excedentes
+  //    suben quantity en Stripe.
+  const { extraAdmins, extraDrivers } = computeExtrasFromSeats(newAdmin, newDriver);
+
+  // 4. Fetch subscription para conocer los item IDs (Stripe pide item.id en
+  //    el update, no price.id). 1 RTT extra aceptable; cachear en BD sería
+  //    optimización futura.
   let stripeError: string | undefined;
   try {
     const sub = await stripe.subscriptions.retrieve(customer.stripe_subscription_id);
-    const adminItem = sub.items.data.find((it) => it.price.id === priceIds.admin);
-    const driverItem = sub.items.data.find((it) => it.price.id === priceIds.driver);
+    const baseItem = sub.items.data.find((it) => it.price.id === priceIds.base);
+    const extraAdminItem = sub.items.data.find((it) => it.price.id === priceIds.extraAdmin);
+    const extraDriverItem = sub.items.data.find((it) => it.price.id === priceIds.extraDriver);
 
-    // Si la subscription no tiene los items esperados (configuración
-    // inconsistente en el dashboard), fallamos suave y loggeamos.
-    if (!adminItem || !driverItem) {
-      stripeError = `Subscription ${customer.stripe_subscription_id} no tiene los line items esperados (admin/driver price IDs).`;
+    // Defensive: si falta cualquiera de los items esperados, no podemos
+    // hacer update parcial seguro. Loggeamos como error pero no rompemos.
+    if (!baseItem || !extraAdminItem || !extraDriverItem) {
+      stripeError = `Subscription ${customer.stripe_subscription_id} no tiene los 3 line items esperados (base/extraAdmin/extraDriver).`;
     } else {
-      // 4. UPDATE atómico de quantities con proration ON. Stripe genera el
-      //    prorate automáticamente — el cliente verá la diferencia en su
-      //    próxima factura.
+      // 5. UPDATE atómico con proration ON. La base queda fija en × 1; solo
+      //    los extras suben/bajan. Stripe prorrata automático — el cliente
+      //    ve el diff en su próxima factura.
       await stripe.subscriptions.update(customer.stripe_subscription_id, {
         items: [
-          { id: adminItem.id, quantity: Math.max(newAdmin, 1) },
-          { id: driverItem.id, quantity: Math.max(newDriver, 0) },
+          { id: baseItem.id, quantity: 1 },
+          { id: extraAdminItem.id, quantity: extraAdmins },
+          { id: extraDriverItem.id, quantity: extraDrivers },
         ],
         proration_behavior: 'create_prorations',
       });

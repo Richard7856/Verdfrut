@@ -11,7 +11,13 @@
 import { PageHeader, Card, Badge } from '@tripdrive/ui';
 import { requireRole } from '@/lib/auth';
 import { createServiceRoleClient } from '@tripdrive/supabase/server';
-import { getStripe, getPriceIds } from '@/lib/stripe/client';
+import {
+  getStripe,
+  getPriceIds,
+  computeExtrasFromSeats,
+  PRO_LICENSE_MIN_ADMINS,
+  PRO_LICENSE_MIN_DRIVERS,
+} from '@/lib/stripe/client';
 import { BillingActions } from './billing-actions';
 
 export const metadata = { title: 'Suscripción y facturación' };
@@ -154,34 +160,61 @@ export default async function BillingPage({ searchParams }: Props) {
         </div>
       </Card>
 
-      {/* Breakdown de seats */}
-      <Card className="mb-4 border-[var(--color-border)] bg-[var(--vf-surface-2)] p-4">
-        <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
-          Seats activos
-        </p>
-        <div className="mt-2 grid grid-cols-2 gap-3">
-          <SeatRow
-            label="Admin / dispatcher"
-            count={adminCount}
-            lastSynced={customer?.last_synced_admin_seats ?? null}
-          />
-          <SeatRow
-            label="Choferes"
-            count={driverCount}
-            lastSynced={customer?.last_synced_driver_seats ?? null}
-          />
-        </div>
-        {customer?.last_seats_synced_at && (
-          <p className="mt-2 text-[11px] text-[var(--color-text-subtle)]">
-            Última sincronización con Stripe:{' '}
-            {new Date(customer.last_seats_synced_at as string).toLocaleString('es-MX')}
-          </p>
-        )}
-        <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">
-          Cuando creas o desactivas un chofer/admin, las quantities se actualizan en Stripe
-          con proration automática. El cargo del próximo ciclo refleja el cambio.
-        </p>
-      </Card>
+      {/* Breakdown de seats vs licencia base */}
+      {(() => {
+        const { extraAdmins, extraDrivers } = computeExtrasFromSeats(adminCount, driverCount);
+        return (
+          <Card className="mb-4 border-[var(--color-border)] bg-[var(--vf-surface-2)] p-4">
+            <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
+              Seats activos
+            </p>
+
+            <div className="mt-3 rounded-md border border-[var(--color-border)] bg-[var(--vf-surface-1)] p-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-[var(--color-text)]">
+                    Licencia Pro base
+                  </p>
+                  <p className="text-[11px] text-[var(--color-text-muted)]">
+                    Incluye hasta {PRO_LICENSE_MIN_ADMINS} admin + {PRO_LICENSE_MIN_DRIVERS} choferes sin costo extra
+                  </p>
+                </div>
+                <span className="rounded-md bg-[var(--vf-green-950)] px-2 py-0.5 text-[10px] uppercase tracking-wide text-[var(--vf-green-300)]">
+                  Incluida
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <SeatRow
+                label="Admin / dispatcher"
+                count={adminCount}
+                minIncluded={PRO_LICENSE_MIN_ADMINS}
+                extras={extraAdmins}
+                lastSynced={customer?.last_synced_admin_seats ?? null}
+              />
+              <SeatRow
+                label="Choferes"
+                count={driverCount}
+                minIncluded={PRO_LICENSE_MIN_DRIVERS}
+                extras={extraDrivers}
+                lastSynced={customer?.last_synced_driver_seats ?? null}
+              />
+            </div>
+
+            {customer?.last_seats_synced_at && (
+              <p className="mt-3 text-[11px] text-[var(--color-text-subtle)]">
+                Última sincronización con Stripe:{' '}
+                {new Date(customer.last_seats_synced_at as string).toLocaleString('es-MX')}
+              </p>
+            )}
+            <p className="mt-2 text-[11px] text-[var(--color-text-muted)]">
+              Cuando creas un seat arriba del mínimo, se cobra con proration automática. Si lo
+              desactivas, se acredita en la próxima factura.
+            </p>
+          </Card>
+        );
+      })()}
     </>
   );
 }
@@ -189,10 +222,14 @@ export default async function BillingPage({ searchParams }: Props) {
 function SeatRow({
   label,
   count,
+  minIncluded,
+  extras,
   lastSynced,
 }: {
   label: string;
   count: number;
+  minIncluded: number;
+  extras: number;
   lastSynced: number | null;
 }) {
   const drift = lastSynced !== null && lastSynced !== count;
@@ -202,6 +239,11 @@ function SeatRow({
         {label}
       </p>
       <p className="mt-0.5 text-2xl font-semibold text-[var(--color-text)]">{count}</p>
+      <p className="mt-0.5 text-[10px] text-[var(--color-text-muted)]">
+        {extras === 0
+          ? `Dentro del mínimo (${minIncluded} incluidos)`
+          : `+${extras} extra${extras === 1 ? '' : 's'} (sobre ${minIncluded} incluidos)`}
+      </p>
       {drift && (
         <p className="mt-1 text-[10px] text-[var(--color-warning-fg)]">
           ⚠ En Stripe: {lastSynced}. Se sincronizará al siguiente cambio.
