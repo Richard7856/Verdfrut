@@ -14,13 +14,21 @@ import { getStoresByIds } from '@/lib/queries/stores';
 import { getVehiclesByIds } from '@/lib/queries/vehicles';
 import { listDepots } from '@/lib/queries/depots';
 import { MultiRouteMap, type MultiRouteEntry } from './multi-route-map';
+import { BulkSelectableMultiRouteMap } from './bulk-selectable-multi-route-map';
 
 interface Props {
   routes: Route[];
   mapboxToken: string;
+  /**
+   * Si está definido, el mapa habilita el "Modo Selección" con toolbar
+   * flotante para acciones bulk (mover stops entre rutas). Necesita
+   * `dispatchId` para que las server actions sepan qué cache invalidar.
+   * Si no se pasa, el mapa renderiza en modo solo-lectura tradicional.
+   */
+  dispatchId?: string;
 }
 
-export async function MultiRouteMapServer({ routes, mapboxToken }: Props) {
+export async function MultiRouteMapServer({ routes, mapboxToken, dispatchId }: Props) {
   if (routes.length === 0) return null;
 
   // H4.1 / ADR-054: una sola query batch para todas las stops vía
@@ -75,6 +83,7 @@ export async function MultiRouteMapServer({ routes, mapboxToken }: Props) {
           const store = storesById.get(s.storeId);
           if (!store) return null;
           return {
+            stopId: s.id,
             storeCode: store.code,
             storeName: store.name,
             sequence: s.sequence,
@@ -94,5 +103,16 @@ export async function MultiRouteMapServer({ routes, mapboxToken }: Props) {
     };
   });
 
+  // Phase 2 (2026-05-15): si el caller pasa dispatchId, renderizamos el
+  // wrapper de selección bulk. Sin dispatchId, mapa solo-lectura.
+  if (dispatchId) {
+    return (
+      <BulkSelectableMultiRouteMap
+        routes={entries}
+        mapboxToken={mapboxToken}
+        dispatchId={dispatchId}
+      />
+    );
+  }
   return <MultiRouteMap routes={entries} mapboxToken={mapboxToken} />;
 }

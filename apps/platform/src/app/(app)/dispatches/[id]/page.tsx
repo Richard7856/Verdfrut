@@ -165,7 +165,11 @@ export default async function DispatchDetailPage({ params }: Props) {
 
       {routesWithStops.length > 0 && (
         <div className="mb-4">
-          <MultiRouteMapServer routes={routesWithStops} mapboxToken={mapboxToken} />
+          <MultiRouteMapServer
+            routes={routesWithStops}
+            mapboxToken={mapboxToken}
+            dispatchId={dispatch.id}
+          />
         </div>
       )}
 

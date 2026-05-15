@@ -13,7 +13,7 @@
 // Performance: cada ruta hace 1 fetch a /api/routes/[id]/polyline. Para 5-10
 // rutas/día es despreciable. Para 50+ tendríamos que cachear o bulk endpoint.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { mapboxgl, setMapboxToken } from '@tripdrive/maps';
 import { logger } from '@tripdrive/observability';
 
@@ -23,6 +23,8 @@ export interface MultiRouteEntry {
   vehicleLabel: string;
   /** Mismo orden que el optimizer asignó. */
   stops: Array<{
+    /** ID único del stop (tabla stops). Necesario para selección bulk + acciones server. */
+    stopId: string;
     storeCode: string;
     storeName: string;
     sequence: number;
@@ -47,7 +49,22 @@ interface Props {
   routes: MultiRouteEntry[];
   mapboxToken: string;
   className?: string;
+  /**
+   * Si está definida, el mapa habilita "Modo Selección" para seleccionar
+   * múltiples stops y ejecutar acciones masivas (mover entre rutas, crear
+   * ruta nueva, etc.). El callback se invoca cada vez que la selección cambia.
+   */
+  onBulkAction?: (action: BulkAction, stopIds: string[]) => Promise<void> | void;
 }
+
+/**
+ * Acciones masivas disponibles desde la toolbar flotante cuando hay
+ * ≥1 stop seleccionado.
+ */
+export type BulkAction =
+  | { type: 'move_to_route'; targetRouteId: string }
+  | { type: 'create_new_route' }
+  | { type: 'remove_from_dispatch' };
 
 // Palette para hasta ~12 rutas distintas. Si crece, se rota.
 const PALETTE = [
@@ -65,12 +82,15 @@ const PALETTE = [
   '#e11d48', // rosa fuerte
 ];
 
-export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
+export function MultiRouteMap({ routes, mapboxToken, className, onBulkAction }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
   // Refs de markers por ruta — para poder ocultar/mostrar selectivamente
   // sin recrear el mapa entero al toggle.
   const markersByRouteRef = useRef<Map<string, mapboxgl.Marker[]>>(new Map());
+  // Phase 1 selection: indexamos markers por stopId para aplicar ring de
+  // selección sin tener que regenerar el DOM completo del marker.
+  const markerByStopIdRef = useRef<Map<string, mapboxgl.Marker>>(new Map());
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   // Rutas ocultas (toggle de visibilidad por checkbox en la leyenda).
   // Polyline → setLayoutProperty('visibility', 'none'). Markers → .remove() /
@@ -81,6 +101,71 @@ export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
   // ocupando viewport. Necesitamos resize del map al cambiar para que el canvas
   // se reajuste correctamente.
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // ─── Phase 1: Selección bulk de stops ─────────────────────────────
+  // selectionMode habilitado solo si el caller proveyó onBulkAction. Sin
+  // callback no hay nada que hacer con la selección — mejor no exponerla.
+  const selectionAvailable = Boolean(onBulkAction);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedStopIds, setSelectedStopIds] = useState<Set<string>>(new Set());
+  const [busyAction, setBusyAction] = useState(false);
+
+  // Map estable stopId → routeId para acciones que necesiten saber de dónde
+  // viene cada stop seleccionado.
+  const routeIdByStopId = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of routes) {
+      for (const s of r.stops) m.set(s.stopId, r.routeId);
+    }
+    return m;
+  }, [routes]);
+
+  const toggleStopSelection = useCallback((stopId: string) => {
+    setSelectedStopIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(stopId)) next.delete(stopId);
+      else next.add(stopId);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedStopIds(new Set()), []);
+
+  const selectAllVisible = useCallback(() => {
+    setSelectedStopIds(() => {
+      const next = new Set<string>();
+      for (const r of routes) {
+        if (hiddenIds.has(r.routeId)) continue;
+        for (const s of r.stops) next.add(s.stopId);
+      }
+      return next;
+    });
+  }, [routes, hiddenIds]);
+
+  // Keyboard shortcuts globales cuando el modo selección está activo.
+  useEffect(() => {
+    if (!selectionMode) return;
+    const onKey = (e: KeyboardEvent) => {
+      // Ignorar si el user está escribiendo en un input/textarea.
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return;
+      }
+      if (e.key === 'Escape') {
+        clearSelection();
+      } else if ((e.metaKey || e.ctrlKey) && e.key === 'a') {
+        e.preventDefault();
+        selectAllVisible();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [selectionMode, clearSelection, selectAllVisible]);
+
+  // Al desactivar modo selección, limpiar lo seleccionado.
+  useEffect(() => {
+    if (!selectionMode) clearSelection();
+  }, [selectionMode, clearSelection]);
 
   useEffect(() => {
     if (mapRef.current) {
@@ -102,6 +187,13 @@ export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
     routes.forEach((r, i) => map.set(r.routeId, PALETTE[i % PALETTE.length]!));
     return map;
   }, [routes]);
+
+  // Refs "vivas" para que los listeners de marker (creados una sola vez)
+  // siempre lean el estado actual sin tener que re-crearse en cada cambio.
+  const selectionModeRef = useRef(selectionMode);
+  selectionModeRef.current = selectionMode;
+  const toggleStopSelectionRef = useRef(toggleStopSelection);
+  toggleStopSelectionRef.current = toggleStopSelection;
 
   useEffect(() => {
     if (!containerRef.current || !mapboxToken) return;
@@ -163,8 +255,19 @@ export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
               `width:24px;height:24px;background:${color};border:2px solid white;` +
               `border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,0.3);` +
               `display:flex;align-items:center;justify-content:center;` +
-              `color:white;font-weight:600;font-size:11px;font-family:ui-sans-serif;`;
+              `color:white;font-weight:600;font-size:11px;font-family:ui-sans-serif;` +
+              `cursor:pointer;transition:transform 100ms ease,box-shadow 100ms ease;`;
             el.textContent = String(s.sequence);
+            // Phase 1: data attributes para selección bulk.
+            el.dataset.stopId = s.stopId;
+            el.dataset.routeId = r.routeId;
+            // Click en modo selección → toggle. Sin modo → mapbox abre popup normal.
+            el.addEventListener('click', (ev) => {
+              if (!selectionModeRef.current) return;
+              // Prevenir que mapbox abra el popup en modo selección.
+              ev.stopPropagation();
+              toggleStopSelectionRef.current(s.stopId);
+            });
             // ADR-039: popup enriquecido — ETA + dirección + status + CTA "Ver ruta"
             const tz = 'America/Mexico_City';
             const eta = s.plannedArrivalAt
@@ -198,6 +301,7 @@ export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
               .setPopup(new mapboxgl.Popup({ offset: 14, maxWidth: '300px' }).setHTML(popupHTML))
               .addTo(map);
             routeMarkers.push(marker);
+            markerByStopIdRef.current.set(s.stopId, marker);
           }
           markersByRouteRef.current.set(r.routeId, routeMarkers);
 
@@ -246,6 +350,28 @@ export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
       markersByRouteRef.current.clear();
     };
   }, [routes, mapboxToken, colorByRoute]);
+
+  // Phase 1: aplicar visual feedback de selección a los markers.
+  // IMPORTANTE: Mapbox usa `transform` en el marker root para posicionar,
+  // así que NO podemos usar `transform: scale()` ahí — sacaría el marker
+  // de su lat/lng. Usamos solo box-shadow (ring) + opacity + z-index.
+  useEffect(() => {
+    for (const [stopId, marker] of markerByStopIdRef.current.entries()) {
+      const el = marker.getElement();
+      const isSelected = selectedStopIds.has(stopId);
+      if (isSelected) {
+        // Ring verde brillante + outline blanco interior para destacar.
+        el.style.boxShadow = '0 0 0 4px rgba(34,197,94,0.95), 0 0 0 6px rgba(255,255,255,0.6), 0 2px 6px rgba(0,0,0,0.45)';
+        el.style.zIndex = '500';
+        el.style.opacity = '1';
+      } else {
+        el.style.boxShadow = '0 1px 3px rgba(0,0,0,0.3)';
+        el.style.zIndex = '';
+        // En modo selección sin estar seleccionado: atenuar para guiar al user.
+        el.style.opacity = selectionMode ? '0.65' : '1';
+      }
+    }
+  }, [selectedStopIds, selectionMode, routes]);
 
   // Aplicar hidden state: ocultar/mostrar markers + polyline por ruta.
   useEffect(() => {
@@ -323,16 +449,79 @@ export function MultiRouteMap({ routes, mapboxToken, className }: Props) {
               : 'h-[500px] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)]'
           }
         />
-        {/* ADR-043: botón fullscreen flotante en la esquina superior derecha del mapa. */}
-        <button
-          type="button"
-          onClick={() => setIsFullscreen((v) => !v)}
-          aria-label={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
-          title={isFullscreen ? 'Salir (Esc)' : 'Pantalla completa'}
-          className="absolute right-3 top-3 z-10 grid h-9 w-9 place-items-center rounded-md border border-[var(--vf-line)] bg-[var(--vf-bg-elev)] text-base text-[var(--vf-text)] shadow-md hover:bg-[var(--vf-bg-sub)]"
-        >
-          {isFullscreen ? '✕' : '⛶'}
-        </button>
+        {/* Toolbar flotante superior derecha — fullscreen + modo selección. */}
+        <div className="absolute right-3 top-3 z-10 flex gap-2">
+          {selectionAvailable && (
+            <button
+              type="button"
+              onClick={() => setSelectionMode((v) => !v)}
+              aria-label={selectionMode ? 'Salir de modo selección' : 'Modo selección'}
+              title={selectionMode ? 'Salir del modo selección (Esc)' : 'Modo selección — elegir múltiples paradas para acciones masivas'}
+              className={`grid h-9 place-items-center rounded-md border px-3 text-xs font-medium shadow-md transition-colors ${
+                selectionMode
+                  ? 'border-emerald-700 bg-emerald-600 text-white hover:bg-emerald-700'
+                  : 'border-[var(--vf-line)] bg-[var(--vf-bg-elev)] text-[var(--vf-text)] hover:bg-[var(--vf-bg-sub)]'
+              }`}
+            >
+              {selectionMode ? '✓ Seleccionando' : '☐ Seleccionar'}
+            </button>
+          )}
+          {/* ADR-043: botón fullscreen */}
+          <button
+            type="button"
+            onClick={() => setIsFullscreen((v) => !v)}
+            aria-label={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+            title={isFullscreen ? 'Salir (Esc)' : 'Pantalla completa'}
+            className="grid h-9 w-9 place-items-center rounded-md border border-[var(--vf-line)] bg-[var(--vf-bg-elev)] text-base text-[var(--vf-text)] shadow-md hover:bg-[var(--vf-bg-sub)]"
+          >
+            {isFullscreen ? '✕' : '⛶'}
+          </button>
+        </div>
+
+        {/* Toolbar flotante inferior — aparece con stops seleccionados (Phase 1+2). */}
+        {selectionMode && selectedStopIds.size > 0 && (
+          <SelectionToolbar
+            count={selectedStopIds.size}
+            routes={routes}
+            routeIdByStopId={routeIdByStopId}
+            selectedStopIds={selectedStopIds}
+            busy={busyAction}
+            onClear={clearSelection}
+            onMove={async (targetRouteId) => {
+              if (!onBulkAction) return;
+              setBusyAction(true);
+              try {
+                await onBulkAction(
+                  { type: 'move_to_route', targetRouteId },
+                  [...selectedStopIds],
+                );
+                clearSelection();
+              } finally {
+                setBusyAction(false);
+              }
+            }}
+            onCreateNewRoute={async () => {
+              if (!onBulkAction) return;
+              setBusyAction(true);
+              try {
+                await onBulkAction({ type: 'create_new_route' }, [...selectedStopIds]);
+                clearSelection();
+              } finally {
+                setBusyAction(false);
+              }
+            }}
+            onRemove={async () => {
+              if (!onBulkAction) return;
+              setBusyAction(true);
+              try {
+                await onBulkAction({ type: 'remove_from_dispatch' }, [...selectedStopIds]);
+                clearSelection();
+              } finally {
+                setBusyAction(false);
+              }
+            }}
+          />
+        )}
       </div>
 
       {/* Leyenda */}
@@ -426,4 +615,181 @@ function buildFallbackLine(r: MultiRouteEntry): GeoJSON.LineString {
   for (const s of sorted) coords.push([s.lng, s.lat]);
   if (r.depot) coords.push([r.depot.lng, r.depot.lat]);
   return { type: 'LineString', coordinates: coords };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// SelectionToolbar — barra flotante inferior cuando hay stops seleccionados
+// ─────────────────────────────────────────────────────────────────────
+
+interface SelectionToolbarProps {
+  count: number;
+  routes: MultiRouteEntry[];
+  routeIdByStopId: Map<string, string>;
+  selectedStopIds: Set<string>;
+  busy: boolean;
+  onClear: () => void;
+  onMove: (targetRouteId: string) => Promise<void>;
+  onCreateNewRoute: () => Promise<void>;
+  onRemove: () => Promise<void>;
+}
+
+function SelectionToolbar({
+  count,
+  routes,
+  routeIdByStopId,
+  selectedStopIds,
+  busy,
+  onClear,
+  onMove,
+  onCreateNewRoute,
+  onRemove,
+}: SelectionToolbarProps) {
+  const [moveDropdownOpen, setMoveDropdownOpen] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+
+  // Rutas de las cuales VIENEN los stops seleccionados. Util para no mover
+  // a la misma ruta (no-op) y para mostrar breakdown "de N rutas → 1".
+  const sourceRouteIds = useMemo(() => {
+    const s = new Set<string>();
+    for (const stopId of selectedStopIds) {
+      const rid = routeIdByStopId.get(stopId);
+      if (rid) s.add(rid);
+    }
+    return s;
+  }, [selectedStopIds, routeIdByStopId]);
+
+  // Cerrar dropdowns al click fuera (best-effort).
+  useEffect(() => {
+    if (!moveDropdownOpen) return;
+    const onClick = () => setMoveDropdownOpen(false);
+    // setTimeout para no capturar el click que abrió el dropdown.
+    const t = setTimeout(() => document.addEventListener('click', onClick), 0);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener('click', onClick);
+    };
+  }, [moveDropdownOpen]);
+
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-4">
+      <div
+        className="pointer-events-auto flex max-w-full items-center gap-2 rounded-xl border border-[var(--vf-line)] bg-[var(--vf-bg-elev)] px-3 py-2 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2 pr-2">
+          <span className="grid h-7 w-7 place-items-center rounded-full bg-emerald-600 text-xs font-bold text-white">
+            {count}
+          </span>
+          <span className="text-xs text-[var(--vf-text)]">
+            {count === 1 ? 'parada' : 'paradas'} seleccionada{count === 1 ? '' : 's'}
+            {sourceRouteIds.size > 1 && (
+              <span className="ml-1 text-[var(--vf-text-mute)]">
+                · de {sourceRouteIds.size} rutas
+              </span>
+            )}
+          </span>
+        </div>
+
+        <div className="mx-1 h-6 w-px bg-[var(--vf-line)]" />
+
+        {/* Mover a ruta existente */}
+        <div className="relative">
+          <button
+            type="button"
+            disabled={busy || routes.length === 0}
+            onClick={(e) => {
+              e.stopPropagation();
+              setMoveDropdownOpen((v) => !v);
+            }}
+            className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            ➡ Mover a ruta…
+          </button>
+          {moveDropdownOpen && (
+            <div className="absolute bottom-full left-0 mb-2 max-h-72 w-64 overflow-y-auto rounded-lg border border-[var(--vf-line)] bg-[var(--vf-bg-elev)] py-1 shadow-2xl">
+              {routes.map((r) => {
+                const allFromHere = sourceRouteIds.has(r.routeId) && sourceRouteIds.size === 1;
+                return (
+                  <button
+                    key={r.routeId}
+                    type="button"
+                    disabled={busy || allFromHere}
+                    onClick={() => {
+                      setMoveDropdownOpen(false);
+                      void onMove(r.routeId);
+                    }}
+                    className="block w-full px-3 py-2 text-left text-xs hover:bg-[var(--vf-bg-sub)] disabled:cursor-not-allowed disabled:opacity-40"
+                    title={allFromHere ? 'Todas vienen de esta ruta — no hay nada que mover' : undefined}
+                  >
+                    <div className="font-medium text-[var(--vf-text)]">{r.routeName}</div>
+                    <div className="text-[10px] text-[var(--vf-text-mute)]">
+                      {r.vehicleLabel} · {r.stops.length} paradas
+                      {allFromHere && ' (origen)'}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Crear ruta nueva */}
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void onCreateNewRoute()}
+          className="rounded-md border border-[var(--vf-line)] bg-[var(--vf-bg)] px-3 py-1.5 text-xs font-medium text-[var(--vf-text)] hover:bg-[var(--vf-bg-sub)] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          ＋ Nueva ruta
+        </button>
+
+        {/* Quitar del dispatch */}
+        {confirmRemove ? (
+          <div className="flex items-center gap-1 rounded-md border border-red-700 bg-red-950/40 px-2 py-1">
+            <span className="text-[10px] text-red-300">¿Quitar {count}?</span>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setConfirmRemove(false);
+                void onRemove();
+              }}
+              className="rounded bg-red-600 px-2 py-0.5 text-[10px] font-medium text-white hover:bg-red-700"
+            >
+              Sí
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmRemove(false)}
+              className="rounded px-2 py-0.5 text-[10px] text-[var(--vf-text-mute)] hover:text-[var(--vf-text)]"
+            >
+              No
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setConfirmRemove(true)}
+            className="rounded-md border border-[var(--vf-line)] bg-[var(--vf-bg)] px-2 py-1.5 text-xs font-medium text-red-400 hover:bg-red-950/40 disabled:cursor-not-allowed disabled:opacity-50"
+            title="Quitar del dispatch"
+          >
+            🗑
+          </button>
+        )}
+
+        <div className="mx-1 h-6 w-px bg-[var(--vf-line)]" />
+
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onClear}
+          className="rounded-md px-2 py-1.5 text-xs text-[var(--vf-text-mute)] hover:bg-[var(--vf-bg-sub)] hover:text-[var(--vf-text)]"
+          title="Limpiar selección (Esc)"
+        >
+          ✕
+        </button>
+      </div>
+    </div>
+  );
 }

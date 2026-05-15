@@ -700,3 +700,101 @@ export async function removeVehicleFromDispatchAction(
     return { ok: false, error: err instanceof Error ? err.message : 'Error desconocido' };
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Bulk operations en stops (Phase 2 del mapa con selección masiva)
+// ─────────────────────────────────────────────────────────────────────
+
+export interface BulkMoveStopsResult {
+  moved: number;
+  failed: Array<{ stopId: string; reason: string }>;
+  /**
+   * IDs de rutas que se vieron afectadas (origen y destino). Útil para que
+   * el cliente sugiera "optimizar la ruta destino con VROOM" si quedó con
+   * stops apendizados al final sin secuencia óptima.
+   */
+  affectedRouteIds: string[];
+}
+
+/**
+ * Mueve N stops a una ruta destino en una sola operación.
+ *
+ * Implementación: itera sobre `moveStopToAnotherRoute(stopId, targetRouteId)`
+ * que ya valida estado, calcula sequence, re-numera origen, y recalcula
+ * métricas. La penalty de N recálculos es ~50ms × N — aceptable para
+ * batches típicos (≤30 stops).
+ *
+ * Si falla algún stop individual (ej. ya está completed), lo agregamos a
+ * `failed` y seguimos con los demás. Operación parcial es OK — el user
+ * ve el reporte y decide.
+ */
+export async function bulkMoveStopsAction(
+  stopIds: string[],
+  targetRouteId: string,
+  dispatchId: string,
+): Promise<ActionResult & { result?: BulkMoveStopsResult }> {
+  try {
+    await requireRole('admin', 'dispatcher');
+    if (!Array.isArray(stopIds) || stopIds.length === 0) {
+      return { ok: false, error: 'No se recibieron stops para mover.' };
+    }
+    if (stopIds.length > 200) {
+      return { ok: false, error: 'Máximo 200 stops por operación bulk.' };
+    }
+    requireUuid('targetRouteId', targetRouteId);
+    requireUuid('dispatchId', dispatchId);
+
+    let moved = 0;
+    const failed: BulkMoveStopsResult['failed'] = [];
+    const affected = new Set<string>([targetRouteId]);
+
+    for (const stopId of stopIds) {
+      try {
+        requireUuid('stopId', stopId);
+        // Capturar la ruta origen antes del move para audit.
+        const supabase = await createServerClient();
+        const { data: stopRow } = await supabase
+          .from('stops')
+          .select('route_id')
+          .eq('id', stopId)
+          .maybeSingle();
+        const sourceRouteId = stopRow?.route_id as string | undefined;
+
+        await moveStopToAnotherRoute(stopId, targetRouteId);
+        moved++;
+        if (sourceRouteId) affected.add(sourceRouteId);
+      } catch (err) {
+        failed.push({
+          stopId,
+          reason: err instanceof Error ? err.message : 'Error desconocido',
+        });
+      }
+    }
+
+    revalidatePath(`/dispatches/${dispatchId}`);
+    revalidatePath('/routes');
+
+    logger.info('dispatches.bulk_move_stops', {
+      dispatch_id: dispatchId,
+      target_route_id: targetRouteId,
+      requested: stopIds.length,
+      moved,
+      failed: failed.length,
+    });
+
+    return {
+      ok: true,
+      result: {
+        moved,
+        failed,
+        affectedRouteIds: [...affected],
+      },
+    };
+  } catch (err) {
+    if (err instanceof ValidationError) return { ok: false, error: err.message };
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Error desconocido',
+    };
+  }
+}
