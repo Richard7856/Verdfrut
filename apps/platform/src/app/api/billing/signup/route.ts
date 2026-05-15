@@ -144,9 +144,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     });
     stripeCustomerId = created.id;
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Error al crear customer en Stripe';
-    logger.error('stripe.signup.create_customer_failed', { email: adminEmail, err: msg });
-    return NextResponse.json({ error: msg }, { status: 502 });
+    // El mensaje raw de Stripe puede contener fragmentos de la API key
+    // (ej. "Invalid API Key provided: sk_live_***...m61"). Lo loggeamos
+    // server-side pero NO lo retornamos al cliente — el usuario ve un
+    // mensaje genérico para evitar leaks por UI accidental.
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    logger.error('stripe.signup.create_customer_failed', { email: adminEmail, err: rawMsg });
+    return NextResponse.json(
+      {
+        error:
+          'No pudimos iniciar el pago. Inténtalo de nuevo en unos minutos o contáctanos a soporte@tripdrive.xyz.',
+      },
+      { status: 502 },
+    );
   }
 
   // Crear Checkout Session. Signup nuevo arranca con la licencia base sola
@@ -185,8 +195,14 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({ url: session.url });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Error al crear checkout';
-    logger.error('stripe.signup.create_session_failed', { email: adminEmail, err: msg });
-    return NextResponse.json({ error: msg }, { status: 502 });
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    logger.error('stripe.signup.create_session_failed', { email: adminEmail, err: rawMsg });
+    return NextResponse.json(
+      {
+        error:
+          'No pudimos iniciar el pago. Inténtalo de nuevo en unos minutos o contáctanos a soporte@tripdrive.xyz.',
+      },
+      { status: 502 },
+    );
   }
 }

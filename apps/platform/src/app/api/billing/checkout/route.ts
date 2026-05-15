@@ -110,8 +110,12 @@ export async function POST(): Promise<NextResponse> {
       });
       return NextResponse.json({ url: portal.url, mode: 'portal' });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al crear sesión del portal';
-      return NextResponse.json({ error: msg }, { status: 500 });
+      const rawMsg = err instanceof Error ? err.message : String(err);
+      logger.error('stripe.checkout.portal_failed', { customer_id: customer.id, err: rawMsg });
+      return NextResponse.json(
+        { error: 'No pudimos abrir el portal de Stripe. Inténtalo de nuevo o contáctanos.' },
+        { status: 502 },
+      );
     }
   }
 
@@ -132,9 +136,12 @@ export async function POST(): Promise<NextResponse> {
         .update({ stripe_customer_id: stripeCustomerId })
         .eq('id', customer.id);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Error al crear customer en Stripe';
-      logger.error('stripe.checkout.create_customer_failed', { customer_id: customer.id, err: msg });
-      return NextResponse.json({ error: msg }, { status: 500 });
+      const rawMsg = err instanceof Error ? err.message : String(err);
+      logger.error('stripe.checkout.create_customer_failed', { customer_id: customer.id, err: rawMsg });
+      return NextResponse.json(
+        { error: 'No pudimos iniciar el pago. Inténtalo de nuevo o contáctanos a soporte@tripdrive.xyz.' },
+        { status: 502 },
+      );
     }
   }
 
@@ -183,8 +190,11 @@ export async function POST(): Promise<NextResponse> {
     });
     return NextResponse.json({ url: session.url, mode: 'checkout' });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Error al crear checkout';
-    logger.error('stripe.checkout.create_session_failed', { customer_id: customer.id, err: msg });
-    return NextResponse.json({ error: msg }, { status: 500 });
+    const rawMsg = err instanceof Error ? err.message : String(err);
+    logger.error('stripe.checkout.create_session_failed', { customer_id: customer.id, err: rawMsg });
+    return NextResponse.json(
+      { error: 'No pudimos iniciar el checkout. Inténtalo de nuevo o contáctanos.' },
+      { status: 502 },
+    );
   }
 }
