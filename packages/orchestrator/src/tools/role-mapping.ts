@@ -56,12 +56,16 @@ export const TOOLS_BY_ROLE: Record<AgentRole, readonly string[]> = {
     // xlsx (ingestion entry-point — el orchestrator lo llama para extraer
     // direcciones del adjunto antes de delegar a geo)
     'parse_xlsx_attachment',
-    // optimize (legacy — en R4 lo migramos a propose_route_plan del router)
+    // optimize: legacy (re-rutea un tiro existente) + propose (3 alternativas con costo MXN).
+    // ADR-100 / OE-2: propose_route_plan vive en orchestrator desde 2026-05-15 noche
+    // (decisión pre-demo: sin handoff a router agent, un solo modelo conversa con user).
     'optimize_dispatch',
-    // delegación a sub-agentes
+    'propose_route_plan',
+    // delegación a sub-agentes batch (R2 / ADR-099)
     'delegate_to_geo',
-    // handoff conversacional al router agent (R3)
-    'enter_router_mode',
+    // NOTA: enter_router_mode REMOVIDO temporalmente (pre-demo 2026-05-15).
+    // La handoff conversacional confundía al modelo en multi-turn complejo.
+    // Re-habilitar cuando OE-3 traiga UI badge + flow validado.
   ],
 
   // GEO (R2 activo): tool batch worker read-only. Recibe input estructurado

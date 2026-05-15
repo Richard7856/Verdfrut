@@ -609,12 +609,19 @@ export function OrchestratorChat() {
             </button>
           )}
         </span>
-        <span className="text-right">
-          Esta sesión: {usage.in.toLocaleString()} in · {usage.out.toLocaleString()} out
-          {usage.cacheRead > 0 && ` · ${usage.cacheRead.toLocaleString()} cache hits`}
-          {' · '}
-          <span className="font-semibold tabular-nums">{fmtMxn.format(costMxn)}</span>
-        </span>
+        {/*
+          Indicador de uso/costo. Oculto por default para demos con cliente —
+          mostrar precio del AI confunde el mensaje del producto. Activar via
+          env: NEXT_PUBLIC_SHOW_AI_USAGE=1 en .env.local.
+        */}
+        {process.env.NEXT_PUBLIC_SHOW_AI_USAGE === '1' && (
+          <span className="text-right">
+            Esta sesión: {usage.in.toLocaleString()} in · {usage.out.toLocaleString()} out
+            {usage.cacheRead > 0 && ` · ${usage.cacheRead.toLocaleString()} cache hits`}
+            {' · '}
+            <span className="font-semibold tabular-nums">{fmtMxn.format(costMxn)}</span>
+          </span>
+        )}
       </div>
     </div>
     </div>

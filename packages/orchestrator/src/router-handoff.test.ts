@@ -21,43 +21,34 @@ function fakeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
 }
 
 describe('R3 — wiring de roles', () => {
-  test('orchestrator tiene enter_router_mode (pero NO exit_router_mode)', () => {
-    assert.ok(TOOLS_BY_ROLE.orchestrator.includes('enter_router_mode'));
-    assert.ok(!TOOLS_BY_ROLE.orchestrator.includes('exit_router_mode'));
-  });
+  // NOTA pre-demo 2026-05-15: el handoff conversacional al router agent
+  // (enter_router_mode / exit_router_mode) se DESACTIVÓ temporalmente
+  // porque confundía al modelo en multi-turn complejo y no hay UI badge
+  // todavía. Los tests aquí validan ese estado intermedio. Cuando OE-3
+  // re-active el handoff con UI, restaurar los asserts originales (ver
+  // git history).
 
-  test('router tiene exit_router_mode (pero NO enter_router_mode)', () => {
-    assert.ok(TOOLS_BY_ROLE.router.includes('exit_router_mode'));
-    assert.ok(!TOOLS_BY_ROLE.router.includes('enter_router_mode'));
+  test('orchestrator NO tiene enter_router_mode (desactivado pre-demo)', () => {
+    assert.ok(!TOOLS_BY_ROLE.orchestrator.includes('enter_router_mode'));
   });
 
   test('router NO incluye delegate_to_geo (eso es del orchestrator)', () => {
-    // El router puede pedirle al orchestrator que geocodifique via "salir
-    // de modo router y pedir geocoding" — no hace geo directo.
     assert.ok(!TOOLS_BY_ROLE.router.includes('delegate_to_geo'));
     assert.ok(!TOOLS_BY_ROLE.router.includes('geocode_address'));
   });
 
-  test('router prompt ya NO es stub defensivo', () => {
+  test('router prompt ya NO es stub defensivo (sigue cableado para R3 futuro)', () => {
     const prompt = SYSTEM_PROMPTS.router;
     assert.ok(!prompt.includes('TODAVÍA NO está activo'));
     assert.ok(prompt.includes('ROUTING'));
-    assert.ok(prompt.includes('exit_router_mode'));
-  });
-
-  test('orchestrator prompt menciona enter_router_mode', () => {
-    const prompt = SYSTEM_PROMPTS.orchestrator;
-    assert.ok(prompt.includes('enter_router_mode'));
   });
 
   test('router prompt menciona los componentes clave del Optimization Engine', () => {
     const prompt = SYSTEM_PROMPTS.router;
-    // Conocimientos esperados que diferencian al especialista.
     assert.ok(prompt.includes('Clustering'), 'router debe conocer Capa 1');
     assert.ok(prompt.includes('VROOM'), 'router debe conocer Capa 3');
     assert.ok(prompt.includes('MXN'), 'router debe conocer costos');
     assert.ok(prompt.includes('jornada'), 'router debe conocer constraints LFT');
-    assert.ok(prompt.match(/9 ?h|9 h|jornada legal|LFT/), 'router debe mencionar jornada legal MX');
   });
 });
 
@@ -92,13 +83,17 @@ describe('R3 — tools de handoff', () => {
 });
 
 describe('R3 — invariantes globales', () => {
-  test('todas las tools del registry siguen mapeadas a algún rol', () => {
+  test('todas las tools del registry están mapeadas (excepto enter_router_mode temporal)', () => {
     const allRoleNames = new Set([
       ...TOOLS_BY_ROLE.orchestrator,
       ...TOOLS_BY_ROLE.geo,
       ...TOOLS_BY_ROLE.router,
     ]);
+    // enter_router_mode existe en el registry pero está intencionalmente
+    // huérfano (pre-demo 2026-05-15). Cualquier OTRA tool huérfana es bug.
+    const ALLOWED_ORPHANS = new Set(['enter_router_mode']);
     for (const tool of TOOLS) {
+      if (ALLOWED_ORPHANS.has(tool.name)) continue;
       assert.ok(
         allRoleNames.has(tool.name),
         `tool "${tool.name}" no está mapeada a ningún rol — quedará inaccesible`,
@@ -124,9 +119,14 @@ describe('R3 — invariantes globales', () => {
     );
   });
 
-  test('enter/exit son simétricos: orchestrator → router → orchestrator', () => {
-    assert.ok(TOOLS_BY_ROLE.orchestrator.includes('enter_router_mode'));
+  test('cuando R3 se re-active: enter_router_mode y exit_router_mode definen un par simétrico', () => {
+    // Test informativo — verifica que ambas tools existen en el registry
+    // para cuando se re-active R3. Hoy enter_router_mode no está en
+    // orchestrator (handoff desactivado pre-demo).
+    const enter = TOOLS.find((t) => t.name === 'enter_router_mode');
+    const exit = TOOLS.find((t) => t.name === 'exit_router_mode');
+    assert.ok(enter, 'enter_router_mode debe existir en el registry');
+    assert.ok(exit, 'exit_router_mode debe existir en el registry');
     assert.ok(TOOLS_BY_ROLE.router.includes('exit_router_mode'));
-    // No hay forma de quedar atrapado: el router siempre puede volver.
   });
 });

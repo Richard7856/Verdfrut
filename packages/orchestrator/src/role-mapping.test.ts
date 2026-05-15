@@ -75,13 +75,17 @@ describe('TOOLS_BY_ROLE — invariantes', () => {
     assert.deepEqual([...getRoleToolNames('geo')].sort(), [...TOOLS_BY_ROLE.geo].sort());
   });
 
-  test('cada tool del registry está al menos en un rol (no huérfanos)', () => {
+  test('cada tool del registry está al menos en un rol (excepto huérfanos permitidos)', () => {
     const allRoleNames = new Set([
       ...TOOLS_BY_ROLE.orchestrator,
       ...TOOLS_BY_ROLE.geo,
       ...TOOLS_BY_ROLE.router,
     ]);
+    // enter_router_mode está intencionalmente huérfano pre-demo 2026-05-15
+    // (handoff conversacional desactivado, ver router-handoff.test.ts).
+    const ALLOWED_ORPHANS = new Set(['enter_router_mode']);
     for (const tool of TOOLS) {
+      if (ALLOWED_ORPHANS.has(tool.name)) continue;
       assert.ok(
         allRoleNames.has(tool.name),
         `tool "${tool.name}" está en el registry pero NO en ningún rol → inaccesible`,
