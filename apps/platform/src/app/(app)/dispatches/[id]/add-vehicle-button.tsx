@@ -1,14 +1,18 @@
 'use client';
 
-// ADR-048: agregar una camioneta al tiro y re-rutear todo. El dispatcher elige
-// vehículo + chofer; el optimizer redistribuye las paradas existentes entre
-// la flota nueva. Si alguna ruta del tiro está PUBLISHED+ se aborta server-side.
+// Agregar una camioneta al tiro como ruta VACÍA — sin tocar las paradas
+// existentes. El dispatcher mueve tiendas a la nueva ruta a mano desde el mapa
+// (selección bulk + "Mover a → camioneta") o usa "⚡ Optimizar tiro → Mover
+// entre camionetas" si quiere que VROOM rebalance todo.
+//
+// Antes (ADR-048): este botón disparaba auto-redistribute con VROOM. Se quitó
+// porque a) sobrescribía el trabajo manual del dispatcher, b) en tiros multi-
+// zona dejaba paradas sin asignar.
 
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button, Modal, Select, toast } from '@tripdrive/ui';
-import { addVehicleToDispatchAction } from '../actions';
-import { persistRestructureSnapshot } from './restructure-snapshot-banner';
+import { addEmptyRouteToDispatchAction } from '../actions';
 
 interface VehicleOption {
   id: string;
@@ -29,9 +33,8 @@ interface Props {
   /** Choferes activos en la zona del tiro. */
   availableDrivers: DriverOption[];
   /**
-   * H3.5: si alguna ruta del tiro tuvo reorder manual o stops agregados/borrados
-   * después del optimizer (version > 1), avisar al dispatcher porque
-   * redistribuir va a recalcular desde cero, perdiendo el orden manual.
+   * @deprecated Ya no se usa — agregar camioneta no recalcula nada.
+   * Se mantiene en la API para no romper a quien la pase desde el server.
    */
   hasManualReorders?: boolean;
 }
@@ -40,7 +43,6 @@ export function AddVehicleButton({
   dispatchId,
   availableVehicles,
   availableDrivers,
-  hasManualReorders = false,
 }: Props) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -64,21 +66,16 @@ export function AddVehicleButton({
       return;
     }
     startTransition(async () => {
-      const res = await addVehicleToDispatchAction(
+      const res = await addEmptyRouteToDispatchAction(
         dispatchId,
         vehicleId,
         driverId === '' ? null : driverId,
       );
       if (res.ok) {
-        // H3.4: guardar snapshot pre/post para que el banner muestre el delta.
-        if (res.before && res.after) {
-          persistRestructureSnapshot(dispatchId, {
-            before: res.before,
-            after: res.after,
-            unassignedStoreIds: res.unassignedStoreIds ?? [],
-          });
-        }
-        toast.success('Camioneta agregada — paradas re-distribuidas entre todas las rutas');
+        toast.success(
+          'Camioneta agregada',
+          'Ruta vacía creada. Mueve paradas a ella desde el mapa o usa "⚡ Optimizar tiro".',
+        );
         close();
         router.refresh();
       } else {
@@ -98,7 +95,7 @@ export function AddVehicleButton({
         title={
           availableVehicles.length === 0
             ? 'No hay más camiones disponibles en esta zona'
-            : undefined
+            : 'Agrega una camioneta vacía — tú decides qué paradas le tocan'
         }
       >
         + Agregar camioneta
@@ -107,14 +104,14 @@ export function AddVehicleButton({
         open={open}
         onClose={close}
         title="Agregar camioneta al tiro"
-        description="El optimizador volverá a repartir todas las paradas del tiro entre las camionetas resultantes."
+        description="Se crea como ruta vacía. Mueve paradas con la selección bulk del mapa, o re-balancea con ⚡ Optimizar tiro."
         footer={
           <>
             <Button variant="ghost" onClick={close} disabled={pending}>
               Cancelar
             </Button>
             <Button variant="primary" onClick={submit} isLoading={pending}>
-              Agregar y re-rutear
+              Agregar camioneta
             </Button>
           </>
         }
@@ -154,24 +151,9 @@ export function AddVehicleButton({
               ))}
             </Select>
           </div>
-          {hasManualReorders && (
-            <div
-              className="rounded border px-2 py-1.5 text-[11px]"
-              style={{
-                borderColor: 'var(--color-warning-border, #fbbf24)',
-                background: 'var(--color-warning-bg, #fef3c7)',
-                color: 'var(--color-warning-fg, #92400e)',
-              }}
-            >
-              ⚠ Alguna ruta del tiro tiene cambios manuales (reorden, agregar o
-              borrar paradas). Redistribuir va a recalcular el orden desde cero —
-              esos ajustes se pierden.
-            </div>
-          )}
           <p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
-            Solo se re-distribuyen tiros con todas sus rutas en pre-publicación
-            (DRAFT/OPTIMIZED/APPROVED). Si alguna ruta ya está publicada o en
-            curso, esta acción aborta y debes hacerlo manualmente.
+            La camioneta se agrega vacía. Ninguna parada existente se mueve ni
+            se recalcula automáticamente.
           </p>
         </div>
       </Modal>

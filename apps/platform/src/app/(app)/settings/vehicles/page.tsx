@@ -66,7 +66,7 @@ export default async function VehiclesPage() {
     },
     {
       key: 'alias',
-      header: 'Alias',
+      header: 'Color',
       cell: (v) => v.alias ?? <span className="text-[var(--color-text-subtle)]">—</span>,
     },
     {

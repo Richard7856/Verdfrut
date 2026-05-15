@@ -36,6 +36,7 @@ import {
   deleteStopFromRouteAction,
   reoptimizeLiveAction,
   recalculateRouteEtasAction,
+  reoptimizeRouteAction,
 } from '../../routes/actions';
 import { AddStopButton } from '../../routes/[id]/add-stop-button';
 import { RemoveVehicleButton } from './remove-vehicle-button';
@@ -292,6 +293,39 @@ export function RouteStopsCard({
     });
   }
 
+  // Optimización pre-publicación de UNA ruta (DRAFT/OPTIMIZED). Reordena las
+  // tiendas de esta ruta sin tocar el resto del tiro. Botón hermano del
+  // "Optimizar tiro completo" — distinto de reoptimizeLive que es post-publish
+  // con tráfico real.
+  function handleReoptimizeRoute() {
+    if (
+      !confirm(
+        `¿Re-optimizar la ruta "${route.name}"?\n\n` +
+          `Las paradas se reordenarán según VROOM. No se moverán tiendas a otras camionetas.`,
+      )
+    ) {
+      return;
+    }
+    setReoptPending(true);
+    startTransition(async () => {
+      const res = await reoptimizeRouteAction(route.id);
+      setReoptPending(false);
+      if (res.ok) {
+        if (res.unassignedStoreIds && res.unassignedStoreIds.length > 0) {
+          toast.warning(
+            'Re-optimizada con paradas sin asignar',
+            `${res.unassignedStoreIds.length} no cupieron en la capacidad del camión.`,
+          );
+        } else {
+          toast.success('Ruta re-optimizada');
+        }
+        router.refresh();
+      } else {
+        toast.error('No se pudo re-optimizar', res.error);
+      }
+    });
+  }
+
   // Bug-#L4 mitigation: re-calcular ETAs sin tocar el orden. Útil cuando admin
   // reordenó post-publish y las ETAs originales quedaron obsoletas. NO llama
   // optimizer — solo haversine sobre el orden actual. Barato, instantáneo.
@@ -350,6 +384,20 @@ export function RouteStopsCard({
         </div>
         <div className="flex flex-col items-end gap-1">
           <Badge tone={status.tone}>{status.text}</Badge>
+          {/* Optimizar/re-optimizar UNA ruta — solo DRAFT/OPTIMIZED y con paradas. */}
+          {(route.status === 'DRAFT' || route.status === 'OPTIMIZED') && items.length > 0 && (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={handleReoptimizeRoute}
+              isLoading={reoptPending}
+              disabled={pending || reoptPending}
+              title="Reordena las paradas de esta camioneta sin mover tiendas a otra."
+            >
+              {route.status === 'DRAFT' ? 'Optimizar' : 'Re-optimizar'}
+            </Button>
+          )}
           {/* ADR-048: quitar camioneta — solo en pre-publicación. */}
           {EDITABLE_STATUSES.has(route.status) && (
             <RemoveVehicleButton

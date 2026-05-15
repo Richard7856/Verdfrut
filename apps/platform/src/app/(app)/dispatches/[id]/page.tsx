@@ -23,6 +23,7 @@ import { RouteStopsCard } from './route-stops-card';
 import { ShareDispatchButton } from './share-dispatch-button';
 import { AddVehicleButton } from './add-vehicle-button';
 import { RestructureSnapshotBanner } from './restructure-snapshot-banner';
+import { OptimizeDispatchButton } from './optimize-dispatch-button';
 import type { ChatStatus, DispatchStatus, Store } from '@tripdrive/types';
 
 export const dynamic = 'force-dynamic';
@@ -89,7 +90,7 @@ export default async function DispatchDetailPage({ params }: Props) {
     .filter((v) => v.isActive && v.zoneId === dispatch.zoneId && !usedVehicleIds.has(v.id))
     .map((v) => ({
       id: v.id,
-      label: `${v.plate}${v.alias ? ` · ${v.alias}` : ''}`,
+      label: v.alias ? `${v.alias} (${v.plate})` : v.plate,
       zoneId: v.zoneId,
     }));
 
@@ -121,6 +122,16 @@ export default async function DispatchDetailPage({ params }: Props) {
   const hasManualReorders = routes.some(
     (r) => r.status !== 'CANCELLED' && r.version > 1,
   );
+
+  // Para el botón "Optimizar tiro" — habilitado si hay al menos una ruta
+  // optimizable con paradas. Bloqueado si alguna ruta ya está publicada
+  // (post-publish requiere el flujo de re-optimización en vivo por ruta).
+  const POST_PUBLISH_STATUSES = new Set(['PUBLISHED', 'IN_PROGRESS', 'INTERRUPTED', 'COMPLETED']);
+  const hasPostPublishRoutes = routes.some((r) => POST_PUBLISH_STATUSES.has(r.status));
+  const canOptimizeDispatch = routes.some((r, idx) => {
+    if (r.status !== 'DRAFT' && r.status !== 'OPTIMIZED') return false;
+    return (stopsPerRoute[idx]?.length ?? 0) > 0;
+  });
 
   // Choferes activos en la zona para el selector.
   const profilesByUserId = new Map(zoneUsers.map((p) => [p.id, p]));
@@ -179,6 +190,13 @@ export default async function DispatchDetailPage({ params }: Props) {
             Rutas del tiro
           </h2>
           <div className="flex items-center gap-2">
+            {/* Optimizar tiro completo (modo across o within). */}
+            <OptimizeDispatchButton
+              dispatchId={dispatch.id}
+              canOptimize={canOptimizeDispatch}
+              hasPostPublishRoutes={hasPostPublishRoutes}
+              hasManualReorders={hasManualReorders}
+            />
             {/* ADR-048: agregar camioneta = re-rutea todo el tiro automáticamente. */}
             <AddVehicleButton
               dispatchId={dispatch.id}

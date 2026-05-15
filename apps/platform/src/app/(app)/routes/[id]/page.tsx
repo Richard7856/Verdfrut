@@ -270,7 +270,7 @@ export default async function RouteDetailPage({ params }: PageProps) {
               }))}
               availableVehicles={availableVehiclesForTransfer.map((v) => ({
                 id: v.id,
-                label: `${v.plate}${v.alias ? ` · ${v.alias}` : ''}`,
+                label: v.alias ? `${v.alias} (${v.plate})` : v.plate,
               }))}
               hasDispatch={route.dispatchId !== null}
             />

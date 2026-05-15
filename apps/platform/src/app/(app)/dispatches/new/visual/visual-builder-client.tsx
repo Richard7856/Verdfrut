@@ -972,7 +972,7 @@ function RoutesTab({
   }, [showAdd, pickVehicle, availableVehicles]);
 
   const vehicleLabel = (v: VehicleEntry) =>
-    `${v.plate}${v.alias ? ` · ${v.alias}` : ''}`;
+    v.alias ? `${v.alias} (${v.plate})` : v.plate;
 
   return (
     <div className="space-y-2">

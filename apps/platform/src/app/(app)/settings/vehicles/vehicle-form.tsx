@@ -317,7 +317,7 @@ export function VehicleForm({
               ))}
             </Select>
           </Field>
-          <Field label="Alias" htmlFor="alias" hint="Ej: Tortón rojo, Camión 5">
+          <Field label="Color" htmlFor="alias" hint="Ej: Roja, Azul, Verde — los choferes la identifican por color">
             <Input
               id="alias"
               name="alias"

@@ -12,7 +12,7 @@ import { cancelRoute } from '@/lib/queries/routes';
 import { listRoutesByDispatch } from '@/lib/queries/dispatches';
 import { listStopsForRoute } from '@/lib/queries/stops';
 import { computeOptimizationPlan } from '@/lib/optimizer-pipeline';
-import { type CreateAndOptimizeResult } from '../routes/actions';
+import { type CreateAndOptimizeResult, reoptimizeRouteAction } from '../routes/actions';
 import {
   runAction,
   requireUuid,
@@ -585,8 +585,101 @@ async function restructureDispatchInternal(
 }
 
 /**
+ * Agrega una camioneta como ruta VACÍA al tiro — sin re-optimizar.
+ *
+ * El dispatcher prefiere agregar la camioneta vacía y mover paradas a mano
+ * desde el mapa (selección bulk + "Mover a → camioneta nueva"). Si quiere que
+ * VROOM rebalance, usa el botón "⚡ Optimizar tiro → Mover entre camionetas".
+ *
+ * Antes (ADR-048): "agregar camioneta" disparaba un re-rutee automático que
+ * borraba todas las paradas y las redistribuía con VROOM. Esto a) sobrescribía
+ * el trabajo manual del dispatcher, b) en algunos tiros multi-zona dejaba 10+
+ * paradas sin asignar porque VROOM no podía con la flota dada. El user pidió
+ * separar las dos operaciones: agregar ≠ optimizar.
+ */
+export async function addEmptyRouteToDispatchAction(
+  dispatchId: string,
+  vehicleId: string,
+  driverId: string | null,
+): Promise<ActionResult & { routeId?: string }> {
+  const profile = await requireRole('admin', 'dispatcher');
+  try {
+    const id = requireUuid('dispatchId', dispatchId);
+    requireUuid('vehicleId', vehicleId);
+    if (driverId) requireUuid('driverId', driverId);
+
+    const supabase = await createServerClient();
+    const { data: dispatch, error: dErr } = await supabase
+      .from('dispatches')
+      .select('id, name, date, zone_id')
+      .eq('id', id)
+      .maybeSingle();
+    if (dErr || !dispatch) throw new ValidationError('dispatchId', 'Tiro no encontrado.');
+
+    // Validar que el vehículo no esté ya en una ruta viva del tiro (uniqueness).
+    const liveRoutes = (await listRoutesByDispatch(id)).filter(
+      (r) => r.status !== 'CANCELLED',
+    );
+    if (liveRoutes.some((r) => r.vehicleId === vehicleId)) {
+      throw new ValidationError(
+        'vehicleId',
+        'Esa camioneta ya está en una ruta del tiro.',
+      );
+    }
+
+    // Validar zona del vehículo. Permitimos cross-zone solo si el dispatcher
+    // ya seleccionó el vehículo desde el dropdown filtrado upstream — aquí
+    // solo verificamos que el vehículo exista.
+    const { data: vehicle, error: vErr } = await supabase
+      .from('vehicles')
+      .select('id, zone_id, is_active')
+      .eq('id', vehicleId)
+      .maybeSingle();
+    if (vErr || !vehicle) throw new ValidationError('vehicleId', 'Vehículo no encontrado.');
+    if (!vehicle.is_active) throw new ValidationError('vehicleId', 'Vehículo inactivo.');
+
+    // Nombre de la ruta: "<dispatch.name> — ruta <N+1>".
+    const routeName = `${dispatch.name as string} — ruta ${liveRoutes.length + 1}`;
+
+    const { data: route, error: rErr } = await supabase
+      .from('routes')
+      .insert({
+        dispatch_id: id,
+        name: routeName,
+        date: dispatch.date as string,
+        zone_id: dispatch.zone_id as string,
+        vehicle_id: vehicleId,
+        driver_id: driverId,
+        status: 'DRAFT',
+        created_by: profile.id,
+      })
+      .select('id')
+      .single();
+    if (rErr || !route) {
+      return {
+        ok: false,
+        error: `No se pudo crear la ruta: ${rErr?.message ?? 'desconocido'}`,
+      };
+    }
+
+    revalidatePath('/dispatches');
+    revalidatePath(`/dispatches/${id}`);
+    revalidatePath('/routes');
+
+    return { ok: true, routeId: route.id as string };
+  } catch (err) {
+    if (err instanceof ValidationError) return { ok: false, error: err.message };
+    return { ok: false, error: err instanceof Error ? err.message : 'Error desconocido' };
+  }
+}
+
+/**
  * Agrega una camioneta al tiro y re-rutea todo. El dispatcher sólo elige
  * cuál vehículo (y opcionalmente chofer) — el split lo hace VROOM.
+ *
+ * @deprecated Para uso del orchestrator AI (`add_vehicle_to_dispatch` tool) y
+ * compatibilidad. La UI usa `addEmptyRouteToDispatchAction` que NO auto-optimiza.
+ * Si el dispatcher quiere rebalance, lo dispara explícito desde "⚡ Optimizar tiro".
  */
 export async function addVehicleToDispatchAction(
   dispatchId: string,
@@ -789,6 +882,127 @@ export async function bulkMoveStopsAction(
         failed,
         affectedRouteIds: [...affected],
       },
+    };
+  } catch (err) {
+    if (err instanceof ValidationError) return { ok: false, error: err.message };
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Error desconocido',
+    };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Optimización del tiro completo — dos modos
+// ─────────────────────────────────────────────────────────────────────
+// El dispatcher ve un tiro con N rutas en DRAFT/OPTIMIZED y quiere mejorarlo.
+// Dos intenciones distintas:
+//
+//   mode='across'  → mover tiendas entre camionetas (rebalance global). Reusa
+//                    restructureDispatchInternal con las mismas asignaciones
+//                    actuales — el optimizer decide el split.
+//   mode='within'  → solo reordenar dentro de cada camioneta (sin cambiar a qué
+//                    camión va cada tienda). Llama reoptimizeRouteAction por ruta.
+//
+// La separación importa porque el dispatcher suele tener un trabajo manual
+// (movió X tienda al camión Y a propósito) que NO quiere perder al optimizar.
+// 'within' respeta esa decisión; 'across' la sobreescribe.
+
+export interface OptimizeDispatchResult extends ActionResult {
+  mode?: 'across' | 'within';
+  routesOptimized?: number;
+  routesFailed?: Array<{ routeId: string; reason: string }>;
+  unassignedStoreIds?: string[];
+  before?: PreRestructureSnapshot;
+  after?: PreRestructureSnapshot;
+}
+
+export async function optimizeDispatchAction(
+  dispatchId: string,
+  mode: 'across' | 'within',
+): Promise<OptimizeDispatchResult> {
+  const profile = await requireRole('admin', 'dispatcher');
+  try {
+    const id = requireUuid('dispatchId', dispatchId);
+    if (mode !== 'across' && mode !== 'within') {
+      throw new ValidationError('mode', 'Modo inválido. Usa "across" o "within".');
+    }
+
+    const routes = await listRoutesByDispatch(id);
+    const liveRoutes = routes.filter((r) => r.status !== 'CANCELLED');
+    if (liveRoutes.length === 0) {
+      throw new ValidationError('routes', 'El tiro no tiene rutas vivas para optimizar.');
+    }
+
+    // Validación común: ninguna ruta puede estar post-publicación. Si la hay,
+    // el dispatcher debe usar el flujo de re-optimización en vivo desde la ruta.
+    const POST_PUBLISH = new Set(['PUBLISHED', 'IN_PROGRESS', 'INTERRUPTED', 'COMPLETED']);
+    const blocking = liveRoutes.find((r) => POST_PUBLISH.has(r.status));
+    if (blocking) {
+      throw new ValidationError(
+        'status',
+        `No se puede optimizar: la ruta "${blocking.name}" está ${blocking.status}. ` +
+          `Usa "Re-optimizar con tráfico" en la ruta individual.`,
+      );
+    }
+
+    if (mode === 'across') {
+      // Rebalance global preservando las asignaciones (mismos vehículos/choferes).
+      const result = await restructureDispatchInternal({
+        dispatchId: id,
+        vehicleAssignments: liveRoutes.map((r) => ({
+          vehicleId: r.vehicleId,
+          driverId: r.driverId,
+        })),
+        createdBy: profile.id,
+      });
+      revalidatePath('/dispatches');
+      revalidatePath(`/dispatches/${id}`);
+      revalidatePath('/routes');
+      return {
+        ok: result.ok,
+        error: result.error,
+        mode: 'across',
+        routesOptimized: result.ok ? liveRoutes.length : 0,
+        unassignedStoreIds: result.unassignedStoreIds,
+        before: result.before,
+        after: result.after,
+      };
+    }
+
+    // mode === 'within': loop por ruta. Cada llamada es independiente — si una
+    // falla (capacidad, sin tiendas), seguimos con las demás y reportamos.
+    let optimized = 0;
+    const failed: Array<{ routeId: string; reason: string }> = [];
+    const unassignedAll: string[] = [];
+    for (const r of liveRoutes) {
+      if (!['DRAFT', 'OPTIMIZED'].includes(r.status)) {
+        failed.push({ routeId: r.id, reason: `Ruta ${r.status} no se puede optimizar.` });
+        continue;
+      }
+      const res = await reoptimizeRouteAction(r.id);
+      if (res.ok) {
+        optimized++;
+        if (res.unassignedStoreIds) unassignedAll.push(...res.unassignedStoreIds);
+      } else {
+        failed.push({ routeId: r.id, reason: res.error ?? 'Error desconocido' });
+      }
+    }
+
+    revalidatePath('/dispatches');
+    revalidatePath(`/dispatches/${id}`);
+    revalidatePath('/routes');
+
+    return {
+      ok: optimized > 0 || failed.length === 0,
+      mode: 'within',
+      routesOptimized: optimized,
+      routesFailed: failed.length > 0 ? failed : undefined,
+      unassignedStoreIds: unassignedAll.length > 0 ? unassignedAll : undefined,
+      error:
+        optimized === 0 && failed.length > 0
+          ? `Ninguna ruta se pudo optimizar (${failed.length} fallaron).`
+          : undefined,
     };
   } catch (err) {
     if (err instanceof ValidationError) return { ok: false, error: err.message };
