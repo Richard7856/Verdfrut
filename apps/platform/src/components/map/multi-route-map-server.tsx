@@ -78,6 +78,7 @@ export async function MultiRouteMapServer({ routes, mapboxToken, dispatchId }: P
       routeId: r.id,
       routeName: r.name,
       vehicleLabel: vehicle ? (vehicle.alias ?? vehicle.plate) : '—',
+      vehicleColorAlias: vehicle?.alias ?? null,
       stops: stops
         .map((s) => {
           const store = storesById.get(s.storeId);

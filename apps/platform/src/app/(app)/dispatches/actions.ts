@@ -609,37 +609,36 @@ export async function addEmptyRouteToDispatchAction(
     if (driverId) requireUuid('driverId', driverId);
 
     const supabase = await createServerClient();
-    const { data: dispatch, error: dErr } = await supabase
-      .from('dispatches')
-      .select('id, name, date, zone_id')
-      .eq('id', id)
-      .maybeSingle();
-    if (dErr || !dispatch) throw new ValidationError('dispatchId', 'Tiro no encontrado.');
 
-    // Validar que el vehículo no esté ya en una ruta viva del tiro (uniqueness).
-    const liveRoutes = (await listRoutesByDispatch(id)).filter(
-      (r) => r.status !== 'CANCELLED',
-    );
-    if (liveRoutes.some((r) => r.vehicleId === vehicleId)) {
-      throw new ValidationError(
-        'vehicleId',
-        'Esa camioneta ya está en una ruta del tiro.',
-      );
+    // Una sola query: necesitamos date + zone_id + name para construir el
+    // payload del insert. Antes hacíamos 3 queries adicionales (uniqueness,
+    // vehicle exists, vehicle active) que el DB ya garantiza:
+    //   - UNIQUE(vehicle_id, date) WHERE status != CANCELLED (índice idx_routes_vehicle_date_active)
+    //   - FK routes.vehicle_id → vehicles
+    //   - El dropdown del cliente solo muestra vehículos activos de la zona.
+    // El insert mismo levanta error si algo viola constraints y lo
+    // traducimos a un mensaje legible abajo.
+    //
+    // Para el nombre "ruta N+1" usamos un COUNT rápido en lugar de listar
+    // todas las filas + computar length client-side.
+    const [dispatchRes, countRes] = await Promise.all([
+      supabase
+        .from('dispatches')
+        .select('id, name, date, zone_id')
+        .eq('id', id)
+        .maybeSingle(),
+      supabase
+        .from('routes')
+        .select('id', { count: 'exact', head: true })
+        .eq('dispatch_id', id)
+        .neq('status', 'CANCELLED'),
+    ]);
+    if (dispatchRes.error || !dispatchRes.data) {
+      throw new ValidationError('dispatchId', 'Tiro no encontrado.');
     }
-
-    // Validar zona del vehículo. Permitimos cross-zone solo si el dispatcher
-    // ya seleccionó el vehículo desde el dropdown filtrado upstream — aquí
-    // solo verificamos que el vehículo exista.
-    const { data: vehicle, error: vErr } = await supabase
-      .from('vehicles')
-      .select('id, zone_id, is_active')
-      .eq('id', vehicleId)
-      .maybeSingle();
-    if (vErr || !vehicle) throw new ValidationError('vehicleId', 'Vehículo no encontrado.');
-    if (!vehicle.is_active) throw new ValidationError('vehicleId', 'Vehículo inactivo.');
-
-    // Nombre de la ruta: "<dispatch.name> — ruta <N+1>".
-    const routeName = `${dispatch.name as string} — ruta ${liveRoutes.length + 1}`;
+    const dispatch = dispatchRes.data;
+    const liveCount = countRes.count ?? 0;
+    const routeName = `${dispatch.name as string} — ruta ${liveCount + 1}`;
 
     const { data: route, error: rErr } = await supabase
       .from('routes')
@@ -656,15 +655,21 @@ export async function addEmptyRouteToDispatchAction(
       .select('id')
       .single();
     if (rErr || !route) {
+      // Postgres 23505 = unique_violation. El índice idx_routes_vehicle_date_active
+      // bloquea agregar la misma camioneta dos veces el mismo día (en estados vivos).
+      if (rErr?.code === '23505') {
+        return { ok: false, error: 'Esa camioneta ya está en una ruta del tiro.' };
+      }
       return {
         ok: false,
         error: `No se pudo crear la ruta: ${rErr?.message ?? 'desconocido'}`,
       };
     }
 
-    revalidatePath('/dispatches');
+    // Solo revalida la página del tiro — /dispatches y /routes recargan al
+    // próximo navigate. Antes revalidábamos las 3, lo que invalidaba caches
+    // grandes innecesariamente.
     revalidatePath(`/dispatches/${id}`);
-    revalidatePath('/routes');
 
     return { ok: true, routeId: route.id as string };
   } catch (err) {

@@ -16,11 +16,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { mapboxgl, setMapboxToken } from '@tripdrive/maps';
 import { logger } from '@tripdrive/observability';
+import { pickRouteColor } from '@/lib/route-colors';
 
 export interface MultiRouteEntry {
   routeId: string;
   routeName: string;
   vehicleLabel: string;
+  /**
+   * Alias del vehículo (típicamente un color: "Roja", "Azul"). Si matchea un
+   * color conocido, el polyline del mapa usa ese hex; así el dispatcher ve
+   * consistencia visual entre el nombre del camión y la ruta. Si no matchea,
+   * cae al PALETTE indexado.
+   */
+  vehicleColorAlias?: string | null;
   /** Mismo orden que el optimizer asignó. */
   stops: Array<{
     /** ID único del stop (tabla stops). Necesario para selección bulk + acciones server. */
@@ -65,22 +73,6 @@ export type BulkAction =
   | { type: 'move_to_route'; targetRouteId: string }
   | { type: 'create_new_route' }
   | { type: 'remove_from_dispatch' };
-
-// Palette para hasta ~12 rutas distintas. Si crece, se rota.
-const PALETTE = [
-  '#16a34a', // verde
-  '#2563eb', // azul
-  '#dc2626', // rojo
-  '#f59e0b', // ámbar
-  '#7c3aed', // violeta
-  '#0891b2', // cian
-  '#db2777', // rosa
-  '#ca8a04', // dorado
-  '#059669', // esmeralda
-  '#9333ea', // morado
-  '#0284c7', // azul cielo
-  '#e11d48', // rosa fuerte
-];
 
 export function MultiRouteMap({ routes, mapboxToken, className, onBulkAction }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -181,10 +173,12 @@ export function MultiRouteMap({ routes, mapboxToken, className, onBulkAction }: 
     return () => window.removeEventListener('keydown', onKey);
   }, [isFullscreen]);
 
-  // Memorizar asignación de color por ruta (estable entre re-renders).
+  // Memorizar asignación de color por ruta (estable entre re-renders). Prioriza
+  // el alias del vehículo si es un color conocido ("Roja" → #dc2626); cae al
+  // PALETTE indexado por orden de llegada cuando el alias no matchea.
   const colorByRoute = useMemo(() => {
     const map = new Map<string, string>();
-    routes.forEach((r, i) => map.set(r.routeId, PALETTE[i % PALETTE.length]!));
+    routes.forEach((r, i) => map.set(r.routeId, pickRouteColor(r.vehicleColorAlias, i)));
     return map;
   }, [routes]);
 

@@ -12,6 +12,7 @@ import { useRouter } from 'next/navigation';
 import { mapboxgl, setMapboxToken } from '@tripdrive/maps';
 import { Button, PageHeader } from '@tripdrive/ui';
 import { createVisualDispatchAction, type RoutePlanPayload } from './actions';
+import { pickRouteColor } from '@/lib/route-colors';
 
 // ─── Tipos compartidos con server ──────────────────────────────────
 
@@ -84,12 +85,6 @@ interface DraftRoute {
   storeIds: Set<string>;
 }
 
-// Paleta de colores para distinguir rutas visualmente. Mismo set que MultiRouteMap.
-const ROUTE_COLORS = [
-  '#16a34a', '#2563eb', '#dc2626', '#f59e0b', '#7c3aed',
-  '#0891b2', '#db2777', '#ca8a04', '#059669', '#9333ea',
-];
-
 const UNASSIGNED_COLOR = '#71717a'; // zinc-500 — pin gris para sin asignar.
 
 // ─── Componente principal ──────────────────────────────────────────
@@ -154,12 +149,16 @@ export function VisualDispatchBuilder({
     return m;
   }, [stores, routes]);
 
-  /** Color por tempId de ruta — estable mientras no se reorderen. */
+  /** Color por tempId de ruta — prioriza alias del vehículo (color name). */
   const colorByRouteTempId = useMemo(() => {
     const m = new Map<string, string>();
-    routes.forEach((r, i) => m.set(r.tempId, ROUTE_COLORS[i % ROUTE_COLORS.length]!));
+    const vehicleById = new Map(vehicles.map((v) => [v.id, v]));
+    routes.forEach((r, i) => {
+      const alias = vehicleById.get(r.vehicleId)?.alias ?? null;
+      m.set(r.tempId, pickRouteColor(alias, i));
+    });
     return m;
-  }, [routes]);
+  }, [routes, vehicles]);
 
   /** Stores sin asignar (visibles en tab "Sin asignar"). */
   const unassignedStores = useMemo(() => {
