@@ -106,7 +106,7 @@ const optimize_dispatch: ToolDefinition<OptimizeDispatchArgs, OptimizeResult> = 
     // Si está configurada PLATFORM_INTERNAL_URL la usamos; si no, asumimos
     // mismo host vía localhost:3000.
     const baseUrl = process.env.PLATFORM_INTERNAL_URL ?? 'http://localhost:3000';
-    const url = `${baseUrl}/api/orchestrator/_internal/optimize`;
+    const url = `${baseUrl}/api/orchestrator/internal/optimize`;
 
     let res: Response;
     try {

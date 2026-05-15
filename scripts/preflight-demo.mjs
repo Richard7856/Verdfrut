@@ -5,7 +5,7 @@
 // OE-2 (propose-routes) sin sorpresas:
 //   1. Env vars críticas presentes.
 //   2. Migraciones 045 y 046 aplicadas.
-//   3. Endpoint /api/orchestrator/_internal/propose-routes reachable.
+//   3. Endpoint /api/orchestrator/internal/propose-routes reachable.
 //   4. El user designado para demo tiene rol admin/dispatcher activo.
 //   5. Existe al menos un dispatch con paradas (para no improvisar).
 //
@@ -210,7 +210,7 @@ async function main() {
   const baseUrl = process.env.PLATFORM_BASE_URL ?? 'http://localhost:3000';
   try {
     // Hit el endpoint con un body inválido a propósito — debe responder 400 (no 404 ni 502).
-    const res = await fetch(`${baseUrl}/api/orchestrator/_internal/propose-routes`, {
+    const res = await fetch(`${baseUrl}/api/orchestrator/internal/propose-routes`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

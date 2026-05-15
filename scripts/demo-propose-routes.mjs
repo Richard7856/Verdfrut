@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Demo CLI del feature `propose_route_plan` (ADR-100 / OE-2).
-// Llama el endpoint /api/orchestrator/_internal/propose-routes y muestra
+// Llama el endpoint /api/orchestrator/internal/propose-routes y muestra
 // las 3 alternativas en formato legible para presentación al cliente.
 //
 // Pensado para usar la noche del 2026-05-15 ante NETO / VerdFrut, donde
@@ -116,7 +116,7 @@ async function main() {
   console.log('TripDrive — Propuesta de alternativas de ruteo (OE-2)');
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log();
-  console.log(`Endpoint: ${baseUrl}/api/orchestrator/_internal/propose-routes`);
+  console.log(`Endpoint: ${baseUrl}/api/orchestrator/internal/propose-routes`);
   console.log(`Modo:     ${args.dispatch ? 'A (por dispatch)' : args.vehicles ? 'B (stops+vehicles)' : 'C (stops+zone)'}`);
   console.log();
   console.log('Calculando alternativas... (esto puede tardar 30-90s, llama VROOM N veces en paralelo)');
@@ -125,7 +125,7 @@ async function main() {
   const startedAt = Date.now();
   let res;
   try {
-    res = await fetch(`${baseUrl}/api/orchestrator/_internal/propose-routes`, {
+    res = await fetch(`${baseUrl}/api/orchestrator/internal/propose-routes`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

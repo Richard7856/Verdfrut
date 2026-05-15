@@ -1,5 +1,5 @@
 // Orquestación de la Capa 4 del Optimization Engine.
-// ADR-100 / OE-2. Llamado por /api/orchestrator/_internal/propose-routes.
+// ADR-100 / OE-2. Llamado por /api/orchestrator/internal/propose-routes.
 //
 // Vive en apps/platform (no en @tripdrive/router) porque necesita acceso
 // a BD (stores, vehicles, customer config) y al optimizer Railway (VROOM).

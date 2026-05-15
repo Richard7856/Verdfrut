@@ -10,7 +10,18 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createMiddlewareClient } from '@tripdrive/supabase/middleware';
 
-const PUBLIC_PATHS = ['/login', '/_next', '/favicon.ico', '/api/health'];
+// Endpoints públicos al middleware Supabase. Los `_internal/*` se protegen
+// con su propio `INTERNAL_AGENT_TOKEN` (ADR-095 / hardening C1) y NO
+// necesitan sesión de usuario — son server-to-server desde el orchestrator
+// AI o desde scripts admin (preflight, demo). Sin esta exención, fetch
+// interno con cookies vacías redirige a /login → 404 (POST no permitido).
+const PUBLIC_PATHS = [
+  '/login',
+  '/_next',
+  '/favicon.ico',
+  '/api/health',
+  '/api/orchestrator/internal/',
+];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((p) => pathname.startsWith(p));

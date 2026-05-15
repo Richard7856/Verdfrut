@@ -20,7 +20,7 @@ output. El costo MXN es secundario hasta que veamos producción real con
 **Para entender riesgos / gaps no terminados** → ver sección "Estado Streams OE + R" en [KNOWN_ISSUES.md](./KNOWN_ISSUES.md).
 
 **Resumen ejecutivo**:
-- ✅ OE-2 backend (endpoint `_internal/propose-routes`) y CLI demo: **demo-ready**.
+- ✅ OE-2 backend (endpoint `internal/propose-routes`) y CLI demo: **demo-ready**.
 - ✅ R2 + R3 server-side: **funcional, sin UI**. Solo se activa si el user toca el chat conversacional con intent específico (geo o routing). Defensivo: cualquier sorpresa se mitiga con texto, no crash.
 - ❌ UI conversacional (`RouteProposalCard`, badge "modo routing") + tools `propose_route_plan`/`apply_route_plan`: **NO entran en demo**. Sprint OE-3, post-demo.
 
@@ -45,7 +45,7 @@ alternativas óptimas es **el value prop completo del producto**.
 | Sprint | Entrega | Status |
 |---|---|---|
 | **OE-1** | Capas 1+2 — clustering bisección + asignación greedy | ✅ 2026-05-15 (ADR-097) |
-| **OE-2** | Capa 4 — propuesta N alternativas + costo MXN + endpoint `_internal/propose-routes` + migración 045 `customers.optimizer_costs` | ✅ 2026-05-15 (ADR-100) |
+| **OE-2** | Capa 4 — propuesta N alternativas + costo MXN + endpoint `internal/propose-routes` + migración 045 `customers.optimizer_costs` | ✅ 2026-05-15 (ADR-100) |
 | **OE-3** | Tools `propose_route_plan` + `apply_route_plan` en el router agent (ver Stream R) + UI `RouteProposalCard` con map preview | ⏳ depende de R3 |
 | **OE-4** | Refinamientos: constraints (ventanas horarias, capacity multi-dim), cache matriz Google Routes, A/B testing default option | ⏳ pendiente |
 
@@ -155,7 +155,7 @@ duplicado.
   `@tripdrive/router/cost.ts` + `propose.ts` (cost MXN + ranking
   cheapest/balanced/fastest); `apps/platform/src/lib/propose-plans.ts`
   (orquestación con clustering paralelo); endpoint POST
-  `/api/orchestrator/_internal/propose-routes` con hardening C1;
+  `/api/orchestrator/internal/propose-routes` con hardening C1;
   migration 045 `customers.optimizer_costs jsonb` aplicada al tenant
   VerdFrut (resto via `scripts/migrate-all-tenants.sh`);
   `scripts/demo-propose-routes.mjs` CLI listo para demo con cliente.

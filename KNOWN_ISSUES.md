@@ -14,7 +14,7 @@ Sesión de desarrollo intensa hoy. Tracker rápido de qué está demo-ready y qu
 |---|---|---|
 | `scripts/demo-propose-routes.mjs` | ✅ Ready | CLI para mostrar 3 alternativas con costo MXN. Punto principal del demo. |
 | `scripts/preflight-demo.mjs` | ✅ Ready | Verifica todo en 30s. **Correr ANTES del cliente.** |
-| Endpoint `_internal/propose-routes` | ✅ Ready | Hardening C1 aplicado. Type-check ✅. |
+| Endpoint `internal/propose-routes` | ✅ Ready | Hardening C1 aplicado. Type-check ✅. |
 | Migración 045 (`customers.optimizer_costs`) | ✅ Aplicada al tenant VerdFrut | |
 | Migración 046 (`orchestrator_sessions.active_agent_role`) | ✅ Aplicada al tenant VerdFrut | |
 | Chat existente (orchestrator solo) | ✅ Funciona idéntico a antes | Si user NO menciona armar/optimizar/geocodificar, no hay sub-agentes activados. |
