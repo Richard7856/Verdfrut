@@ -173,6 +173,7 @@ export function SortableStops({
       )}
 
       <DndContext
+        id={`dnd-${routeId}`}
         sensors={sensors}
         collisionDetection={closestCenter}
         onDragEnd={reorderable ? handleDragEnd : undefined}

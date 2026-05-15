@@ -518,6 +518,7 @@ export function RouteStopsCard({
         </p>
       ) : (
         <DndContext
+          id={`dnd-${route.id}`}
           sensors={sensors}
           collisionDetection={closestCenter}
           onDragEnd={canReorder ? handleDragEnd : undefined}
