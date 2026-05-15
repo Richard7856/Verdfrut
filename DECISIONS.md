@@ -5178,6 +5178,188 @@ export async function requireFeature(...): Promise<void>  // throws 403
 - VerdFrut queda con `tier='pro'`, `status='active'`, sin overrides
   (paga el Pro completo).
 
+---
+
+## [2026-05-14] ADR-096: Optimización como feature central — arquitectura de 3 capas
+
+**Contexto:**
+
+Durante el armado del demo CDMX para VerdFrut (sesión 2026-05-14), el user
+identificó un problema real: cuando reparte 21 stops en 2 camionetas vía
+ROW_NUMBER alfabético, ambas terminan cruzando toda la zona. La camioneta
+A hizo 152 km / 6h, la B hizo 269 km / 10h — desbalanceada e ineficiente.
+
+El fix manual fue partir geográficamente por longitud (Sur-Oeste 11 stops
+lng ≤ -99.142, Sur-Este 10 stops lng > -99.142). Misma técnica aplicada a
+Oriente con split por latitud (Norte 13 vs Sur 12). El user reportó que
+esto es **el feature central del producto** — no un add-on, no algo
+opcional, no una utilidad escondida. La promesa de valor a clientes
+("rutas optimizadas, costo logístico bajo") depende de que esto funcione
+mejor que cualquier competidor.
+
+**Diagnóstico técnico de por qué el optimizador actual falla:**
+
+El optimizer existente (`apps/platform/src/lib/optimizer-pipeline.ts` +
+package VROOM en Railway) resuelve **secuencia DENTRO de una ruta dada**,
+no **asignación ENTRE rutas**. VROOM en su llamado actual:
+
+- Input: vehículos[], stops[], asignación implícita (todos los stops son
+  candidatos para todos los vehículos)
+- Output: secuencia óptima por vehículo
+
+Pero VROOM, dado un conjunto de vehículos con depot idéntico, distribuye
+los stops para minimizar distancia agregada. Si todos los vehículos
+salen del mismo depot (CEDA en Iztapalapa) y no hay restricciones de
+asignación, VROOM puede asignar cualquier stop a cualquier vehículo —
+incluyendo crisscrossing geográfico si la distancia agregada lo permite.
+
+Resultado en práctica: con 21 stops, 2 vehículos sin restricciones,
+VROOM optimiza la suma pero no la coherencia geográfica de cada ruta.
+El supervisor humano detecta el problema visualmente; el algoritmo no
+porque su función objetivo es solo distancia agregada.
+
+**Decisión: arquitectura de optimización en 3 capas explícitas**
+
+### Capa 1 — Clustering geográfico (NUEVO)
+
+Entrada: N stops + K vehículos + capacidad por vehículo + opcional
+constraints (max stops, max horas).
+Salida: K clusters, cada uno con un subconjunto coherente de stops.
+
+Algoritmos candidatos:
+- **k-means balanceado** con restricción de tamaño (Lloyd + rebalance).
+- **k-medoids** si queremos centroides en stores reales.
+- **Bisección recursiva por lat/lng** (más simple, lo que hicimos a mano
+  hoy con lng/lat median).
+- **Capacitated VRP cluster-first** vía bin-packing geográfico.
+
+V1 implementación: bisección recursiva por eje más amplio (si lng_spread
+> lat_spread → split por lng, else por lat). Es lo que el supervisor
+humano haría intuitivamente y se aproxima a clustering óptimo para
+zonas urbanas convexas.
+
+### Capa 2 — Asignación cluster → vehículo (NUEVO)
+
+Entrada: K clusters + V vehículos disponibles + depot por vehículo +
+costo por vehículo (combustible, salario, etc.).
+Salida: mapping cluster → vehículo que minimiza costo total.
+
+V1: si V == K, asignación trivial (cluster más cercano al depot del
+vehículo). V > K → algunos vehículos no van. V < K → infeasible, alertar.
+
+### Capa 3 — Secuencia intra-ruta (EXISTENTE)
+
+Entrada: stops asignados a un vehículo + depot + ventanas horarias +
+service times.
+Salida: secuencia óptima de visita (TSP con ventanas).
+
+Esto ya lo hace VROOM. **No cambia** — solo se invoca por cluster en
+lugar de globalmente.
+
+### Capa 4 — Decisión "cuántos vehículos" (NUEVO)
+
+Antes de aplicar capas 1-3, el sistema propone N alternativas
+(1 vehículo / 2 vehículos / 3 vehículos) y muestra trade-off:
+
+| Opción | Vehículos | Costo total estimado | Jornada por chofer |
+|---|---|---|---|
+| Mínimo costo | 1 | $1,200 | 14 h (excede límite) |
+| Balanced | 2 | $1,800 | 7 h c/u ✓ |
+| Rápido | 3 | $2,400 | 5 h c/u ✓ |
+
+User elige. Default sugerido: la opción más barata que cabe en jornada
+legal (≤9 h) sin exceder cap de stops por camión (configurable per-tier).
+
+### Capa 5 — Multi-día / frequency (NUEVO, post-VerdFrut)
+
+Cuando el catálogo de stops crece más allá de lo que cabe en 1 día,
+el sistema reparte en N días respetando frecuencia de visita por store
+(ej. "tienda X debe visitarse lun/mié/vie"). Aplica capas 1-4 a cada
+día. Por ahora hardcodeable, V2 lo expone configurable.
+
+**Cómo se integra con el agente AI**
+
+El agente del orchestrator pasa a ser el entry point primario para
+generar rutas. Flow:
+
+1. User dice: "Arma el tiro del lunes con estas 55 tiendas. Tengo
+   3 camionetas disponibles."
+2. Agente llama tool `propose_route_plan(stop_ids, vehicle_count_max=3)`.
+3. Tool devuelve 3 alternativas (1/2/3 cam) con costo + jornada.
+4. Agente presenta al user en lenguaje natural + map preview.
+5. User confirma alternativa.
+6. Agente llama tool `apply_route_plan(plan_id)` que crea dispatches +
+   routes + stops en transacción atómica.
+7. Cada ruta queda en status `OPTIMIZED` (capa 3 ya corrió internamente).
+8. User publica.
+
+Esto requiere:
+- 2 tools nuevos en `@tripdrive/orchestrator`: `propose_route_plan` y
+  `apply_route_plan`.
+- Endpoint interno nuevo: `POST /api/orchestrator/_internal/propose-routes`.
+- Componente UI: `RouteProposalCard` que renderea las 3 alternativas
+  con mini-map por cluster.
+
+**Alternativas consideradas:**
+
+- **Mantener VROOM-only (sin clustering)**: el problema persiste, el
+  user ya lo detectó. Rechazado.
+- **Comprar SaaS de routing (Onfleet, Routific)**: contradice el value
+  prop ("software local mexicano"). Rechazado.
+- **OR-Tools de Google**: más capable que VROOM pero curva de learning
+  mayor + dependencia Python. Si VROOM + clustering custom no es
+  suficiente, evaluar en O3.
+- **Solver puro k-means** sin restricciones: produce clusters
+  geográficamente coherentes pero puede violar caps. Necesitamos
+  k-means **capacitated**.
+
+**Riesgos / limitaciones:**
+
+- **Clustering greedy puede ser sub-óptimo**: bisección recursiva es
+  heurística. Para 50-100 stops es excelente; para 500+ puede dejar
+  ~10% en mesa. V2 sustituye con metaheurística (simulated annealing
+  o tabu search) si reporta cliente.
+- **Costo de cómputo**: clustering + asignación + 1 VROOM call por
+  cluster = 3-5x más latencia que VROOM-only. Para 55 stops y 3 cam,
+  ~15-20 segundos. Aceptable si el agente AI muestra "calculando
+  óptimo..." con progress.
+- **UI compleja para mostrar trade-offs**: necesita map con clusters
+  coloreados, breakdown de costo, slider de "más rápido vs más barato".
+  Diseñar bien o el feature se siente cargado.
+
+**Por qué ahora:**
+
+- Es el primer cliente real (VerdFrut) y ya lo necesita visiblemente.
+- Sin esto el agente AI es un CRUD glorificado, no un diferenciador.
+- Competidores extranjeros tienen optimización buena pero UX cargada
+  por DBA, no por chofer/dispatcher. Aquí es el opuesto: tan automático
+  que el dispatcher solo decide entre 2-3 opciones presentadas.
+- Cuando entre cliente 2, esto es la demo: "sube tu CSV, ves rutas
+  óptimas en 30 segundos, las publicas".
+
+**Status al cierre de ADR-096:**
+
+- Decisión documentada.
+- Spec técnica detallada en `OPTIMIZATION_ENGINE.md` (nuevo doc).
+- Roadmap ajustado: este feature pasa a P0 antes de cualquier otra
+  expansión funcional.
+- Próxima sesión arranca con la implementación de capa 1 (clustering).
+
+**Oportunidades de mejora futuras (post-V1):**
+
+- Issue #272 — clustering con restricciones de service window (no juntar
+  tiendas con receiving 7-9am y 14-16pm en mismo cluster si no caben).
+- Issue #273 — cost-aware optimization: combustible/L, peajes en
+  función objetivo, no solo distancia.
+- Issue #274 — heatmap de carga histórica para detectar oportunidades
+  ("esta tienda se entrega 3x/semana, las otras del cluster 1x — ¿la
+  movemos?").
+- Issue #275 — auto-re-cluster cuando entran o salen tiendas del
+  catálogo (no recalcular cada día desde cero).
+- Issue #276 — slider en UI: "balance entre rapidez y costo" como en
+  Google Maps "evitar peajes / vía rápida".
+
+
 
 
 

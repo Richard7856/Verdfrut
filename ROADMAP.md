@@ -1,6 +1,35 @@
-# TripDrive — Roadmap (post Sprint H6)
+# TripDrive — Roadmap
 
-> Actualizado el 2026-05-13 (post Stream B + Sprint H8 hardening). La plataforma se llama **TripDrive** (dominio `tripdrive.xyz` comprado en Hostinger, nameservers en Vercel). Primer cliente productivo: **VerdFrut**, alias operativo de su contrato con NETO Tiendas en CDMX y Toluca. **APK preview funcional** — listo para piloto N6.
+> Actualizado el 2026-05-14. La plataforma se llama **TripDrive** (dominio `tripdrive.xyz` en Vercel). Primer cliente productivo: **VerdFrut** → NETO CDMX/Toluca.
+
+---
+
+## 🚨 P0 ACTUAL — Optimization Engine (feature central)
+
+**Decisión 2026-05-14 (ADR-096)**: el clustering + asignación geográfica
++ propuesta de N alternativas pasa a ser **el feature principal del
+producto**. Todo lo demás es secundario hasta que esto esté funcionando.
+
+Razón: el optimizer VROOM actual resuelve secuencia DENTRO de una ruta
+pero no asignación ENTRE rutas. En la demo VerdFrut (21 stops, 2 cam),
+ambas camionetas terminaron cruzando toda la zona — la diferencia entre
+un dispatcher humano armando rutas a mano y el agente AI proponiendo 2-3
+alternativas óptimas es **el value prop completo del producto**.
+
+**Spec detallada**: ver `OPTIMIZATION_ENGINE.md`.
+
+**Sprints planeados** (~4 sprints / ~2-3 semanas):
+- Sprint 1: Capas 1+2 — clustering bisección recursiva + asignación greedy
+- Sprint 2: Capa 4 — propuesta de N alternativas con cálculo de costo MXN
+- Sprint 3: Tools del agente + UI `RouteProposalCard` con map preview
+- Sprint 4: Refinamientos (constraints, cache matriz, A/B testing)
+
+**Métrica de éxito**: km totales por tiro CDMX 21 stops ≤ 280 (vs 421 hoy
+con asignación alfabética). Adopción ≥80% de tiros vía agente AI propose.
+
+---
+
+## ✅ Estado cerrado al 2026-05-14
 
 ---
 
@@ -38,8 +67,18 @@
    Stack final: SDK 54-style (RN 0.79.6 + expo-router 5.x).
 ```
 
-**84 ADRs documentados. 35 migraciones tenant + 1 control plane.**
-**Stream B 100% en código. Listo para piloto operacional N6 con 1 chofer.**
+**96 ADRs documentados. 44 migraciones tenant + 1 control plane.**
+**Stream B 100% en código. Stream A landed (multi-customer + plans + RLS).
+Landing pública live + control-plane live. APK pendiente rebuild EAS.**
+
+### Cierre 2026-05-14 (esta sesión)
+- ADR-095 — Feature gating por tier + admin panel (mig 043)
+- ADR-096 — Optimization-first architecture (decisión arquitectónica)
+- Hardening: 3 CRITICAL fixes (C1 internal optimize, C2 share expiry, C3 CP login rate limit)
+- Privacy + ToS publicados en landing (LFPDPPP MX)
+- Demo CDMX 55 stops repartidos en 3 dispatches (Lun/Mar/Mié) con
+  re-partición geográfica manual (Sur-Oeste/Este, Oriente-Norte/Sur) —
+  evidencia del problema que motiva ADR-096
 
 ---
 
