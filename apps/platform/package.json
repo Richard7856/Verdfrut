@@ -20,6 +20,7 @@
     "@tripdrive/observability": "workspace:*",
     "@tripdrive/orchestrator": "workspace:*",
     "@tripdrive/plans": "workspace:*",
+    "@tripdrive/router": "workspace:*",
     "@tripdrive/supabase": "workspace:*",
     "@tripdrive/types": "workspace:*",
     "@tripdrive/ui": "workspace:*",

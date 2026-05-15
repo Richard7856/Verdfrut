@@ -9,6 +9,11 @@
 
 import 'server-only';
 import { localTimeToUnix } from '@tripdrive/utils';
+import {
+  clusterStops,
+  assignClustersToVehicles,
+  type RouterVehicle,
+} from '@tripdrive/router';
 import { callOptimizer, getUnassignedStoreIds } from './optimizer';
 import { listDepots } from '@/lib/queries/depots';
 import { getStoresByIds } from '@/lib/queries/stores';
@@ -194,5 +199,133 @@ export async function computeOptimizationPlan(
     unassignedStoreIds,
     totalDistanceMeters: totalDistance,
     totalDurationSeconds: totalDuration,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Capa 1+2 del Optimization Engine (ADR-096 / OPTIMIZATION_ENGINE.md)
+// Pre-clustering geográfico antes de invocar VROOM.
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Variante con pre-clustering geográfico. Aplica capas 1+2 de
+ * @tripdrive/router (split por bisección + asignación greedy al depot más
+ * cercano) y luego ejecuta `computeOptimizationPlan` UNA VEZ POR VEHÍCULO
+ * en paralelo con su subconjunto pre-asignado de stops.
+ *
+ * Por qué llamar VROOM N veces en lugar de 1 sola:
+ *   VROOM resuelve secuencia dado un set de stops por vehículo — pero
+ *   cuando le pasamos todos los vehículos juntos, su asignación tiende a
+ *   "vaciar primero al primer vehículo" sin optimizar globalmente la
+ *   distribución geográfica. El clustering previo fuerza la separación
+ *   por zonas coherentes (evidencia VerdFrut sur CDMX: -40% km totales).
+ *
+ * Trade-off conocido: las N llamadas a VROOM corren en paralelo
+ * (Promise.all) → latencia agregada ≈ max(latencias) en lugar de suma.
+ * Sin embargo, cada call paga su propia matriz de tráfico (Google Routes),
+ * lo que multiplica el costo de API. Mitigación pendiente Sprint 4: cache
+ * de matriz pre-clustering.
+ *
+ * Backward compatible: el flujo legacy sigue usando `computeOptimizationPlan`.
+ * Sólo callers nuevos (orchestrator AI, propose_route_plan) usan esta variante.
+ */
+export async function computeClusteredOptimizationPlan(
+  input: ComputePlanInput,
+): Promise<OptimizationPlan> {
+  if (input.vehicleIds.length === 0) {
+    throw new Error('Selecciona al menos un camión');
+  }
+  if (input.storeIds.length === 0) {
+    throw new Error('Selecciona al menos una tienda');
+  }
+
+  // Cargar entidades para conocer coords + depots — el clustering necesita
+  // lat/lng. Mismas queries que la versión legacy, sin tocar BD por side-effect.
+  const [stores, vehicles] = await Promise.all([
+    getStoresByIds(input.storeIds),
+    getVehiclesByIds(input.vehicleIds),
+  ]);
+  if (stores.length !== input.storeIds.length) throw new Error('Alguna tienda no existe');
+  if (vehicles.length !== input.vehicleIds.length) throw new Error('Algún camión no existe');
+
+  // Resolver depot por vehículo: override > depot_id de la tabla > coords
+  // crudas del vehículo. El clustering usa coords; si un vehículo no las
+  // tiene en ninguna fuente, cae al centroide de los stops (sentinel).
+  const depots = await listDepots();
+  const depotsById = new Map(depots.map((d) => [d.id, d]));
+
+  const routerVehicles: RouterVehicle[] = vehicles.map((v) => {
+    const overrideId = input.vehicleDepotOverrides?.get(v.id);
+    if (overrideId) {
+      const d = depotsById.get(overrideId);
+      if (d) return { id: v.id, depot: { lat: d.lat, lng: d.lng } };
+    }
+    if (v.depotId) {
+      const d = depotsById.get(v.depotId);
+      if (d) return { id: v.id, depot: { lat: d.lat, lng: d.lng } };
+    }
+    if (v.depotLat !== null && v.depotLng !== null) {
+      return { id: v.id, depot: { lat: v.depotLat, lng: v.depotLng } };
+    }
+    // Sentinel: si no hay depot, usar (0,0). El greedy degenera al orden
+    // del array. Caso muy raro en producción (vehículos están saneados).
+    return { id: v.id, depot: { lat: 0, lng: 0 } };
+  });
+
+  // Capa 1: clustering.
+  const k = vehicles.length;
+  const clusters = clusterStops(
+    stores.map((s) => ({ id: s.id, lat: s.lat, lng: s.lng })),
+    k,
+  );
+
+  // Si el clustering devuelve menos clusters que k (ej. todos los stops
+  // colocan en el mismo punto), caemos al pipeline legacy: un solo VROOM
+  // con todos los vehículos resuelve mejor que llamarlo N veces con el mismo
+  // conjunto duplicado.
+  if (clusters.length < k) {
+    return computeOptimizationPlan(input);
+  }
+
+  // Capa 2: asignación cluster → vehicle.
+  const assignment = assignClustersToVehicles(clusters, routerVehicles);
+
+  // Construir un sub-input por vehículo y disparar VROOM en paralelo.
+  // Cada sub-input preserva driverId y depotOverride correspondiente.
+  const driverByVehicleId = new Map<string, string | null>();
+  input.vehicleIds.forEach((vid, i) => {
+    driverByVehicleId.set(vid, input.driverIds?.[i] ?? null);
+  });
+
+  const subPlans = await Promise.all(
+    [...assignment.entries()].map(([vehicleId, clusterStops]) => {
+      const subInput: ComputePlanInput = {
+        ...input,
+        vehicleIds: [vehicleId],
+        driverIds: [driverByVehicleId.get(vehicleId) ?? null],
+        storeIds: clusterStops.map((s) => s.id),
+      };
+      return computeOptimizationPlan(subInput);
+    }),
+  );
+
+  // Mergear resultados. Las rutas mantienen su orden de aparición — irrelevante
+  // funcionalmente porque cada ruta tiene su vehicleId asignado.
+  const mergedRoutes: ComputedRoute[] = [];
+  let mergedDistance = 0;
+  let mergedDuration = 0;
+  const mergedUnassigned: string[] = [];
+  for (const p of subPlans) {
+    mergedRoutes.push(...p.routes);
+    mergedDistance += p.totalDistanceMeters;
+    mergedDuration += p.totalDurationSeconds;
+    mergedUnassigned.push(...p.unassignedStoreIds);
+  }
+
+  return {
+    routes: mergedRoutes,
+    unassignedStoreIds: mergedUnassigned,
+    totalDistanceMeters: mergedDistance,
+    totalDurationSeconds: mergedDuration,
   };
 }
