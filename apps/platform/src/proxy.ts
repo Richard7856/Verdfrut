@@ -25,6 +25,10 @@ const PUBLIC_PATHS = [
   // STRIPE_WEBHOOK_SECRET dentro del handler. Si lo dejamos detrás del
   // middleware auth, redirige a /login y Stripe ve 200 vacío → falsos OK.
   '/api/billing/webhook',
+  // Self-serve signup desde landing pública (tripdrive.xyz/empezar).
+  // El form vive en /empezar y postea a /api/billing/signup.
+  '/empezar',
+  '/api/billing/signup',
 ];
 
 function isPublicPath(pathname: string): boolean {

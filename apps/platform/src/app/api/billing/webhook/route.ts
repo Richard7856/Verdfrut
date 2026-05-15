@@ -73,16 +73,48 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             ? session.subscription
             : session.subscription?.id;
 
-        // tripdrive_customer_id viene en el metadata que setteamos al crear
-        // el Stripe customer. Si no está, lo resolvemos por stripe_customer_id.
-        const tripdriveCustomerId =
-          (session.metadata?.tripdrive_customer_id as string | undefined) ??
-          (await resolveCustomerByStripeId(admin, stripeCustomerId ?? null));
+        if (!stripeCustomerId || !subscriptionId) {
+          logger.error('stripe.webhook.checkout_no_session_data', { event_id: event.id });
+          break;
+        }
 
-        if (!tripdriveCustomerId || !subscriptionId) {
-          logger.error('stripe.webhook.checkout_no_customer', {
+        // Caso A: customer existente (admin que ya tenía cuenta hace checkout
+        // desde /settings/billing). El metadata trae `tripdrive_customer_id`.
+        const existingCustomerId = session.metadata?.tripdrive_customer_id as string | undefined;
+
+        // Caso B: signup público desde landing. El metadata trae los datos
+        // del form para materializar customer + user.
+        const signupCompany = session.metadata?.tripdrive_signup_company as string | undefined;
+        const signupAdminEmail = session.metadata?.tripdrive_signup_admin_email as string | undefined;
+        const signupAdminName = session.metadata?.tripdrive_signup_admin_name as string | undefined;
+        const signupPlan = (session.metadata?.tripdrive_signup_plan as string | undefined) ?? 'pro';
+
+        let tripdriveCustomerId: string | null = existingCustomerId ?? null;
+
+        if (!tripdriveCustomerId && signupCompany && signupAdminEmail && signupAdminName) {
+          // Provisión nueva — crea customer + user_profile + auth user.
+          tripdriveCustomerId = await provisionNewCustomerFromSignup({
+            adminClient: admin,
+            stripe,
+            companyName: signupCompany,
+            adminName: signupAdminName,
+            adminEmail: signupAdminEmail,
+            plan: signupPlan,
+            stripeCustomerId,
+            stripeSubscriptionId: subscriptionId,
+          });
+        }
+
+        if (!tripdriveCustomerId) {
+          // Fallback: intentar resolver por stripe_customer_id si ya existía.
+          tripdriveCustomerId = await resolveCustomerByStripeId(admin, stripeCustomerId);
+        }
+
+        if (!tripdriveCustomerId) {
+          logger.error('stripe.webhook.checkout_unresolved_customer', {
             event_id: event.id,
             stripe_customer_id: stripeCustomerId,
+            had_signup_metadata: Boolean(signupCompany),
           });
           break;
         }
@@ -96,11 +128,12 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
             stripe_subscription_id: subscriptionId,
             subscription_status: sub.status,
             subscription_current_period_end: subscriptionItemPeriodEnd(sub),
+            // Si era una provisión nueva, ya quedó como 'active'. Para
+            // existentes, este update no toca status (omitido del payload).
           })
           .eq('id', tripdriveCustomerId);
 
-        // Sync inicial de quantities — el checkout ya creó las cantidades
-        // correctas, pero llamamos sync para poblar last_synced_* y el audit.
+        // Sync inicial de quantities.
         await syncSeats({
           customerId: tripdriveCustomerId,
           reason: 'webhook',
@@ -231,4 +264,179 @@ function invoiceSubscriptionId(invoice: Stripe.Invoice): string | null {
   const raw = (invoice as unknown as { subscription?: string | { id: string } }).subscription;
   if (!raw) return null;
   return typeof raw === 'string' ? raw : raw.id;
+}
+
+/**
+ * Self-serve signup desde la landing: materializa customer + user_profile +
+ * auth user al confirmarse el pago. Idempotente: si el email ya existe como
+ * user_profile (porque un webhook duplicado disparó), retorna el customer_id
+ * existente sin duplicar.
+ *
+ * Pasos:
+ *  1. slugify(companyName) único (sufijo numérico si colisión).
+ *  2. Insert customer (status='active' porque ya pagó, tier=plan).
+ *  3. Crear auth user via Supabase admin invite (manda magic link).
+ *  4. Insert user_profile con role='admin', must_reset_password=true,
+ *     customer_id=nuevo.
+ *
+ * Si cualquier paso falla, rollback best-effort. NO tiramos error al webhook
+ * — devolvemos null y el log capturará el problema; idempotency de Stripe
+ * eventualmente re-disparará.
+ */
+async function provisionNewCustomerFromSignup(opts: {
+  adminClient: ReturnType<typeof createServiceRoleClient>;
+  stripe: Stripe;
+  companyName: string;
+  adminName: string;
+  adminEmail: string;
+  plan: string;
+  stripeCustomerId: string;
+  stripeSubscriptionId: string;
+}): Promise<string | null> {
+  const { adminClient, companyName, adminName, adminEmail, plan, stripeCustomerId, stripeSubscriptionId } = opts;
+
+  // Idempotency: si el user_profile ya existe (webhook duplicado), retorna
+  // el customer existente. Stripe puede re-disparar el mismo event.id.
+  const { data: existingProfile } = await adminClient
+    .from('user_profiles')
+    .select('id, customer_id')
+    .eq('email', adminEmail)
+    .maybeSingle();
+  if (existingProfile?.customer_id) {
+    logger.info('stripe.webhook.signup_idempotent', {
+      admin_email: adminEmail,
+      customer_id: existingProfile.customer_id,
+    });
+    return existingProfile.customer_id as string;
+  }
+
+  // Si el stripe_customer_id ya tiene un customer asociado (caso edge:
+  // re-firma con mismo Stripe customer), reutilizamos.
+  const { data: existingCustomer } = await adminClient
+    .from('customers')
+    .select('id')
+    .eq('stripe_customer_id', stripeCustomerId)
+    .maybeSingle();
+  if (existingCustomer?.id) {
+    return existingCustomer.id as string;
+  }
+
+  // 1. Generar slug único.
+  const baseSlug = slugifyForCustomer(companyName);
+  const slug = await findAvailableSlug(adminClient, baseSlug);
+
+  // 2. Insert customer. La landing UI dice "Operación / Pro / Enterprise",
+  // pero el enum customer_tier en BD es 'starter' | 'pro' | 'enterprise'.
+  // Mapeamos: operacion → starter; otros pasan tal cual.
+  const tier: 'starter' | 'pro' | 'enterprise' =
+    plan === 'operacion' ? 'starter' : plan === 'enterprise' ? 'enterprise' : 'pro';
+  const { data: newCustomer, error: cErr } = await adminClient
+    .from('customers')
+    .insert({
+      slug,
+      name: companyName,
+      tier,
+      status: 'active',
+      stripe_customer_id: stripeCustomerId,
+      stripe_subscription_id: stripeSubscriptionId,
+    })
+    .select('id')
+    .single();
+  if (cErr || !newCustomer) {
+    logger.error('stripe.webhook.signup_customer_insert_failed', {
+      admin_email: adminEmail,
+      slug,
+      err: cErr?.message,
+    });
+    return null;
+  }
+  const customerId = newCustomer.id as string;
+
+  // 3. Crear auth user con magic link.
+  const redirectTo = `${process.env.NEXT_PUBLIC_PLATFORM_URL ?? 'https://app.tripdrive.xyz'}/login`;
+  const { data: invited, error: inviteErr } = await adminClient.auth.admin.inviteUserByEmail(adminEmail, {
+    data: { full_name: adminName, signup_via: 'landing' },
+    redirectTo,
+  });
+  if (inviteErr || !invited.user) {
+    logger.error('stripe.webhook.signup_invite_failed', {
+      admin_email: adminEmail,
+      customer_id: customerId,
+      err: inviteErr?.message,
+    });
+    // Rollback customer — sin admin user, queda huérfano.
+    await adminClient.from('customers').delete().eq('id', customerId);
+    return null;
+  }
+  const userId = invited.user.id;
+
+  // 4. Insert user_profile linked al nuevo customer con role admin.
+  const { error: pErr } = await adminClient.from('user_profiles').insert({
+    id: userId,
+    customer_id: customerId,
+    email: adminEmail,
+    full_name: adminName,
+    role: 'admin',
+    zone_id: null,
+    phone: null,
+    must_reset_password: true,
+    is_active: true,
+  });
+  if (pErr) {
+    logger.error('stripe.webhook.signup_profile_insert_failed', {
+      admin_email: adminEmail,
+      customer_id: customerId,
+      err: pErr.message,
+    });
+    // Rollback auth user + customer.
+    await adminClient.auth.admin.deleteUser(userId).catch(() => {});
+    await adminClient.from('customers').delete().eq('id', customerId);
+    return null;
+  }
+
+  logger.info('stripe.webhook.signup_provisioned', {
+    customer_id: customerId,
+    admin_email: adminEmail,
+    company: companyName,
+    plan: tier,
+  });
+
+  return customerId;
+}
+
+/**
+ * Convierte "Distribuidora Sol S.A. de C.V." → "distribuidora-sol".
+ * Stripping caracteres no-ASCII + spaces → dashes + lowercase.
+ * Max 40 chars (queda margen para sufijo numérico).
+ */
+function slugifyForCustomer(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '') // strip diacritics
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+}
+
+/**
+ * Encuentra un slug disponible: si "distribuidora-sol" existe, intenta
+ * "distribuidora-sol-2", "distribuidora-sol-3", etc.
+ */
+async function findAvailableSlug(
+  admin: ReturnType<typeof createServiceRoleClient>,
+  base: string,
+): Promise<string> {
+  let slug = base || `customer-${Date.now()}`;
+  for (let suffix = 0; suffix < 100; suffix++) {
+    const candidate = suffix === 0 ? slug : `${slug}-${suffix + 1}`;
+    const { data } = await admin
+      .from('customers')
+      .select('id')
+      .eq('slug', candidate)
+      .maybeSingle();
+    if (!data) return candidate;
+  }
+  // Fallback extremadamente improbable.
+  return `${slug}-${Date.now()}`;
 }
