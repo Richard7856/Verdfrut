@@ -195,6 +195,22 @@ export function MultiRouteMap({ routes, mapboxToken, className, onBulkAction }: 
   const toggleStopSelectionRef = useRef(toggleStopSelection);
   toggleStopSelectionRef.current = toggleStopSelection;
 
+  // ─── Phase 3: Drag-rectangle (lasso) con Shift+drag ────────────────
+  // Estado del rectángulo de selección: coordenadas en pixels relativas al
+  // container del mapa. null = no estamos dibujando.
+  const [lassoBox, setLassoBox] = useState<{
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+  } | null>(null);
+
+  // Ref viva para el handler que se registra una sola vez.
+  const routesRef = useRef(routes);
+  routesRef.current = routes;
+  const hiddenIdsRef = useRef(hiddenIds);
+  hiddenIdsRef.current = hiddenIds;
+
   useEffect(() => {
     if (!containerRef.current || !mapboxToken) return;
     setMapboxToken(mapboxToken);
@@ -373,6 +389,128 @@ export function MultiRouteMap({ routes, mapboxToken, className, onBulkAction }: 
     }
   }, [selectedStopIds, selectionMode, routes]);
 
+  // Phase 3: Drag-rectangle. Se activa con Shift+drag sobre el container
+  // del mapa cuando selectionMode está ON. Sin Shift, el mapbox dragPan
+  // normal sigue funcionando — el usuario puede paner libremente.
+  useEffect(() => {
+    if (!selectionMode) return;
+    const map = mapRef.current;
+    const container = containerRef.current;
+    if (!map || !container) return;
+
+    let dragging = false;
+    let startX = 0;
+    let startY = 0;
+
+    const containerRect = () => container.getBoundingClientRect();
+
+    const onMouseDown = (e: MouseEvent) => {
+      // Solo activamos lasso con Shift+drag. Sin Shift, deja que mapbox
+      // haga su pan normal. Esto es el patrón estándar de tools como Figma.
+      if (!e.shiftKey) return;
+      // Ignorar si el click es sobre un marker (los markers tienen su
+      // propio click handler para toggle individual).
+      const target = e.target as HTMLElement | null;
+      if (target && target.dataset?.stopId) return;
+
+      e.preventDefault();
+      // Inhabilitar interacciones de mapbox mientras dibujamos el rectángulo.
+      map.dragPan.disable();
+      map.boxZoom.disable();
+      map.scrollZoom.disable();
+
+      const rect = containerRect();
+      startX = e.clientX - rect.left;
+      startY = e.clientY - rect.top;
+      dragging = true;
+      setLassoBox({ x1: startX, y1: startY, x2: startX, y2: startY });
+    };
+
+    const onMouseMove = (e: MouseEvent) => {
+      if (!dragging) return;
+      const rect = containerRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      setLassoBox({ x1: startX, y1: startY, x2: x, y2: y });
+    };
+
+    const onMouseUp = (e: MouseEvent) => {
+      if (!dragging) return;
+      dragging = false;
+
+      // Re-habilitar interacciones de mapbox.
+      map.dragPan.enable();
+      map.boxZoom.enable();
+      map.scrollZoom.enable();
+
+      const rect = containerRect();
+      const endX = e.clientX - rect.left;
+      const endY = e.clientY - rect.top;
+
+      // Bounding box normalizado (min/max).
+      const minX = Math.min(startX, endX);
+      const maxX = Math.max(startX, endX);
+      const minY = Math.min(startY, endY);
+      const maxY = Math.max(startY, endY);
+
+      // Si el rectángulo es minúsculo (<5px), tratarlo como click — limpiar
+      // sin seleccionar nada.
+      if (maxX - minX < 5 && maxY - minY < 5) {
+        setLassoBox(null);
+        return;
+      }
+
+      // Para cada stop, proyectar su lng/lat a screen coords y verificar
+      // si cae dentro del rectángulo. Solo stops visibles (ruta no oculta).
+      const currentRoutes = routesRef.current;
+      const currentHidden = hiddenIdsRef.current;
+      const newlySelected = new Set<string>();
+      for (const r of currentRoutes) {
+        if (currentHidden.has(r.routeId)) continue;
+        for (const s of r.stops) {
+          const pixel = map.project([s.lng, s.lat]);
+          if (
+            pixel.x >= minX &&
+            pixel.x <= maxX &&
+            pixel.y >= minY &&
+            pixel.y <= maxY
+          ) {
+            newlySelected.add(s.stopId);
+          }
+        }
+      }
+
+      // Agregar al set existente (no reemplazar — útil para construir
+      // selecciones incrementales en múltiples lassoes).
+      if (newlySelected.size > 0) {
+        setSelectedStopIds((prev) => {
+          const next = new Set(prev);
+          for (const id of newlySelected) next.add(id);
+          return next;
+        });
+      }
+      setLassoBox(null);
+    };
+
+    // Listen on container (mousedown) y window (mousemove/up) para no perder
+    // el drag si el mouse sale del container.
+    container.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+
+    return () => {
+      container.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      // Si quedó en estado dragging por unmount sorpresivo, re-habilitar.
+      if (dragging) {
+        map.dragPan.enable();
+        map.boxZoom.enable();
+        map.scrollZoom.enable();
+      }
+    };
+  }, [selectionMode]);
+
   // Aplicar hidden state: ocultar/mostrar markers + polyline por ruta.
   useEffect(() => {
     const map = mapRef.current;
@@ -449,6 +587,27 @@ export function MultiRouteMap({ routes, mapboxToken, className, onBulkAction }: 
               : 'h-[500px] overflow-hidden rounded-[var(--radius-lg)] border border-[var(--color-border)]'
           }
         />
+        {/* Hint discreto cuando modo selección está ON sin nada seleccionado.
+            Sirve para que el user descubra Shift+drag (lasso). */}
+        {selectionMode && selectedStopIds.size === 0 && !lassoBox && (
+          <div className="pointer-events-none absolute bottom-4 left-4 z-10 rounded-lg border border-[var(--vf-line)] bg-[var(--vf-bg-elev)]/90 px-3 py-2 text-xs text-[var(--vf-text-mute)] shadow-md backdrop-blur">
+            💡 Click pin para seleccionar · <kbd className="rounded bg-[var(--vf-bg-sub)] px-1 py-0.5 font-mono text-[10px]">Shift</kbd>+drag para rectángulo · <kbd className="rounded bg-[var(--vf-bg-sub)] px-1 py-0.5 font-mono text-[10px]">⌘A</kbd> todos · <kbd className="rounded bg-[var(--vf-bg-sub)] px-1 py-0.5 font-mono text-[10px]">Esc</kbd> salir
+          </div>
+        )}
+
+        {/* Phase 3: rectángulo visual del lasso (Shift+drag). */}
+        {lassoBox && (
+          <div
+            className="pointer-events-none absolute z-20 border-2 border-emerald-400 bg-emerald-400/10"
+            style={{
+              left: Math.min(lassoBox.x1, lassoBox.x2),
+              top: Math.min(lassoBox.y1, lassoBox.y2),
+              width: Math.abs(lassoBox.x2 - lassoBox.x1),
+              height: Math.abs(lassoBox.y2 - lassoBox.y1),
+            }}
+          />
+        )}
+
         {/* Toolbar flotante superior derecha — fullscreen + modo selección. */}
         <div className="absolute right-3 top-3 z-10 flex gap-2">
           {selectionAvailable && (
@@ -456,7 +615,11 @@ export function MultiRouteMap({ routes, mapboxToken, className, onBulkAction }: 
               type="button"
               onClick={() => setSelectionMode((v) => !v)}
               aria-label={selectionMode ? 'Salir de modo selección' : 'Modo selección'}
-              title={selectionMode ? 'Salir del modo selección (Esc)' : 'Modo selección — elegir múltiples paradas para acciones masivas'}
+              title={
+                selectionMode
+                  ? 'Salir del modo selección · Esc limpia · Cmd+A todos · Shift+drag rectángulo'
+                  : 'Modo selección — click pin para toggle · Shift+drag para rectángulo · Cmd+A todos'
+              }
               className={`grid h-9 place-items-center rounded-md border px-3 text-xs font-medium shadow-md transition-colors ${
                 selectionMode
                   ? 'border-emerald-700 bg-emerald-600 text-white hover:bg-emerald-700'
@@ -669,6 +832,38 @@ function SelectionToolbar({
       document.removeEventListener('click', onClick);
     };
   }, [moveDropdownOpen]);
+
+  // Cuando está procesando, mostrar barra de progreso compacta en lugar de
+  // los botones (mejor UX que solo "disabled" — el user no entendía que estaba
+  // trabajando).
+  if (busy) {
+    return (
+      <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-4">
+        <div className="pointer-events-auto flex items-center gap-3 rounded-xl border border-emerald-700 bg-emerald-950/80 px-4 py-2.5 shadow-2xl backdrop-blur">
+          <svg
+            className="h-4 w-4 animate-spin text-emerald-400"
+            viewBox="0 0 24 24"
+            fill="none"
+          >
+            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" opacity="0.3" />
+            <path
+              d="M22 12a10 10 0 0 1-10 10"
+              stroke="currentColor"
+              strokeWidth="3"
+              strokeLinecap="round"
+            />
+          </svg>
+          <span className="text-sm font-medium text-emerald-100">
+            Moviendo {count} {count === 1 ? 'parada' : 'paradas'}…
+          </span>
+          <span className="text-xs text-emerald-300/70">
+            Esto puede tardar {count > 10 ? '10-20s' : 'unos segundos'} — re-numera rutas y
+            recalcula ETAs.
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-center px-4">
