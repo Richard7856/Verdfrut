@@ -86,6 +86,30 @@ export interface ToolDefinition<TArgs = Record<string, unknown>, TResult = unkno
   handler: (args: TArgs, ctx: ToolContext) => Promise<ToolResult<TResult>>;
 }
 
+/**
+ * Roles de agente runtime (Stream R, ROADMAP 2026-05-15).
+ *
+ * - `orchestrator`: agente generalista que ve al usuario directo. Maneja
+ *   conversación, decide cuándo delegar, llama tools de alto nivel.
+ * - `geo`: agente especialista en geocoding/validación de coords/matriz
+ *   de distancias. Patrón "tool batch worker": el orchestrator lo invoca
+ *   via `delegate_to_geo` con input estructurado; corre un loop interno
+ *   de tool calls y devuelve resultado estructurado. NO conversa con el
+ *   usuario directo.
+ * - `router`: agente especialista en armado/optimización/edición de
+ *   rutas. Patrón "conversation handoff": cuando el orchestrator detecta
+ *   intent de routing, el router toma la conversación con prompt rico
+ *   (capas 1-4 del Optimization Engine, costos MXN, jornada legal). El
+ *   user ve un badge "modo routing". El control vuelve al orchestrator
+ *   cuando el user cambia de tema o el router cierra el flujo.
+ *
+ * Sprint R1 (current): el runner acepta el parámetro pero solo
+ * `orchestrator` está cableado a callers reales. R2 activa geo. R3
+ * activa router. Por seguridad, los roles inactivos se pueden invocar
+ * pero su prompt es un stub que rehúsa actuar.
+ */
+export type AgentRole = 'orchestrator' | 'geo' | 'router';
+
 /** Para el preview de confirmación: descripción humana del impacto. */
 export interface ConfirmationPreview {
   toolName: string;

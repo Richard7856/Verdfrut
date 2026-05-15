@@ -16,6 +16,8 @@ import { WRITE_TOOLS } from './writes';
 import { PLACES_TOOLS } from './places';
 import { XLSX_TOOLS } from './xlsx';
 import { OPTIMIZE_TOOLS } from './optimize';
+// Stream R / Sprint R2 (2026-05-15): delegación a sub-agentes especialistas.
+import { DELEGATE_TOOLS } from './delegate';
 
 export const TOOLS: ReadonlyArray<ToolDefinition> = [
   ...READ_TOOLS,
@@ -23,6 +25,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
   ...PLACES_TOOLS,
   ...XLSX_TOOLS,
   ...OPTIMIZE_TOOLS,
+  ...DELEGATE_TOOLS,
 ];
 
 const TOOLS_BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));

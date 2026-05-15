@@ -146,6 +146,26 @@ export async function POST(req: Request) {
     }
   }
 
+  // Stream R / Sprint R3 (ADR-101): leer active_agent_role de la sesión.
+  // Defensa: si la migración 046 no está aplicada, el SELECT falla con
+  // 42703 (column does not exist) y caemos a 'orchestrator' (default
+  // pre-R3). Sesiones legacy también dan 'orchestrator' por DB DEFAULT.
+  let initialRole: 'orchestrator' | 'geo' | 'router' = 'orchestrator';
+  {
+    const { data: sessionRole, error: roleErr } = await admin
+      .from('orchestrator_sessions')
+      .select('active_agent_role' as never)
+      .eq('id', sessionId)
+      .maybeSingle();
+    if (!roleErr && sessionRole) {
+      const r = (sessionRole as { active_agent_role?: unknown }).active_agent_role;
+      if (r === 'router' || r === 'geo' || r === 'orchestrator') {
+        initialRole = r;
+      }
+    }
+    // Si roleErr, fallback silencioso a 'orchestrator' (migración pendiente).
+  }
+
   // Cargar historial de mensajes para reconstruir contexto de Anthropic.
   // Las filas en orchestrator_messages tienen `content` JSONB con el shape
   // del API de Anthropic (text, tool_use, tool_result blocks).
@@ -233,7 +253,20 @@ export async function POST(req: Request) {
           }
         }
 
+        // Anuncia el rol activo al cliente para que la UI muestre el badge
+        // ("modo routing", "modo orchestrator", etc.) ANTES de empezar el loop.
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({ type: 'active_role', role: initialRole })}\n\n`,
+          ),
+        );
+
         const { finalHistory, pendingConfirmation } = await runOrchestrator({
+          // Stream R: el rol viene del estado de la sesión (orchestrator_sessions
+          // .active_agent_role). Las tools `enter_router_mode` / `exit_router_mode`
+          // actualizan ese estado durante el turno; al final del turno releemos
+          // el rol y emitimos un evento si cambió.
+          role: initialRole,
           history: workingHistory,
           userMessage:
             payload.confirmation && !confirmationForRunner ? '' : payload.message ?? '',
@@ -242,6 +275,34 @@ export async function POST(req: Request) {
           toolContext,
           emit,
         });
+
+        // R3: detectar si el rol cambió durante el turno (alguna tool llamó
+        // a enter_/exit_router_mode) y notificar al cliente. Defensa: si la
+        // migración 046 no está, el SELECT falla y no emitimos transición.
+        try {
+          const { data: postRole } = await admin
+            .from('orchestrator_sessions')
+            .select('active_agent_role' as never)
+            .eq('id', sessionId)
+            .maybeSingle();
+          const newRole = (postRole as { active_agent_role?: unknown } | null)?.active_agent_role;
+          if (
+            (newRole === 'orchestrator' || newRole === 'router' || newRole === 'geo') &&
+            newRole !== initialRole
+          ) {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  type: 'role_changed',
+                  from: initialRole,
+                  to: newRole,
+                })}\n\n`,
+              ),
+            );
+          }
+        } catch {
+          // Migración 046 no aplicada o falla — silencioso, no es bloqueante.
+        }
 
         // Persistir mensajes nuevos del turno a BD.
         // Solo escribimos los que NO estaban en el historial original

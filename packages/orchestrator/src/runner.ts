@@ -7,10 +7,11 @@
 // 2.5: integra quota check + audit completo.
 
 import Anthropic from '@anthropic-ai/sdk';
-import { SYSTEM_PROMPT } from './prompts/system';
+import { SYSTEM_PROMPTS } from './prompts';
 import { getTool, listToolsForCustomer } from './tools/registry';
+import { getRoleToolNames } from './tools/role-mapping';
 import { enrichPreviewForTool, type EnrichedPreview } from './previews';
-import type { ToolContext, ToolDefinition, ToolResult } from './types';
+import type { AgentRole, ToolContext, ToolDefinition, ToolResult } from './types';
 
 // Modelo configurable via env. Default Sonnet 4.6 con extended thinking.
 // Para downgrade temporal (testing, control de costo): setear
@@ -65,6 +66,17 @@ export type RunnerEvent =
   | { type: 'error'; message: string };
 
 export interface RunnerInput {
+  /**
+   * Rol del agente (Stream R, ROADMAP 2026-05-15). Determina system prompt
+   * + subset de tools disponibles. Default `'orchestrator'` por backward
+   * compatibility — los callers existentes (api/orchestrator/chat) no
+   * necesitan cambiar hasta R2/R3.
+   *
+   * Sprint R1: solo `'orchestrator'` está cableado en producción. `'geo'`
+   * y `'router'` aceptan la invocación pero responden con stub explicando
+   * que el modo no está activo (defensa contra activación accidental).
+   */
+  role?: AgentRole;
   /** Historial previo de la sesión (mensajes para reconstruir contexto). */
   history: Anthropic.MessageParam[];
   /**
@@ -105,8 +117,16 @@ export async function runOrchestrator(input: RunnerInput): Promise<{
     apiKey: process.env.ANTHROPIC_API_KEY ?? '',
   });
 
-  // Tools disponibles para este caller.
-  const availableTools = listToolsForCustomer(input.callerRole, input.toolsAllowlist);
+  // Resolución de rol. Default 'orchestrator' = comportamiento previo a R1.
+  const role: AgentRole = input.role ?? 'orchestrator';
+  const systemPrompt = SYSTEM_PROMPTS[role];
+  const roleAllowedToolNames = new Set(getRoleToolNames(role));
+
+  // Tools disponibles: intersección (rol AND customer plan AND callerRole).
+  // El filtro por rol va PRIMERO porque define qué dominios maneja este
+  // agente; el filtro por customer/role/allowlist es defensa en profundidad.
+  const customerVisibleTools = listToolsForCustomer(input.callerRole, input.toolsAllowlist);
+  const availableTools = customerVisibleTools.filter((t) => roleAllowedToolNames.has(t.name));
 
   if (availableTools.length === 0) {
     await input.emit({
@@ -165,7 +185,7 @@ export async function runOrchestrator(input: RunnerInput): Promise<{
       system: [
         {
           type: 'text',
-          text: SYSTEM_PROMPT,
+          text: systemPrompt,
           cache_control: { type: 'ephemeral' },
         },
       ],
