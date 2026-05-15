@@ -40,8 +40,9 @@ const NAV_ITEMS: NavItem[] = [
   // mostrar la visión del feature en la presentación.
   { href: '/customers', label: 'Clientes', roles: ['admin', 'dispatcher'], group: 'CLIENTES', badge: 'Nuevo' },
 
+  { href: '/dia', label: '📅 Día', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
   { href: '/routes', label: 'Rutas', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
-  { href: '/dispatches', label: 'Tiros (agrupar rutas)', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
+  { href: '/dispatches', label: 'Tiros (planeación)', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
   { href: '/settings/vehicles', label: 'Flotilla', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
   { href: '/settings/depots', label: 'CEDIS / Hubs', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
   { href: '/incidents', label: 'Incidencias', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
