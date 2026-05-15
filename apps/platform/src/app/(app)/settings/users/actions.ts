@@ -15,6 +15,22 @@ import {
   type ActionResult,
 } from '@/lib/validation';
 import type { UserRole } from '@tripdrive/types';
+import { createServiceRoleClient } from '@tripdrive/supabase/server';
+import { syncSeatsBackground } from '@/lib/stripe/sync-seats';
+
+/**
+ * Resolver helper: obtiene el customer_id del caller. Usado para disparar
+ * `syncSeatsBackground` tras cambios que afectan el conteo de seats.
+ */
+async function resolveCallerCustomerId(userId: string): Promise<string | null> {
+  const admin = createServiceRoleClient();
+  const { data } = await admin
+    .from('user_profiles')
+    .select('customer_id')
+    .eq('id', userId)
+    .maybeSingle();
+  return (data?.customer_id as string | undefined) ?? null;
+}
 
 // `as const` hace el array readonly — defensa contra mutación accidental
 // desde otro request en el server runtime (módulo compartido).
@@ -29,9 +45,10 @@ export interface InviteActionResult extends ActionResult {
 }
 
 export async function inviteUserAction(formData: FormData): Promise<InviteActionResult> {
-  await requireRole('admin');
+  const caller = await requireRole('admin');
 
   let inviteLink: string | undefined;
+  let invitedRole: UserRole | undefined;
   const result = await runAction(async () => {
     const email = requireString('email', formData.get('email'), {
       pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
@@ -62,19 +79,54 @@ export async function inviteUserAction(formData: FormData): Promise<InviteAction
       licenseNumber,
     });
     inviteLink = res.inviteLink;
+    invitedRole = role;
 
     revalidatePath('/settings/users');
   });
+
+  // Sync Stripe seats si invitamos a un rol facturable (admin/dispatcher/driver).
+  // zone_manager no es seat — supervisa pero no opera ni paga. Background:
+  // no bloquea el flujo del admin que recién invitó.
+  if (
+    result.ok &&
+    invitedRole &&
+    invitedRole !== 'zone_manager'
+  ) {
+    const customerId = await resolveCallerCustomerId(caller.id);
+    if (customerId) {
+      syncSeatsBackground({
+        customerId,
+        reason: invitedRole === 'driver' ? 'driver_created' : 'user_promoted',
+        triggeredBy: caller.id,
+      });
+    }
+  }
 
   return { ...result, inviteLink: result.ok ? inviteLink : undefined };
 }
 
 export async function toggleUserActiveAction(id: string, isActive: boolean): Promise<ActionResult> {
-  await requireRole('admin');
-  return runAction(async () => {
+  const caller = await requireRole('admin');
+  const result = await runAction(async () => {
     await updateUser(id, { isActive });
     revalidatePath('/settings/users');
   });
+
+  // Sync Stripe seats: cualquier cambio en is_active mueve la cuenta.
+  // Si se desactivó un zone_manager o un usuario no facturable, syncSeats
+  // detecta "no_change" y short-circuita sin llamar a Stripe.
+  if (result.ok) {
+    const customerId = await resolveCallerCustomerId(caller.id);
+    if (customerId) {
+      syncSeatsBackground({
+        customerId,
+        reason: isActive ? 'driver_reactivated' : 'driver_deactivated',
+        triggeredBy: caller.id,
+      });
+    }
+  }
+
+  return result;
 }
 
 /**

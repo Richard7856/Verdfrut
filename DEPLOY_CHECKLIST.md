@@ -38,6 +38,11 @@ Las 3 apps (`tripdrive-platform`, `tripdrive-driver`, `tripdrive-control-plane`)
 | `TENANT_BBOX_LAT_MAX` | `32.8` (default) | No |
 | `TENANT_BBOX_LNG_MIN` | `-118.7` (default) | No |
 | `TENANT_BBOX_LNG_MAX` | `-86.5` (default) | No |
+| **`STRIPE_SECRET_KEY`** | `sk_test_...` o `sk_live_...` desde Stripe Dashboard → Developers → API keys | ⚠ **Sí para billing.** Sin esto, /settings/billing muestra warning y syncSeats es no-op silencioso. Resto del sistema sigue funcionando. |
+| **`STRIPE_WEBHOOK_SECRET`** | `whsec_...` desde el endpoint del webhook en Stripe Dashboard | ⚠ **Sí para procesar eventos** (confirmación de pago, renovaciones). Si falta, el webhook rechaza con 503 y Stripe reintenta hasta darse por vencido. |
+| **`STRIPE_PRICE_ID_ADMIN`** | `price_...` del Product "TripDrive - Admin seat" (recurring monthly MXN) | ⚠ Sí — checkout falla con 500 si no está |
+| **`STRIPE_PRICE_ID_DRIVER`** | `price_...` del Product "TripDrive - Driver seat" (recurring monthly MXN) | ⚠ Sí — checkout falla con 500 si no está |
+| `NEXT_PUBLIC_BILLING_RETURN_URL` | Base URL para retorno desde Stripe checkout (ej. `https://tripdrive.xyz`). Si falta, cae a `NEXT_PUBLIC_PLATFORM_URL` o localhost | No (default funciona en prod si hay PLATFORM_URL) |
 
 ### Driver (`tripdrive-driver`)
 
@@ -60,6 +65,58 @@ Las 3 apps (`tripdrive-platform`, `tripdrive-driver`, `tripdrive-control-plane`)
 | `CP_SHARED_PASSWORD` | password compartida del staff (ver ADR del CP) | Sí — sin esto no logueas |
 | `CP_COOKIE_SECRET` | HMAC secret para firmar cookies | Sí |
 | `TENANT_REGISTRY_PATH` | `/etc/tripdrive/tenants.json` | Sí en self-hosted; opcional en Vercel |
+
+---
+
+## 💳 Stripe Dashboard — setup inicial (~15 min)
+
+Antes de cobrar al primer cliente, configurar en https://dashboard.stripe.com:
+
+### 1. Crear los 2 Products (uno por tipo de seat)
+
+**Product 1: "TripDrive Pro — Admin seat"**
+- Tipo: Recurring
+- Billing period: Monthly
+- Currency: MXN
+- Precio: el que decidas (ej. $499/mes/admin)
+- Después de crear: copia el `price_id` (`price_...`) → eso va en `STRIPE_PRICE_ID_ADMIN`
+
+**Product 2: "TripDrive Pro — Driver seat"**
+- Mismo setup, currency MXN, monthly
+- Precio: el que decidas (ej. $199/mes/chofer)
+- Copia el `price_id` → `STRIPE_PRICE_ID_DRIVER`
+
+### 2. Crear webhook endpoint
+
+Developers → Webhooks → Add endpoint:
+- URL: `https://<tu-platform-domain>/api/billing/webhook`
+- Eventos a escuchar:
+  - `checkout.session.completed`
+  - `customer.subscription.updated`
+  - `customer.subscription.deleted`
+  - `invoice.paid`
+  - `invoice.payment_failed`
+
+Después de crear: copia el **Signing secret** (`whsec_...`) → `STRIPE_WEBHOOK_SECRET`.
+
+### 3. API key
+
+Developers → API keys → Secret key (en test mode al principio, switch a live después).
+Copia → `STRIPE_SECRET_KEY`.
+
+### 4. Customer Portal (opcional pero recomendado)
+
+Settings → Customer portal → Activar y configurar qué puede editar el cliente
+(cancelar suscripción, actualizar payment method, ver invoices). Al activarlo,
+el botón "Administrar suscripción" del platform abre el portal automáticamente.
+
+### Verificación post-setup
+
+1. En el platform: ir a `/settings/billing` como admin. Debe mostrar status "Sin suscripción" + botón "💳 Empezar Pro".
+2. Click → redirect a Stripe Checkout → completar con tarjeta de prueba `4242 4242 4242 4242`.
+3. Tras éxito, regresar a `/settings/billing` → status "Activa" + breakdown de seats.
+4. En Stripe Dashboard: la subscription aparece con quantities = (admins activos, drivers activos).
+5. Crear un nuevo chofer → en `customers.last_seats_synced_at` debe actualizarse + Stripe muestra quantity+1.
 
 ---
 

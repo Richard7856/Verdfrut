@@ -56,6 +56,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/audit/chat-failures', label: 'Auditoría · chat', roles: ['admin'], group: 'SISTEMA' },
   { href: '/settings/zones', label: 'Zonas', roles: ['admin'], group: 'SISTEMA' },
   { href: '/settings/users', label: 'Usuarios', roles: ['admin'], group: 'SISTEMA' },
+  { href: '/settings/billing', label: '💳 Suscripción', roles: ['admin'], group: 'SISTEMA' },
 ];
 
 const GROUP_ORDER: NavItem['group'][] = ['GENERAL', 'CLIENTES', 'OPERACIÓN', 'CATÁLOGO', 'SISTEMA'];

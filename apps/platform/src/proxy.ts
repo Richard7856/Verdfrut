@@ -21,6 +21,10 @@ const PUBLIC_PATHS = [
   '/favicon.ico',
   '/api/health',
   '/api/orchestrator/internal/',
+  // Stripe webhook: Stripe nos llama sin cookies; valida la firma con
+  // STRIPE_WEBHOOK_SECRET dentro del handler. Si lo dejamos detrás del
+  // middleware auth, redirige a /login y Stripe ve 200 vacío → falsos OK.
+  '/api/billing/webhook',
 ];
 
 function isPublicPath(pathname: string): boolean {

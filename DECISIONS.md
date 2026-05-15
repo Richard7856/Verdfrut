@@ -5672,8 +5672,99 @@ R3 también desbloquea OE-3 (UI `RouteProposalCard` + tools `propose_route_plan`
 - apps/platform/src/app/api/orchestrator/chat/route.ts:256-302 — paso del rol al runner + detección de cambio + eventos SSE.
 - packages/orchestrator/src/router-handoff.test.ts — 13 tests de invariantes (todos pasan).
 
+---
 
+## [2026-05-15] ADR-102: Stripe per-seat billing (Sprint Stripe)
 
+**Contexto:** TripDrive vende el plan Pro al primer cliente productivo (VerdFrut/NETO) con cobro mañana 2026-05-16. El modelo decidido por el user previamente: 1 Subscription por customer con 2 line items (admin seat + driver seat), cargo proration ON al cambiar quantities, CFDI manejado por el cliente fuera de Stripe (no integramos SAT). La magia operativa: cuando un admin crea/desactiva un chofer desde la UI o el chat AI, las quantities en Stripe se actualizan automáticamente — el cliente jamás abre un form de billing, su uso se traduce a su factura.
+
+**Decisión:**
+
+1. **Migración 047 — `customers` agrega 7 columnas Stripe + tabla `billing_seats_audit`**:
+   - `stripe_customer_id TEXT` (unique partial index) — referencia al customer en Stripe.
+   - `stripe_subscription_id TEXT` (unique partial index) — la subscription activa.
+   - `subscription_status TEXT` — cache del status último reportado vía webhook (`active` / `past_due` / `canceled` / etc.).
+   - `subscription_current_period_end TIMESTAMPTZ` — UI: "próxima factura el X".
+   - `last_synced_admin_seats / last_synced_driver_seats INTEGER` — cache del último conteo que reportamos a Stripe (diagnóstico de drift).
+   - `last_seats_synced_at TIMESTAMPTZ` — timestamp del último sync exitoso.
+   - Tabla `billing_seats_audit` — log de cada cambio de quantity con `reason` (driver_created, driver_deactivated, etc.), `triggered_by` (user_profile), y `stripe_error` si Stripe falló. RLS scoped al mismo customer.
+
+2. **Defensa total contra falta de configuración**:
+   - `getStripe()` devuelve null si `STRIPE_SECRET_KEY` no está seteada → `syncSeats` se vuelve no-op silencioso con `skipReason: 'stripe_not_configured'`.
+   - `requireStripe()` solo se invoca en endpoints que sí necesitan Stripe (checkout / webhook); pages como `/settings/billing` cargan en modo "warning" con CTA explícita.
+   - `syncSeats` también short-circuita si el customer no tiene `stripe_subscription_id` todavía (no completó checkout). Y si Stripe falla mid-request, capturamos el error en el audit pero NO rompemos el flujo del dispatcher — billing es importante pero secundario al cumplimiento operativo.
+
+3. **Helper `syncSeats(customerId, reason, triggeredBy?)`** en `lib/stripe/sync-seats.ts`:
+   - Cuenta admin seats (`user_profiles.role IN ('admin','dispatcher') AND is_active`) y driver seats (`drivers.is_active`) del customer.
+   - Si los conteos no cambiaron vs `last_synced_*` → no llama Stripe (short-circuit). Esto importa: muchas server actions disparan syncSeats por updates triviales (cambiar nombre del chofer); sin el short-circuit cada sesión costaría 20-30 calls a Stripe.
+   - Si cambiaron: fetch subscription para obtener item IDs, `stripe.subscriptions.update` con `proration_behavior: 'create_prorations'`. Audit insert.
+
+4. **Wrapper `syncSeatsBackground(opts)`** para callers donde no queremos esperar latencia Stripe (300-800ms):
+   - Lanza la promise sin awaitar, captura errores al logger. Server action retorna inmediato.
+   - Trade-off: si Stripe se cae durante el background sync, queda en el audit log para retry vía cron (Phase 2).
+
+5. **Endpoint `POST /api/billing/checkout`**:
+   - `requireRole('admin')` — solo el owner, no dispatcher.
+   - Si ya hay subscription activa → redirect al Customer Portal de Stripe.
+   - Si no: crea `stripe.customers.create` con metadata `tripdrive_customer_id`, luego `stripe.checkout.sessions.create` mode=subscription con 2 line items + quantities iniciales (count actual de admins/drivers activos).
+   - Returns `{ url }` → el cliente hace `window.location = url`.
+
+6. **Endpoint `POST /api/billing/webhook`**:
+   - Verifica firma con `STRIPE_WEBHOOK_SECRET` (rechaza 401 si fail) — defensa contra attacker que adivine el endpoint.
+   - Procesa: `checkout.session.completed` (asocia subscription_id, trigger sync inicial), `customer.subscription.updated` (status + period_end), `customer.subscription.deleted` (status canceled, preserva subscription_id para historia), `invoice.paid` / `invoice.payment_failed` (re-fetch status).
+   - Idempotencia: nuestros UPDATEs son last-write-wins sobre los mismos campos, así que un retry de Stripe es seguro sin tabla `processed_stripe_events` (Phase 2 si vemos problemas).
+   - Excluido del middleware auth (`proxy.ts` PUBLIC_PATHS) — Stripe nos llama sin cookies.
+
+7. **UI `/settings/billing`** (admin only):
+   - Card "Estado actual" con badge (Activa / Past_due / Cancelada / Sin suscripción) + tier + próxima factura.
+   - Card "Seats activos" con breakdown admin/driver + warning si hay drift entre count actual y `last_synced_*`.
+   - Botón "💳 Empezar Pro" (sin subscription) o "Administrar suscripción" (con subscription → Customer Portal).
+   - Banner amarillo si Stripe no está configurado (`STRIPE_SECRET_KEY` falta) — para que el dispatcher entienda por qué los seats no se están sincronizando.
+
+8. **Hooks en `apps/platform/src/app/(app)/settings/users/actions.ts`**:
+   - `inviteUserAction`: tras success, si el rol es admin/dispatcher/driver (zone_manager NO es seat) → `syncSeatsBackground({ reason: 'driver_created' | 'user_promoted' })`.
+   - `toggleUserActiveAction`: tras success → `syncSeatsBackground({ reason: 'driver_reactivated' | 'driver_deactivated' })`.
+
+**Alternativas consideradas:**
+- *Tabla separada `subscriptions`*: descartado — cardinalidad 1-1 customer↔subscription, el JOIN sería sin valor. Stripe es source-of-truth; las columnas en customers son cache del último webhook.
+- *Pasar `customerId` desde el caller en lugar de resolverlo*: descartado — el caller (server action) lo conoce vía auth, pero esto duplicaría la lookup en cada call-site. Helper centralizado `resolveCallerCustomerId(userId)` es DRY.
+- *Llamar Stripe en sync mode (await en la server action)*: descartado — latencia 300-800ms × cada cambio = UX degradada. Background con fire-and-forget es invisible para el dispatcher.
+- *Procesar webhooks con idempotencia hard (tabla `processed_stripe_events` + lookup)*: deferred — nuestros UPDATEs ya son idempotentes. Si vemos problemas en producción, agregarlo.
+- *Romper la operación si Stripe falla*: descartado explícitamente. El billing es importante pero NO crítico para la operación diaria; cobrar de menos por unas horas se corrige al siguiente sync, romper la creación de choferes sería peor.
+- *Stripe Tax / CFDI integration*: descartado. El cliente factura aparte por sus canales tradicionales (SAT). Phase 2 si llega cliente que pida SAT vía Stripe.
+- *Pin de `apiVersion` en el cliente Stripe*: descartado — causa type errors cada vez que actualizamos el SDK. Omitir = usa la más reciente que conoce el SDK instalado. Riesgo de breaking change bajo (Stripe mantiene compat en minor bumps).
+
+**Riesgos / Limitaciones:**
+- **Drift entre seats reales y Stripe**: si un admin edita directo en BD (skip server actions) o el orchestrator AI crea drivers vía tool sin hookear syncSeats, queda inconsistencia. Mitigación parcial: la UI muestra warning si `last_synced_* !== count actual`. Mitigación completa pendiente: cron periódico (`syncSeats periodic` 1×/día) que reconcilia todos los customers activos.
+- **Migración 047 aplicada solo al tenant VerdFrut**: el MCP de Supabase está vinculado al project_ref `hidlxgajcjbtlwyxerhy`. Otros tenants no tienen las columnas; el código defensivo cae a "stripe not configured" → no rompe. Aplicar a otros vía `scripts/migrate-all-tenants.sh` antes del 2do cliente.
+- **Webhook signature secret en env vs vault**: el secret va plano en env vars de Vercel. Si un attacker accede al dashboard de Vercel puede leerlo y forjar webhooks. Mitigación parcial: el secret rotable desde Stripe Dashboard sin downtime (rotar quincenal). Mitigación completa pendiente: Vercel Encrypted Env Vars (paid feature) o Supabase Vault.
+- **Customer Portal customization no hecho**: el botón "Administrar suscripción" abre el portal default de Stripe. Si el cliente quiere brand custom, agregar config en Stripe Dashboard (no requiere código). Pendiente Phase 2.
+- **Sin tests de la lógica**: añadir tests requiere mockear stripe SDK + supabase RLS. Aceptado para shipping rápido; los flows críticos (`syncSeats short-circuit`, webhook signature) son verificables manualmente con tarjeta de prueba Stripe.
+- **Email del Stripe customer viene del user_profile que creó el checkout**: si el admin original deja la empresa, los emails de Stripe (recibos, fallos de pago) van a su correo personal. Mitigación pendiente: campo `billing_email` en customers + UI para editarlo.
+- **CFDI no integrado**: el cliente debe facturar el cargo de Stripe vía SAT por su cuenta. Sin esto no pueden deducir el gasto. Aceptado pre-acuerdo con cliente; si bloquea adopción → Phase 2 integra Stripe Tax MX.
+- **`syncSeatsBackground` no garantiza orden**: si el admin crea 5 choferes rápido, las 5 syncs corren en paralelo y la última que termina escribe `last_synced_*`. Race condition benigna: el conteo final es correcto, solo el `last_seats_synced_at` puede no reflejar la última operación. Aceptado.
+- **No hay límite de seats**: si el cliente desactiva todos los choferes, Stripe quantity baja a 0 (Math.max para drivers). Si todos los admins también, quantity admin baja a 1 (mínimo defensive — sin admin no hay quien pague). El borde no está testeado en producción.
+
+**Oportunidades de mejora:**
+- Cron `sync-all-customers` 1×/día — reconcilia drift vs Stripe.
+- Mailgun/Resend para notificar al admin si Stripe webhook falla (past_due crítico).
+- Página `/settings/billing` mostrar historial: `billing_seats_audit` con timeline humano-legible.
+- Tests con `nock` mockeando Stripe API + invariantes de syncSeats short-circuit.
+- Stripe Tax / CFDI MX cuando llegue cliente que lo pida.
+- Vault para `STRIPE_WEBHOOK_SECRET` cuando deploy a más tenants.
+- Phase 2: registro desde landing crea customer + auto-checkout (hoy: el customer existe en BD y el admin logueado paga).
+
+**Refs:**
+- ROADMAP.md → Stream Stripe (prioridad #1 de la sesión).
+- supabase/migrations/00000000000047_customers_stripe_billing.sql — migración aplicada al tenant VerdFrut.
+- apps/platform/src/lib/stripe/client.ts — cliente lazy + defensivo.
+- apps/platform/src/lib/stripe/sync-seats.ts — `syncSeats` + `syncSeatsBackground`.
+- apps/platform/src/app/api/billing/checkout/route.ts — endpoint checkout / portal.
+- apps/platform/src/app/api/billing/webhook/route.ts — handler eventos Stripe.
+- apps/platform/src/app/(app)/settings/billing/{page,billing-actions}.tsx — UI.
+- apps/platform/src/app/(app)/settings/users/actions.ts — hooks `inviteUserAction` y `toggleUserActiveAction`.
+- apps/platform/src/proxy.ts — `/api/billing/webhook` agregado a PUBLIC_PATHS.
+- DEPLOY_CHECKLIST.md — env vars + Stripe Dashboard setup.
 
 
 

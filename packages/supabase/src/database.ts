@@ -186,6 +186,14 @@ export type Database = {
           metadata: Json
           /** ADR-095. Overrides de features por customer (jsonb). */
           feature_overrides: Json
+          /** ADR-102. Stripe billing per-seat — IDs y status de la suscripción. */
+          stripe_customer_id: string | null
+          stripe_subscription_id: string | null
+          subscription_status: string | null
+          subscription_current_period_end: string | null
+          last_synced_admin_seats: number | null
+          last_synced_driver_seats: number | null
+          last_seats_synced_at: string | null
           created_at: string
           updated_at: string
         }
@@ -212,6 +220,13 @@ export type Database = {
           notes?: string | null
           metadata?: Json
           feature_overrides?: Json
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          subscription_status?: string | null
+          subscription_current_period_end?: string | null
+          last_synced_admin_seats?: number | null
+          last_synced_driver_seats?: number | null
+          last_seats_synced_at?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -238,8 +253,51 @@ export type Database = {
           notes?: string | null
           metadata?: Json
           feature_overrides?: Json
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          subscription_status?: string | null
+          subscription_current_period_end?: string | null
+          last_synced_admin_seats?: number | null
+          last_synced_driver_seats?: number | null
+          last_seats_synced_at?: string | null
           created_at?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      billing_seats_audit: {
+        Row: {
+          id: string
+          customer_id: string
+          seat_type: string
+          prev_quantity: number
+          new_quantity: number
+          reason: string
+          triggered_by: string | null
+          stripe_error: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          customer_id: string
+          seat_type: string
+          prev_quantity: number
+          new_quantity: number
+          reason: string
+          triggered_by?: string | null
+          stripe_error?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          customer_id?: string
+          seat_type?: string
+          prev_quantity?: number
+          new_quantity?: number
+          reason?: string
+          triggered_by?: string | null
+          stripe_error?: string | null
+          created_at?: string
         }
         Relationships: []
       }
