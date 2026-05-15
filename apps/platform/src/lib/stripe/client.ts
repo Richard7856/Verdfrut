@@ -215,17 +215,36 @@ export function requirePriceIds(): TierPriceIds {
 }
 
 /**
- * URLs de retorno para checkout (success/cancel). Por defecto al
- * /settings/billing del platform — la página acepta `?success=1` o
- * `?canceled=1` para mostrar toasts.
+ * URLs de retorno para checkout (success/cancel). Resuelve la base URL en
+ * este orden:
+ *   1. `NEXT_PUBLIC_BILLING_RETURN_URL` (override explícito)
+ *   2. `NEXT_PUBLIC_PLATFORM_URL` (URL canónica del platform)
+ *   3. Headers del request actual (host + proto) — robusto en Vercel
+ *      donde el dominio puede variar entre prod/preview/branch deploys.
+ *   4. `http://localhost:3000` como último fallback.
+ *
+ * El path por defecto va a /settings/billing; los call-sites pueden
+ * override con `pathOverride` (ej. signup público redirige a /empezar).
  */
-export function getReturnUrls(): { success: string; cancel: string } {
-  const base =
+export function getReturnUrls(opts?: {
+  reqHeaders?: Headers;
+  pathOverride?: string;
+}): { success: string; cancel: string } {
+  let base =
     process.env.NEXT_PUBLIC_BILLING_RETURN_URL ??
-    process.env.NEXT_PUBLIC_PLATFORM_URL ??
-    'http://localhost:3000';
+    process.env.NEXT_PUBLIC_PLATFORM_URL;
+
+  if (!base && opts?.reqHeaders) {
+    const host = opts.reqHeaders.get('host');
+    const proto = opts.reqHeaders.get('x-forwarded-proto') ?? 'https';
+    if (host) base = `${proto}://${host}`;
+  }
+
+  if (!base) base = 'http://localhost:3000';
+
+  const path = opts?.pathOverride ?? '/settings/billing';
   return {
-    success: `${base}/settings/billing?success=1`,
-    cancel: `${base}/settings/billing?canceled=1`,
+    success: `${base}${path}?success=1`,
+    cancel: `${base}${path}?canceled=1`,
   };
 }

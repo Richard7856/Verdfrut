@@ -29,7 +29,7 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function POST(): Promise<NextResponse> {
+export async function POST(req: Request): Promise<NextResponse> {
   // Sólo admin (no dispatcher) puede iniciar checkout — billing es decisión
   // del owner del customer.
   const profile = await requireRole('admin');
@@ -38,7 +38,7 @@ export async function POST(): Promise<NextResponse> {
   let urls;
   try {
     stripe = requireStripe();
-    urls = getReturnUrls();
+    urls = getReturnUrls({ reqHeaders: req.headers });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Stripe no configurado' },
@@ -166,17 +166,23 @@ export async function POST(): Promise<NextResponse> {
     customerTier,
   );
 
-  // 5. Crear Checkout Session subscription mode con 3 line items: base
-  //    (siempre × 1) + extras (× N sobre el mínimo).
+  // 5. Crear Checkout Session subscription mode. Base siempre × 1; los
+  //    extras solo se incluyen como line item si su quantity > 0 — Stripe
+  //    rechaza con "must be greater than or equal to 1" si mandamos 0.
   try {
+    const lineItems: Array<{ price: string; quantity: number }> = [
+      { price: priceIds.base, quantity: 1 },
+    ];
+    if (extraAdmins > 0) {
+      lineItems.push({ price: priceIds.extraAdmin, quantity: extraAdmins });
+    }
+    if (extraDrivers > 0) {
+      lineItems.push({ price: priceIds.extraDriver, quantity: extraDrivers });
+    }
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       customer: stripeCustomerId,
-      line_items: [
-        { price: priceIds.base, quantity: 1 },
-        { price: priceIds.extraAdmin, quantity: extraAdmins },
-        { price: priceIds.extraDriver, quantity: extraDrivers },
-      ],
+      line_items: lineItems,
       success_url: urls.success,
       cancel_url: urls.cancel,
       subscription_data: {

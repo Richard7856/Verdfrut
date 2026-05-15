@@ -38,7 +38,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   let urls;
   try {
     stripe = requireStripe();
-    urls = getReturnUrls();
+    // Pasamos los headers del request para que getReturnUrls pueda derivar
+    // la base URL del host actual si las env vars no están seteadas. Path
+    // override apunta a /empezar (no a /settings/billing) porque el signup
+    // viene de la landing pública, no del platform logueado.
+    urls = getReturnUrls({ reqHeaders: req.headers, pathOverride: '/empezar' });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Stripe no configurado' },
@@ -165,19 +169,18 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // Crear Checkout Session. Signup nuevo arranca con la licencia base sola
   // (sin extras) — el cliente paga el piso y va invitando admins/choferes
-  // según necesite. Apenas cruce el mínimo (2 admins + 5 choferes), el
-  // syncSeats post-invite ajusta extras automáticamente con proration.
+  // según necesite. Apenas cruce el mínimo del tier, syncSeats post-invite
+  // AGREGA los line items de extras vía subscription.update (Stripe no acepta
+  // quantity 0 al crear; hay que omitir el line item entero).
   try {
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
       customer: stripeCustomerId,
       line_items: [
         { price: priceIds.base, quantity: 1 },
-        { price: priceIds.extraAdmin, quantity: 0 },
-        { price: priceIds.extraDriver, quantity: 0 },
       ],
-      success_url: `${urls.success.replace('/settings/billing?success=1', '/empezar?success=1')}`,
-      cancel_url: `${urls.cancel.replace('/settings/billing?canceled=1', '/empezar?canceled=1')}`,
+      success_url: urls.success,
+      cancel_url: urls.cancel,
       subscription_data: {
         metadata: {
           // Estos metadata también los lee el webhook (subscription events).

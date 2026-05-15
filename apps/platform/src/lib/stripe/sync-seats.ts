@@ -146,9 +146,17 @@ export async function syncSeats(opts: SyncSeatsOptions): Promise<SyncSeatsResult
   //    cubre la base; solo los excedentes suben quantity en Stripe.
   const { extraAdmins, extraDrivers } = computeExtrasFromSeats(newAdmin, newDriver, tier);
 
-  // 4. Fetch subscription para conocer los item IDs (Stripe pide item.id en
-  //    el update, no price.id). 1 RTT extra aceptable; cachear en BD sería
-  //    optimización futura.
+  // 4. Fetch subscription para conocer los item IDs. La subscription puede
+  //    NO tener los line items de extras todavía si el customer arrancó con
+  //    solo la base (signup nuevo) — Stripe no acepta quantity 0 al crear,
+  //    así que los extras se OMITEN del checkout inicial. syncSeats agrega
+  //    el line item dinámicamente la primera vez que el customer cruza el
+  //    mínimo, y los REMUEVE cuando vuelve a estar bajo.
+  //
+  // Patrón Stripe correcto:
+  //  - Agregar item:   { price, quantity }                 (sin id)
+  //  - Update qty:     { id: item.id, quantity }            (≥ 1)
+  //  - Remover item:   { id: item.id, deleted: true }
   let stripeError: string | undefined;
   try {
     const sub = await stripe.subscriptions.retrieve(customer.stripe_subscription_id);
@@ -156,20 +164,38 @@ export async function syncSeats(opts: SyncSeatsOptions): Promise<SyncSeatsResult
     const extraAdminItem = sub.items.data.find((it) => it.price.id === priceIds.extraAdmin);
     const extraDriverItem = sub.items.data.find((it) => it.price.id === priceIds.extraDriver);
 
-    // Defensive: si falta cualquiera de los items esperados, no podemos
-    // hacer update parcial seguro. Loggeamos como error pero no rompemos.
-    if (!baseItem || !extraAdminItem || !extraDriverItem) {
-      stripeError = `Subscription ${customer.stripe_subscription_id} no tiene los 3 line items esperados (base/extraAdmin/extraDriver).`;
+    if (!baseItem) {
+      stripeError = `Subscription ${customer.stripe_subscription_id} no tiene el line item base — config inconsistente.`;
     } else {
-      // 5. UPDATE atómico con proration ON. La base queda fija en × 1; solo
-      //    los extras suben/bajan. Stripe prorrata automático — el cliente
-      //    ve el diff en su próxima factura.
+      type SubItemMutation =
+        | { id: string; quantity: number }
+        | { id: string; deleted: true }
+        | { price: string; quantity: number };
+      const items: SubItemMutation[] = [
+        { id: baseItem.id, quantity: 1 },
+      ];
+
+      // Admin extra: agregar / actualizar / borrar según el nuevo conteo.
+      if (extraAdmins > 0 && extraAdminItem) {
+        items.push({ id: extraAdminItem.id, quantity: extraAdmins });
+      } else if (extraAdmins > 0 && !extraAdminItem) {
+        items.push({ price: priceIds.extraAdmin, quantity: extraAdmins });
+      } else if (extraAdmins === 0 && extraAdminItem) {
+        items.push({ id: extraAdminItem.id, deleted: true });
+      }
+      // Driver extra: misma lógica.
+      if (extraDrivers > 0 && extraDriverItem) {
+        items.push({ id: extraDriverItem.id, quantity: extraDrivers });
+      } else if (extraDrivers > 0 && !extraDriverItem) {
+        items.push({ price: priceIds.extraDriver, quantity: extraDrivers });
+      } else if (extraDrivers === 0 && extraDriverItem) {
+        items.push({ id: extraDriverItem.id, deleted: true });
+      }
+
+      // UPDATE atómico con proration ON. Stripe genera el prorate
+      // automáticamente — el cliente ve el diff en su próxima factura.
       await stripe.subscriptions.update(customer.stripe_subscription_id, {
-        items: [
-          { id: baseItem.id, quantity: 1 },
-          { id: extraAdminItem.id, quantity: extraAdmins },
-          { id: extraDriverItem.id, quantity: extraDrivers },
-        ],
+        items: items as never,
         proration_behavior: 'create_prorations',
       });
     }
