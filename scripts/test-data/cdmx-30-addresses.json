@@ -1,0 +1,40 @@
+{
+  "_meta": {
+    "purpose": "Smoke test fixture for delegate_to_geo / runGeoAgent (Stream R / Sprint R2, ADR-099).",
+    "generated": "2026-05-15",
+    "notes": "30 direcciones CDMX sintéticas (mezcla de calles reales y sintéticas). Pensadas para validar que el geo agent maneja: (1) lote grande, (2) algunas direcciones ambiguas, (3) algunas que probablemente fallarán ZERO_RESULTS, (4) duplicados intencionales para verificar fuzzy_match.",
+    "usage": "Pasar las strings como `addresses` a la tool delegate_to_geo. Verificar que el sub-agent: (a) ejecuta ≤10 iteraciones, (b) geocodifica ≥25 con location_type ROOFTOP o RANGE_INTERPOLATED, (c) reporta los 2 duplicados (NETO Insurgentes y NETO Reforma aparecen 2 veces)."
+  },
+  "addresses": [
+    "Av Insurgentes Sur 1235, Del Valle, 03100 CDMX",
+    "Av Reforma 222, Cuauhtémoc, 06600 CDMX",
+    "Calz de Tlalpan 3000, Coyoacán, 04610 CDMX",
+    "Av Universidad 1000, Coyoacán, 04510 CDMX",
+    "Av Patriotismo 580, Mixcoac, 03910 CDMX",
+    "Periférico Sur 4690, Tlalpan, 14200 CDMX",
+    "Av Revolución 1267, San Ángel, 01000 CDMX",
+    "Calz de las Bombas 100, Coapa, 04619 CDMX",
+    "Av Coyoacán 1622, Del Valle, 03100 CDMX",
+    "Av División del Norte 2800, Iztapalapa, 09310 CDMX",
+    "Av Insurgentes Sur 1235, Del Valle, 03100 CDMX",
+    "Av Reforma 222, Cuauhtémoc, 06600 CDMX",
+    "Av Tláhuac 4555, Iztapalapa, 09800 CDMX",
+    "Av Iztaccíhuatl 200, Iztapalapa, 09290 CDMX",
+    "Calz Ignacio Zaragoza 2750, Iztapalapa, 09660 CDMX",
+    "Av Eduardo Molina 1234, Gustavo A Madero, 07840 CDMX",
+    "Av Río Consulado 500, GAM, 07730 CDMX",
+    "Calz Vallejo 1500, Azcapotzalco, 02860 CDMX",
+    "Av Cuitláhuac 3200, Azcapotzalco, 02500 CDMX",
+    "Av Aquiles Serdán 900, Tacuba, 11410 CDMX",
+    "Calz México-Tacuba 1500, Miguel Hidalgo, 11410 CDMX",
+    "Av Ejército Nacional 980, Polanco, 11560 CDMX",
+    "Av Mariano Escobedo 700, Anzures, 11590 CDMX",
+    "Av Constituyentes 901, Tacubaya, 11820 CDMX",
+    "Av San Antonio 100, Nápoles, 03810 CDMX",
+    "Av Cuauhtémoc 745, Narvarte, 03020 CDMX",
+    "Av Eje Central 250, Centro, 06800 CDMX",
+    "una dirección que no existe nunca jamás 999",
+    "calle sin número, colonia sin nombre, CDMX",
+    "Calle 5 de Mayo 17, Centro Histórico, 06000 CDMX"
+  ]
+}
