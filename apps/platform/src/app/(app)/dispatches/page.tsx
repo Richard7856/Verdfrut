@@ -36,7 +36,18 @@ export default async function DispatchesPage() {
       <PageHeader
         title="Tiros"
         description="Herramienta opcional para AGRUPAR rutas existentes que salen juntas (ej. mismo CEDIS, misma hora). Crea las rutas primero en Rutas; aquí las agrupas para publicarlas en bloque y monitorearlas como una sola operación."
-        action={<CreateDispatchButton zones={zones} defaultDate={todayInZone(TENANT_TZ)} />}
+        action={
+          <div className="flex gap-2">
+            <a
+              href="/dispatches/new/visual"
+              className="rounded-md border border-emerald-700 bg-emerald-950/30 px-3 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-950/50"
+              title="Armar tiro nuevo viendo todas las tiendas en mapa"
+            >
+              🗺️ Armar visual
+            </a>
+            <CreateDispatchButton zones={zones} defaultDate={todayInZone(TENANT_TZ)} />
+          </div>
+        }
       />
 
       {summaries.length === 0 ? (
