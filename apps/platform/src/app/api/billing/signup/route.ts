@@ -40,9 +40,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     stripe = requireStripe();
     // Pasamos los headers del request para que getReturnUrls pueda derivar
     // la base URL del host actual si las env vars no están seteadas. Path
-    // override apunta a /empezar (no a /settings/billing) porque el signup
-    // viene de la landing pública, no del platform logueado.
-    urls = getReturnUrls({ reqHeaders: req.headers, pathOverride: '/empezar' });
+    // override apunta a /empezar/exito (página de activación post-pago);
+    // ahí mostramos un form para que el user establezca su contraseña
+    // sin tener que esperar el magic link de email.
+    urls = getReturnUrls({ reqHeaders: req.headers, pathOverride: '/empezar/exito' });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Stripe no configurado' },
@@ -179,7 +180,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       line_items: [
         { price: priceIds.base, quantity: 1 },
       ],
-      success_url: urls.success,
+      // Stripe interpola {CHECKOUT_SESSION_ID} con el ID de la sesión
+      // creada. La página de activación lo lee del URL y verifica el pago.
+      success_url: `${urls.success}&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: urls.cancel,
       subscription_data: {
         metadata: {
