@@ -53,16 +53,20 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
     req.headers.get('x-real-ip') ??
     'unknown';
+  // Rate limit: 5 intentos por minuto por IP. Antes era 1/30s (muy agresivo
+  // para debug + para usuarios que dudan y reintentan rápido). El abuso real
+  // sigue protegido porque 5/min × 60min = 300 customers ficticios/hora
+  // máximo por IP, más que suficiente para frenar un script malicioso.
   try {
     const supabase = createServiceRoleClient();
     const { data: rateOk } = await supabase.rpc('tripdrive_rate_limit_check', {
       p_bucket_key: `signup:${ip}`,
-      p_window_seconds: 30,
-      p_max_hits: 1,
+      p_window_seconds: 60,
+      p_max_hits: 5,
     });
     if (rateOk === false) {
       return NextResponse.json(
-        { error: 'Espera unos segundos antes de intentar de nuevo.' },
+        { error: 'Demasiados intentos. Espera un minuto antes de volver a intentar.' },
         { status: 429 },
       );
     }
