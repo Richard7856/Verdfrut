@@ -6,6 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "tripdrive",
+    "platforms": ["android", "ios"],
     "userInterfaceStyle": "automatic",
     "splash": {
       "image": "./assets/splash.png",

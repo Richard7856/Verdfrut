@@ -13,8 +13,27 @@ export function LoginForm({ next, initialError }: { next?: string; initialError?
       action={(formData) => {
         setError(null);
         startTransition(async () => {
-          const result = await loginAction(formData);
-          if (result?.error) setError(result.error);
+          try {
+            const result = await loginAction(formData);
+            if (result?.error) {
+              setError(result.error);
+            } else if (result && !result.error) {
+              // Server action retornó sin error pero NO hizo redirect (raro):
+              // probable que la cookie de sesión no se haya persistido.
+              setError(
+                'Tu sesión no pudo establecerse. Verifica que tu navegador acepte cookies e intenta de nuevo.',
+              );
+            }
+            // Si result === undefined: el action hizo redirect (éxito).
+            // El browser ya navegó; no tocamos el estado.
+          } catch (err) {
+            // Cualquier excepción inesperada — el form NUNCA debe quedarse en
+            // silencio. El user siempre ve un mensaje.
+            console.error('[loginAction client]', err);
+            setError(
+              'Algo salió mal al iniciar sesión. Revisa tu conexión e intenta de nuevo.',
+            );
+          }
         });
       }}
       className="flex flex-col gap-4"

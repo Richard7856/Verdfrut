@@ -19,7 +19,39 @@ import type { StopContext } from '@/lib/queries/stop';
 import { supabase } from '@/lib/supabase';
 import { haversineMeters } from '@/lib/geo';
 
-const ARRIVAL_RADIUS_METERS_ENTREGA = 300;
+// Default conservador. El driver web (PWA) usa el mismo (ADR-019).
+const ARRIVAL_RADIUS_METERS_DEFAULT_ENTREGA = 300;
+
+/**
+ * Lee el radio configurado por el admin del customer en
+ * `customers.flow_engine_overrides.arrival_radius_meters.entrega`.
+ *
+ * La UI vive en /customers/[id]/flow del control-plane y guarda valores en
+ * el JSONB del customer. El driver web SÍ lo respeta — esta función trae
+ * paridad al driver-native (bug previo: hardcoded 300m sin importar override).
+ *
+ * Best-effort: si la query falla (offline, RLS, fila no encontrada),
+ * caemos al default. NO bloqueamos la operación por un read fallido.
+ */
+async function getArrivalRadiusMeters(): Promise<number> {
+  try {
+    const { data } = await supabase
+      .from('customers')
+      .select('flow_engine_overrides')
+      .limit(1)
+      .maybeSingle();
+    const overrides = (data?.flow_engine_overrides ?? {}) as {
+      arrival_radius_meters?: { entrega?: number };
+    };
+    const v = overrides.arrival_radius_meters?.entrega;
+    if (typeof v === 'number' && v > 0 && v <= 1_000_000) {
+      return v;
+    }
+  } catch {
+    // Silencioso: fallback al default.
+  }
+  return ARRIVAL_RADIUS_METERS_DEFAULT_ENTREGA;
+}
 
 export interface ArrivalRejection {
   reason: 'too_far' | 'no_coords' | 'permission_denied';
@@ -92,21 +124,22 @@ export async function markArrived(ctx: StopContext): Promise<ArriveResult> {
     };
   }
 
-  // 3. Validación de distancia.
+  // 3. Validación de distancia (radio configurado por customer admin).
+  const radiusMeters = await getArrivalRadiusMeters();
   const distance = haversineMeters(
     pos.coords.latitude,
     pos.coords.longitude,
     ctx.store.lat,
     ctx.store.lng,
   );
-  if (distance > ARRIVAL_RADIUS_METERS_ENTREGA) {
+  if (distance > radiusMeters) {
     return {
       ok: false,
       rejection: {
         reason: 'too_far',
         distanceMeters: Math.round(distance),
-        thresholdMeters: ARRIVAL_RADIUS_METERS_ENTREGA,
-        message: `Estás a ${(distance / 1000).toFixed(2)} km de la tienda. Acércate (máx. ${ARRIVAL_RADIUS_METERS_ENTREGA} m).`,
+        thresholdMeters: radiusMeters,
+        message: `Estás a ${(distance / 1000).toFixed(2)} km de la tienda. Acércate (máx. ${radiusMeters} m).`,
       },
     };
   }

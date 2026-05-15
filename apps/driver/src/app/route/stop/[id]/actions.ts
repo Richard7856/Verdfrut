@@ -30,7 +30,7 @@ import type {
  * Configurable por env si en el futuro hay que tunear por ciudad/cliente.
  */
 const ARRIVAL_RADIUS_METERS: Record<ReportType, number> = {
-  entrega: 300,
+  entrega: 1000,
   tienda_cerrada: 1000,
   bascula: 300,
 };
