@@ -8,6 +8,7 @@ import { createServerClient } from '@tripdrive/supabase/server';
 import { Sidebar } from '@/components/shell/sidebar';
 import { Topbar } from '@/components/shell/topbar';
 import { IncidentToastListener } from '@/components/notifications/incident-toast-listener';
+import { FloatingChat } from '@/components/floating-chat/floating-chat';
 import { getCurrentCustomerBranding, brandingCss } from '@/lib/branding';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -44,6 +45,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         {/* Listener global de incidencias — toast + sonido cuando llega evento.
             Solo se activa para admin/dispatcher (zone_manager ya está en SU chat). */}
         <IncidentToastListener role={profile.role} zoneId={profile.zoneId} />
+        {/* Stream AI-1 / Phase 1 (2026-05-15): asistente flotante contextual.
+            Solo admin/dispatcher (zone_manager no tiene tools del orchestrator).
+            El componente decide internamente no renderizar en /orchestrator. */}
+        {(profile.role === 'admin' || profile.role === 'dispatcher') && <FloatingChat />}
       </div>
     </>
   );

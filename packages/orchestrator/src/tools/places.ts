@@ -419,10 +419,349 @@ const create_store: ToolDefinition<CreateStoreArgs, CreateStoreResult> = {
 };
 
 // ============================================================================
+// update_store — editar una tienda existente (Phase 2 / 2026-05-15)
+// ============================================================================
+
+interface UpdateStoreArgs {
+  store_id: string;
+  // Todos opcionales — la tool acepta un subset (PATCH semantics).
+  code?: string;
+  name?: string;
+  zone_id?: string;
+  address?: string;
+  lat?: number;
+  lng?: number;
+  contact_name?: string | null;
+  contact_phone?: string | null;
+  receiving_window_start?: string | null;
+  receiving_window_end?: string | null;
+  service_time_seconds?: number;
+  is_active?: boolean;
+}
+
+interface UpdateStoreResult {
+  store_id: string;
+  code: string;
+  name: string;
+  updated_fields: string[];
+}
+
+const update_store: ToolDefinition<UpdateStoreArgs, UpdateStoreResult> = {
+  name: 'update_store',
+  description:
+    'Actualiza campos de una tienda existente. Solo pasa los campos a cambiar (PATCH semantics). Casos comunes: corregir dirección, cambiar nombre, marcar inactiva, cambiar zona, ajustar ventana de recepción. Si cambias lat/lng, deben venir de geocode_address o search_place — NUNCA inventarlas. Cambiar zone_id puede afectar tiros futuros (la tienda dejará de ser elegible para esa zona). Requiere confirmación porque modifica catálogo persistente.',
+  is_write: true,
+  requires_confirmation: true,
+  input_schema: {
+    type: 'object',
+    properties: {
+      store_id: {
+        type: 'string',
+        format: 'uuid',
+        description: 'UUID de la tienda a actualizar. Resuélvelo con search_stores si solo tienes el código o nombre.',
+      },
+      code: {
+        type: 'string',
+        description: 'Nuevo código (2-30 alfanum + guión). Debe seguir siendo único.',
+      },
+      name: {
+        type: 'string',
+        description: 'Nuevo nombre comercial (2-100 chars).',
+      },
+      zone_id: {
+        type: 'string',
+        format: 'uuid',
+        description: 'Nueva zona operativa. Cambio impactará rutas futuras.',
+      },
+      address: {
+        type: 'string',
+        description: 'Nueva dirección postal (mínimo 5 chars).',
+      },
+      lat: {
+        type: 'number',
+        description: 'Nueva latitud (-90 a 90). Debe venir de geocoding, no inventada.',
+      },
+      lng: {
+        type: 'number',
+        description: 'Nueva longitud (-180 a 180). Debe venir de geocoding, no inventada.',
+      },
+      contact_name: {
+        type: 'string',
+        description: 'Nombre del contacto/encargado (pasar string vacío "" para limpiar).',
+      },
+      contact_phone: {
+        type: 'string',
+        description: 'Teléfono del contacto (pasar "" para limpiar).',
+      },
+      receiving_window_start: {
+        type: 'string',
+        description: 'Hora inicio ventana recepción HH:MM (pasar "" para limpiar).',
+      },
+      receiving_window_end: {
+        type: 'string',
+        description: 'Hora fin ventana recepción HH:MM (pasar "" para limpiar).',
+      },
+      service_time_seconds: {
+        type: 'integer',
+        description: 'Tiempo estimado de servicio en segundos (default 900 = 15 min).',
+      },
+      is_active: {
+        type: 'boolean',
+        description: 'true = activa (elegible para rutas), false = desactivada (oculta del catálogo operativo). Marca false en vez de borrar — preservas historial.',
+      },
+    },
+    required: ['store_id'],
+  },
+  handler: async (args, ctx): Promise<ToolResult<UpdateStoreResult>> => {
+    if (!UUID_RE.test(args.store_id)) return badArg('store_id', 'UUID inválido.');
+
+    // Construir patch object solo con campos provistos.
+    const patch: Record<string, unknown> = {};
+    const updatedFields: string[] = [];
+
+    if (args.code !== undefined) {
+      const code = String(args.code).toUpperCase().trim();
+      if (!/^[A-Z0-9-]{2,30}$/.test(code)) return badArg('code', '2-30 chars alfanum + guiones.');
+      patch.code = code;
+      updatedFields.push('code');
+    }
+    if (args.name !== undefined) {
+      const name = String(args.name).trim();
+      if (name.length < 2 || name.length > 100) return badArg('name', '2-100 chars.');
+      patch.name = name;
+      updatedFields.push('name');
+    }
+    if (args.zone_id !== undefined) {
+      if (!UUID_RE.test(args.zone_id)) return badArg('zone_id', 'UUID inválido.');
+      // Validar zone pertenece al customer.
+      const { data: zone } = await ctx.supabase
+        .from('zones')
+        .select('id')
+        .eq('id', args.zone_id)
+        .eq('customer_id', ctx.customerId)
+        .maybeSingle();
+      if (!zone) return { ok: false, error: 'Zona no pertenece a tu organización.' };
+      patch.zone_id = args.zone_id;
+      updatedFields.push('zone_id');
+    }
+    if (args.address !== undefined) {
+      const address = String(args.address).trim();
+      if (address.length < 5) return badArg('address', 'mínimo 5 chars.');
+      patch.address = address;
+      updatedFields.push('address');
+    }
+    if (args.lat !== undefined) {
+      if (typeof args.lat !== 'number' || args.lat < -90 || args.lat > 90) {
+        return badArg('lat', 'debe ser número entre -90 y 90.');
+      }
+      patch.lat = args.lat;
+      updatedFields.push('lat');
+    }
+    if (args.lng !== undefined) {
+      if (typeof args.lng !== 'number' || args.lng < -180 || args.lng > 180) {
+        return badArg('lng', 'debe ser número entre -180 y 180.');
+      }
+      patch.lng = args.lng;
+      updatedFields.push('lng');
+    }
+    // Si cambió lat o lng, marcamos coord_verified=true (el AI sólo permite si vino de geocoding).
+    if (args.lat !== undefined || args.lng !== undefined) {
+      patch.coord_verified = true;
+    }
+
+    // Nullable strings: "" → null para limpiar.
+    if (args.contact_name !== undefined) {
+      patch.contact_name = args.contact_name === '' ? null : args.contact_name;
+      updatedFields.push('contact_name');
+    }
+    if (args.contact_phone !== undefined) {
+      patch.contact_phone = args.contact_phone === '' ? null : args.contact_phone;
+      updatedFields.push('contact_phone');
+    }
+
+    const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
+    if (args.receiving_window_start !== undefined) {
+      if (args.receiving_window_start === '' || args.receiving_window_start === null) {
+        patch.receiving_window_start = null;
+      } else if (!timeRe.test(args.receiving_window_start)) {
+        return badArg('receiving_window_start', 'formato HH:MM (o "" para limpiar).');
+      } else {
+        patch.receiving_window_start = args.receiving_window_start;
+      }
+      updatedFields.push('receiving_window_start');
+    }
+    if (args.receiving_window_end !== undefined) {
+      if (args.receiving_window_end === '' || args.receiving_window_end === null) {
+        patch.receiving_window_end = null;
+      } else if (!timeRe.test(args.receiving_window_end)) {
+        return badArg('receiving_window_end', 'formato HH:MM (o "" para limpiar).');
+      } else {
+        patch.receiving_window_end = args.receiving_window_end;
+      }
+      updatedFields.push('receiving_window_end');
+    }
+    if (args.service_time_seconds !== undefined) {
+      if (
+        typeof args.service_time_seconds !== 'number' ||
+        args.service_time_seconds < 0 ||
+        args.service_time_seconds > 7200
+      ) {
+        return badArg('service_time_seconds', 'entre 0 y 7200 (2 hrs máx).');
+      }
+      patch.service_time_seconds = args.service_time_seconds;
+      updatedFields.push('service_time_seconds');
+    }
+    if (args.is_active !== undefined) {
+      patch.is_active = Boolean(args.is_active);
+      updatedFields.push('is_active');
+    }
+
+    if (updatedFields.length === 0) {
+      return {
+        ok: false,
+        error: 'No se pasaron campos a actualizar. Incluye al menos un campo además de store_id.',
+      };
+    }
+
+    // Validar que la tienda existe + pertenece al customer (RLS protege también).
+    const { data: existing } = await ctx.supabase
+      .from('stores')
+      .select('id, code, name')
+      .eq('id', args.store_id)
+      .eq('customer_id', ctx.customerId)
+      .maybeSingle();
+    if (!existing) {
+      return { ok: false, error: 'Tienda no encontrada o no pertenece a tu organización.' };
+    }
+
+    const { data, error } = await ctx.supabase
+      .from('stores')
+      .update(patch as never)
+      .eq('id', args.store_id)
+      .eq('customer_id', ctx.customerId)
+      .select('id, code, name')
+      .single();
+
+    if (error) {
+      if (error.code === '23505') {
+        return { ok: false, error: `Ya existe otra tienda con ese código.` };
+      }
+      return { ok: false, error: `Error de BD: ${error.message}` };
+    }
+
+    return {
+      ok: true,
+      data: {
+        store_id: data.id as string,
+        code: data.code as string,
+        name: data.name as string,
+        updated_fields: updatedFields,
+      },
+      summary: `Tienda "${data.code}" actualizada (${updatedFields.length} campo${updatedFields.length > 1 ? 's' : ''}: ${updatedFields.join(', ')}).`,
+    };
+  },
+};
+
+// ============================================================================
+// archive_store — soft-delete con motivo (Phase 2 / 2026-05-15)
+// ============================================================================
+//
+// Wrapper semántico de update_store(is_active=false). Diferencias:
+//   - Verbo más claro para el AI ("archive" vs "update is_active=false").
+//   - Acepta un `reason` que va al logger para audit (no toca BD).
+//   - Validación más estricta: requiere reason explícito.
+
+interface ArchiveStoreArgs {
+  store_id: string;
+  reason: string;
+}
+
+interface ArchiveStoreResult {
+  store_id: string;
+  code: string;
+  name: string;
+  reason: string;
+}
+
+const archive_store: ToolDefinition<ArchiveStoreArgs, ArchiveStoreResult> = {
+  name: 'archive_store',
+  description:
+    'Archiva (soft-delete) una tienda: la marca como inactiva, preservando historial. La tienda ya NO aparece en search_stores ni se puede asignar a rutas nuevas, pero los tiros pasados que la incluían siguen visibles. Pide un motivo explícito (ej. "cerró sucursal", "duplicado de XYZ", "cliente terminó relación"). NO usar para borrar datos sensibles — eso es delete físico, otra operación. Requiere confirmación.',
+  is_write: true,
+  requires_confirmation: true,
+  input_schema: {
+    type: 'object',
+    properties: {
+      store_id: {
+        type: 'string',
+        format: 'uuid',
+        description: 'UUID de la tienda a archivar. Resuelve con search_stores si solo tienes código/nombre.',
+      },
+      reason: {
+        type: 'string',
+        description: 'Motivo claro (5-200 chars). Ej: "cerró sucursal", "duplicado de NETO-1422", "fuera de zona operativa". Va al audit log.',
+      },
+    },
+    required: ['store_id', 'reason'],
+  },
+  handler: async (args, ctx): Promise<ToolResult<ArchiveStoreResult>> => {
+    if (!UUID_RE.test(args.store_id)) return badArg('store_id', 'UUID inválido.');
+    const reason = String(args.reason ?? '').trim();
+    if (reason.length < 5 || reason.length > 200) {
+      return badArg('reason', 'motivo obligatorio (5-200 chars).');
+    }
+
+    // Verificar tienda existe + activa actualmente (si ya estaba archived, sería no-op).
+    const { data: existing } = await ctx.supabase
+      .from('stores')
+      .select('id, code, name, is_active')
+      .eq('id', args.store_id)
+      .eq('customer_id', ctx.customerId)
+      .maybeSingle();
+    if (!existing) {
+      return { ok: false, error: 'Tienda no encontrada o no pertenece a tu organización.' };
+    }
+    const wasActive = (existing as { is_active: boolean }).is_active;
+    if (!wasActive) {
+      return {
+        ok: false,
+        error: `La tienda "${(existing as { code: string }).code}" ya estaba archivada.`,
+      };
+    }
+
+    const { data, error } = await ctx.supabase
+      .from('stores')
+      .update({ is_active: false } as never)
+      .eq('id', args.store_id)
+      .eq('customer_id', ctx.customerId)
+      .select('id, code, name')
+      .single();
+    if (error) {
+      return { ok: false, error: `Error de BD: ${error.message}` };
+    }
+
+    // El motivo queda en orchestrator_actions (el runner persiste args automáticamente
+    // como audit log). Aquí solo lo retornamos en summary para que sea visible al user.
+    return {
+      ok: true,
+      data: {
+        store_id: data.id as string,
+        code: data.code as string,
+        name: data.name as string,
+        reason,
+      },
+      summary: `Tienda "${data.code}" archivada. Motivo: "${reason}".`,
+    };
+  },
+};
+
+// ============================================================================
 // Registry export
 // ============================================================================
 export const PLACES_TOOLS: ReadonlyArray<ToolDefinition> = [
   geocode_address as unknown as ToolDefinition,
   search_place as unknown as ToolDefinition,
   create_store as unknown as ToolDefinition,
+  update_store as unknown as ToolDefinition,
+  archive_store as unknown as ToolDefinition,
 ];

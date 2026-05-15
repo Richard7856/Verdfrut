@@ -18,6 +18,8 @@ import { XLSX_TOOLS } from './xlsx';
 import { OPTIMIZE_TOOLS } from './optimize';
 // Stream R / Sprint R2 (2026-05-15): delegación a sub-agentes especialistas.
 import { DELEGATE_TOOLS } from './delegate';
+// Phase 2 (2026-05-15): edición de catálogo (drivers/vehicles/zones).
+import { CATALOG_EDIT_TOOLS } from './catalog-edits';
 
 export const TOOLS: ReadonlyArray<ToolDefinition> = [
   ...READ_TOOLS,
@@ -26,6 +28,7 @@ export const TOOLS: ReadonlyArray<ToolDefinition> = [
   ...XLSX_TOOLS,
   ...OPTIMIZE_TOOLS,
   ...DELEGATE_TOOLS,
+  ...CATALOG_EDIT_TOOLS,
 ];
 
 const TOOLS_BY_NAME = new Map(TOOLS.map((t) => [t.name, t]));

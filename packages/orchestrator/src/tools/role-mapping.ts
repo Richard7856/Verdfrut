@@ -52,7 +52,14 @@ export const TOOLS_BY_ROLE: Record<AgentRole, readonly string[]> = {
     'reassign_driver',
     // store writes (requieren confirmation del user)
     'create_store',
+    'update_store',
+    'archive_store',
     'bulk_create_stores',
+    // catalog edits (drivers, vehicles, zones — Phase 2)
+    'update_driver',
+    'update_vehicle',
+    'create_zone',
+    'update_zone',
     // xlsx (ingestion entry-point — el orchestrator lo llama para extraer
     // direcciones del adjunto antes de delegar a geo)
     'parse_xlsx_attachment',

@@ -30,6 +30,41 @@ interface ChatPayload {
     tool_use_id: string;
     approved: boolean;
   };
+  /**
+   * Stream AI-1 (Phase 1): contexto opcional de la pantalla donde se invocó
+   * el chat (floating chat). Se prepende al user message como pista al AI.
+   * Ejemplo: { path: '/dispatches/abc-123' } → AI sabe que el user está
+   * viendo ese tiro específico y puede operar sobre él sin re-preguntar.
+   */
+  pageContext?: {
+    path: string;
+    /** IDs extraídos de la ruta (ej. dispatch_id, store_id). Free-form. */
+    entities?: Record<string, string>;
+  };
+}
+
+/**
+ * Construye un prefix de contexto para inyectar al inicio del primer user
+ * message de un floating chat. Devuelve string vacío si no hay contexto.
+ */
+function buildContextPrefix(pageContext: ChatPayload['pageContext']): string {
+  if (!pageContext || !pageContext.path) return '';
+  const lines: string[] = [
+    '[CONTEXTO DE PANTALLA — generado automáticamente, no del usuario]',
+    `El usuario está actualmente en la pantalla: ${pageContext.path}`,
+  ];
+  if (pageContext.entities && Object.keys(pageContext.entities).length > 0) {
+    lines.push('Entidades identificables en la URL:');
+    for (const [k, v] of Object.entries(pageContext.entities)) {
+      lines.push(`  · ${k} = ${v}`);
+    }
+  }
+  lines.push(
+    '[Si la pregunta del usuario refiere a "este tiro", "esta tienda", etc., asume que se refiere a la entidad de la URL. Si necesitas más info, usa list_/get_ tools.]',
+    '',
+    '[Mensaje del usuario]',
+  );
+  return lines.join('\n') + '\n';
 }
 
 export async function POST(req: Request) {
@@ -261,6 +296,14 @@ export async function POST(req: Request) {
           ),
         );
 
+        // Stream AI-1 (Phase 1): si viene pageContext y es el PRIMER turno
+        // del session (history vacío), prepend el contexto al user message.
+        // En turns subsecuentes, el AI ya tiene el contexto en el history.
+        const isFirstTurn = history.length === 0;
+        const contextPrefix = isFirstTurn ? buildContextPrefix(payload.pageContext) : '';
+        const rawMessage = payload.confirmation && !confirmationForRunner ? '' : payload.message ?? '';
+        const userMessageWithContext = rawMessage && contextPrefix ? contextPrefix + rawMessage : rawMessage;
+
         const { finalHistory, pendingConfirmation } = await runOrchestrator({
           // Stream R: el rol viene del estado de la sesión (orchestrator_sessions
           // .active_agent_role). Las tools `enter_router_mode` / `exit_router_mode`
@@ -268,8 +311,7 @@ export async function POST(req: Request) {
           // el rol y emitimos un evento si cambió.
           role: initialRole,
           history: workingHistory,
-          userMessage:
-            payload.confirmation && !confirmationForRunner ? '' : payload.message ?? '',
+          userMessage: userMessageWithContext,
           confirmation: confirmationForRunner,
           callerRole: profile.role as 'admin' | 'dispatcher',
           toolContext,
