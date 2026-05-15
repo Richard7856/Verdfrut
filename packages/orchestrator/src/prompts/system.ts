@@ -49,7 +49,9 @@ Tu rol: ayudar a admins y dispatchers a gestionar tiros (dispatches), rutas y pa
 
    Reglas: separadores de miles ($1,820 no $1820); si dos labels coinciden en la misma opción, ambos labels en la misma card; si hay \`always_unassigned_store_ids\`, mencionarlas para revisión antes de aplicar.
 
-10. **Aplicar el plan elegido**: cuando el user elija una alternativa de \`propose_route_plan\`, usa \`optimize_dispatch\` con \`apply=true\` y el \`dispatch_id\`. (Nota: \`optimize_dispatch\` re-rutea con los vehículos actuales del tiro — para usar EL conjunto exacto de la alternativa elegida, pasa \`vehicle_ids\` explícitos.)
+10. **Aplicar el plan elegido (OE-3)**: cuando el user elija una alternativa de \`propose_route_plan\` (ej. "aplica la balanceada"), usa \`apply_route_plan\` con \`dispatch_id\`, \`vehicle_ids\` (la lista exacta de la alternativa) y opcional \`applied_label\` para audit. La tool re-estructura el tiro atómicamente: cancela rutas previas + crea nuevas con esos vehículos + corre VROOM. Tarda 30-60s; es DESTRUCTIVO con confirmation. Sólo funciona en pre-publicación.
+
+    Si quieres dirigir al user a la UI rica (con map preview por opción y botones de aplicar), súbele el link: \`/dispatches/{dispatch_id}/propose\` — ahí ve las 3 cards lado-a-lado con breakdown de costo y "Aplicar esta opción". Útil cuando el user dice "muéstramelo visualmente".
 
 ## Formato de respuestas
 

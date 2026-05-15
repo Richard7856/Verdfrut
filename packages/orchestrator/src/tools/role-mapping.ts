@@ -68,6 +68,9 @@ export const TOOLS_BY_ROLE: Record<AgentRole, readonly string[]> = {
     // (decisión pre-demo: sin handoff a router agent, un solo modelo conversa con user).
     'optimize_dispatch',
     'propose_route_plan',
+    // OE-3: aplicar una alternativa de propose_route_plan (re-estructura
+    // atómica del tiro con los vehículos elegidos por el user).
+    'apply_route_plan',
     // delegación a sub-agentes batch (R2 / ADR-099)
     'delegate_to_geo',
     // NOTA: enter_router_mode REMOVIDO temporalmente (pre-demo 2026-05-15).
@@ -101,8 +104,10 @@ export const TOOLS_BY_ROLE: Record<AgentRole, readonly string[]> = {
     'move_stop',
     'remove_stop',
     'reassign_driver',
-    // Optimización: legacy (en R4 lo reemplazamos por propose_route_plan).
+    // Optimización: legacy + propuesta de alternativas (R4 deprecará optimize_dispatch).
     'optimize_dispatch',
+    'propose_route_plan',
+    'apply_route_plan',
     // Control: devolver el turno al orchestrator.
     'exit_router_mode',
   ],

@@ -190,6 +190,16 @@ export default async function DispatchDetailPage({ params }: Props) {
             Rutas del tiro
           </h2>
           <div className="flex items-center gap-2">
+            {/* OE-3: ver propuestas con costo MXN (3 alternativas). Solo en
+                pre-publicación y con paradas — propose requiere stops para
+                clusterizar. */}
+            {canOptimizeDispatch && (
+              <Link href={`/dispatches/${dispatch.id}/propose`}>
+                <Button type="button" variant="secondary" size="sm">
+                  ⚡ Ver propuestas con costo
+                </Button>
+              </Link>
+            )}
             {/* Optimizar tiro completo (modo across o within). */}
             <OptimizeDispatchButton
               dispatchId={dispatch.id}

@@ -1017,3 +1017,75 @@ export async function optimizeDispatchAction(
     };
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// OE-3: Aplicar una alternativa de propose_route_plan
+// ─────────────────────────────────────────────────────────────────────
+//
+// `proposeRoutePlans()` calcula 2-3 alternativas (cheapest/balanced/fastest)
+// con costo MXN. Esta acción ejecuta la alternativa elegida: re-rutea el
+// tiro con el conjunto exacto de vehículos+choferes de la opción.
+//
+// Por simplicidad esta fase, NO usamos el plan precomputado (que tendría
+// stops + sequences + ETAs ya resueltas). Reusamos `restructureDispatchInternal`
+// que vuelve a correr VROOM con los vehículos elegidos. Trade-off: 30-60s
+// extra de latencia vs riesgo de drift si los datos cambiaron entre propose
+// y apply. Cuando salgan los datos en producción podemos cachear el plan
+// completo en la propose-routes response y skip VROOM acá (OE-3.1).
+
+export interface ApplyRoutePlanResult extends RestructureDispatchResult {
+  /** El label de la alternativa que el user eligió (cheapest/balanced/fastest). */
+  appliedLabel?: string;
+}
+
+export async function applyRoutePlanAction(input: {
+  dispatchId: string;
+  /** Lista de assignments del alternativo elegido. */
+  vehicleAssignments: Array<{ vehicleId: string; driverId: string | null }>;
+  /** Label informativo para audit (cheapest / balanced / fastest). */
+  appliedLabel?: string;
+}): Promise<ApplyRoutePlanResult> {
+  const profile = await requireRole('admin', 'dispatcher');
+  try {
+    const id = requireUuid('dispatchId', input.dispatchId);
+    if (!Array.isArray(input.vehicleAssignments) || input.vehicleAssignments.length === 0) {
+      throw new ValidationError(
+        'vehicleAssignments',
+        'Necesitas al menos 1 vehículo en la alternativa elegida.',
+      );
+    }
+    for (const a of input.vehicleAssignments) {
+      requireUuid('vehicleId', a.vehicleId);
+      if (a.driverId) requireUuid('driverId', a.driverId);
+    }
+
+    const result = await restructureDispatchInternal({
+      dispatchId: id,
+      vehicleAssignments: input.vehicleAssignments,
+      createdBy: profile.id,
+    });
+
+    revalidatePath('/dispatches');
+    revalidatePath(`/dispatches/${id}`);
+    revalidatePath(`/dispatches/${id}/propose`);
+    revalidatePath('/routes');
+
+    logger.info('dispatches.apply_route_plan', {
+      dispatch_id: id,
+      applied_label: input.appliedLabel,
+      vehicle_count: input.vehicleAssignments.length,
+      triggered_by: profile.id,
+    });
+
+    return {
+      ...result,
+      appliedLabel: input.appliedLabel,
+    };
+  } catch (err) {
+    if (err instanceof ValidationError) return { ok: false, error: err.message };
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Error desconocido',
+    };
+  }
+}
