@@ -2,6 +2,71 @@
 
 Documento vivo. **Cuando se resuelve un issue, se quita de aquí** (no se marca, se elimina). El resumen al pie cuenta los abiertos por categoría.
 
+---
+
+## 🚨 Estado Streams OE + R (post 2026-05-15) — pre-demo
+
+Sesión de desarrollo intensa hoy. Tracker rápido de qué está demo-ready y qué NO.
+
+### ✅ Demo-ready esta noche (probado o defensivo)
+
+| Componente | Estado | Notas |
+|---|---|---|
+| `scripts/demo-propose-routes.mjs` | ✅ Ready | CLI para mostrar 3 alternativas con costo MXN. Punto principal del demo. |
+| `scripts/preflight-demo.mjs` | ✅ Ready | Verifica todo en 30s. **Correr ANTES del cliente.** |
+| Endpoint `_internal/propose-routes` | ✅ Ready | Hardening C1 aplicado. Type-check ✅. |
+| Migración 045 (`customers.optimizer_costs`) | ✅ Aplicada al tenant VerdFrut | |
+| Migración 046 (`orchestrator_sessions.active_agent_role`) | ✅ Aplicada al tenant VerdFrut | |
+| Chat existente (orchestrator solo) | ✅ Funciona idéntico a antes | Si user NO menciona armar/optimizar/geocodificar, no hay sub-agentes activados. |
+
+### ⚠️ Demo-OK pero SIN UI (degraded UX)
+
+| Componente | Estado | Gap | Workaround si aparece en demo |
+|---|---|---|---|
+| Handoff a router (R3) | ⚠️ Server-side funciona, no hay UI badge | Si el AI llama `enter_router_mode`, el user no ve indicador visual del cambio | El AI dice "te paso con el especialista de rutas" antes de cambiar (instrucción reciente al prompt). Suficiente texto explícito. |
+| Geo agent (R2) | ⚠️ Server-side funciona, sin smoke real ejecutado | No probado end-to-end con direcciones reales | Si usuario pide geocoding, el orchestrator delega. Si falla, se ve el error del tool — no es crash. |
+| Costo MXN per-customer override | ⚠️ Columna existe, no hay UI admin para editar | El demo muestra defaults MX 2026 ($2.50/km combustible, etc.) — buenos para Kangoo | Mencionar "estos defaults son del catálogo MX; cada cliente puede ajustar después" si preguntan |
+
+### ❌ NO incluido en demo
+
+| Componente | Estado | Cuándo |
+|---|---|---|
+| UI conversacional para 3 alternativas (`RouteProposalCard`) | ❌ No implementada | Sprint OE-3, post-demo |
+| Tools `propose_route_plan` / `apply_route_plan` en orchestrator | ❌ No implementadas | Sprint OE-3 (depende de R3 + OE-2) |
+| UI badge "modo routing" en chat | ❌ No implementada | Sprint R3-post (frontend) |
+| Multi-tenant: otros customers con migración 045/046 | ❌ Solo VerdFrut migrado | `scripts/migrate-all-tenants.sh` cuando entre 2º cliente |
+| Smoke test ejecutado de R2 (geo agent) | ❌ Pendiente | $0.10 por run; cuando user autorice |
+| Smoke test ejecutado de R3 (handoff) | ❌ Pendiente | Pendiente |
+| A/B benchmark clustering vs manual (OE-1 día 5) | ❌ Pendiente | Post-demo |
+
+### Riesgos identificados para demo
+
+1. **Si el user toca el chat y le pide "arma un tiro"**: el AI llamará `enter_router_mode`. Funcionalmente OK, pero el user no ve badge → puede pensar que el AI "se comportó raro". Mitigación: el prompt le pide al AI que avise "te paso con el especialista" antes.
+
+2. **Si el VROOM (Railway) está rate-limited durante el demo**: cada propuesta hace N llamadas paralelas a VROOM. Si Railway lo aguanta, ~30s. Si rate-limita, error 502 del endpoint. **Mitigación demo**: correr el CLI ANTES del cliente, captura output, presenta capture si Railway falla en vivo.
+
+3. **Si Google Routes API se cae**: VROOM falla por falta de matrix. Mismo workaround.
+
+4. **Si el dispatcher usa el chat para algo no-routing y el AI delega de todos modos**: el prompt v2 reciente es más conservador ("Si tienes duda, NO delegues"). Riesgo bajo.
+
+5. **Sesiones ANTERIORES al deploy de R3**: como migración 046 ya está aplicada y el DEFAULT es 'orchestrator', sesiones legacy se comportan idéntico. Sin riesgo.
+
+### Comandos críticos para esta noche
+
+```bash
+# 1. Pre-flight (30s, antes del demo):
+node scripts/preflight-demo.mjs --user=<TU_UUID> --dispatch=<UUID_DEMO>
+
+# 2. Si todo OK, dry-run el demo TÚ MISMO antes del cliente:
+node scripts/demo-propose-routes.mjs --dispatch=<UUID_DEMO> --user=<TU_UUID>
+
+# 3. Si pre-flight falla, ABORTAR demo o usar capture pre-grabado.
+```
+
+Ver también: [DEMO_RUNBOOK.md](./DEMO_RUNBOOK.md) — paso a paso de la presentación.
+
+---
+
 Formato:
 ```
 ### #N — Título

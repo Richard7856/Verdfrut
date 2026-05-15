@@ -1,10 +1,34 @@
 # TripDrive — Roadmap
 
-> Actualizado el 2026-05-14. La plataforma se llama **TripDrive** (dominio `tripdrive.xyz` en Vercel). Primer cliente productivo: **VerdFrut** → NETO CDMX/Toluca.
+> Actualizado el 2026-05-15. La plataforma se llama **TripDrive** (dominio `tripdrive.xyz` en Vercel). Primer cliente productivo: **VerdFrut** → NETO CDMX/Toluca.
 
 ---
 
-## 🚨 P0 ACTUAL — Optimization Engine (feature central)
+## 🚨 Principio rector activo
+
+**Calidad > costo de tokens.** Toda decisión de arquitectura del agente AI
+(modelo, particionamiento, prompts) se evalúa primero por la calidad del
+output. El costo MXN es secundario hasta que veamos producción real con
+2+ clientes activos. (Confirmado por user 2026-05-15.)
+
+---
+
+## 🎯 Estado pre-demo 2026-05-15 (noche)
+
+**Para presentar al cliente esta noche** → ver [DEMO_RUNBOOK.md](./DEMO_RUNBOOK.md).
+
+**Para entender riesgos / gaps no terminados** → ver sección "Estado Streams OE + R" en [KNOWN_ISSUES.md](./KNOWN_ISSUES.md).
+
+**Resumen ejecutivo**:
+- ✅ OE-2 backend (endpoint `_internal/propose-routes`) y CLI demo: **demo-ready**.
+- ✅ R2 + R3 server-side: **funcional, sin UI**. Solo se activa si el user toca el chat conversacional con intent específico (geo o routing). Defensivo: cualquier sorpresa se mitiga con texto, no crash.
+- ❌ UI conversacional (`RouteProposalCard`, badge "modo routing") + tools `propose_route_plan`/`apply_route_plan`: **NO entran en demo**. Sprint OE-3, post-demo.
+
+---
+
+## 🚨 P0 ACTUAL — Dos streams en paralelo
+
+### Stream OE — Optimization Engine (feature central, ADR-096)
 
 **Decisión 2026-05-14 (ADR-096)**: el clustering + asignación geográfica
 + propuesta de N alternativas pasa a ser **el feature principal del
@@ -18,22 +42,130 @@ alternativas óptimas es **el value prop completo del producto**.
 
 **Spec detallada**: ver `OPTIMIZATION_ENGINE.md`.
 
-**Sprints planeados** (~4 sprints / ~2-3 semanas):
-- Sprint 1: Capas 1+2 — clustering bisección recursiva + asignación greedy
-- Sprint 2: Capa 4 — propuesta de N alternativas con cálculo de costo MXN
-- Sprint 3: Tools del agente + UI `RouteProposalCard` con map preview
-- Sprint 4: Refinamientos (constraints, cache matriz, A/B testing)
+| Sprint | Entrega | Status |
+|---|---|---|
+| **OE-1** | Capas 1+2 — clustering bisección + asignación greedy | ✅ 2026-05-15 (ADR-097) |
+| **OE-2** | Capa 4 — propuesta N alternativas + costo MXN + endpoint `_internal/propose-routes` + migración 045 `customers.optimizer_costs` | ✅ 2026-05-15 (ADR-100) |
+| **OE-3** | Tools `propose_route_plan` + `apply_route_plan` en el router agent (ver Stream R) + UI `RouteProposalCard` con map preview | ⏳ depende de R3 |
+| **OE-4** | Refinamientos: constraints (ventanas horarias, capacity multi-dim), cache matriz Google Routes, A/B testing default option | ⏳ pendiente |
 
 **Métrica de éxito**: km totales por tiro CDMX 21 stops ≤ 280 (vs 421 hoy
 con asignación alfabética). Adopción ≥80% de tiros vía agente AI propose.
 
+### Stream R — Multi-agente runtime (calidad geo + routing)
+
+**Decisión 2026-05-15**: partir el orchestrator monolítico en 3 roles
+(`orchestrator`, `geo`, `router`) para que cada uno tenga un system prompt
+focalizado y un subconjunto de tools relevantes. Motivación: **calidad de
+output** en geocoding y routing (los dos dominios donde el orchestrator
+general se distrae con tools de otros dominios).
+
+**Baseline medido 2026-05-15** (script `scripts/measure-orchestrator-tokens.ts`):
+- 19 tools, ~5k tokens por turno (system + tools), distribuidos:
+  - geo 3 tools / 748 tok · routing 4 / 827 · dispatch 4 / 580
+  - catalog 3 / 379 · data 2 / 344 · edit 3 / 369
+
+**NO usamos**: Claude Agent SDK como framework (overkill; el loop actual
+en `runner.ts` ya hace lo necesario). NO Skills (son dev-time, no runtime).
+
+**Patrones de invocación distintos por rol**:
+- **Geo agent** = "tool batch worker": el orchestrator delega via mega-tool
+  `delegate_to_geo` con input estructurado. El sub-agente corre 5-10 tool
+  calls en loop y devuelve resultado estructurado. El user NO ve el loop
+  interno. Caso de uso: validar 50 direcciones, geocodificar bulk.
+- **Router agent** = "conversation handoff": cuando el orchestrator detecta
+  intent de routing, hace handoff total. El router agent toma la
+  conversación con prompt rico (capas 1-4, costos MXN, jornada). El user
+  ve un badge "modo routing". El control vuelve al orchestrator cuando el
+  user cambia de tema o el router cierra el flujo.
+
+| Sprint | Entrega | Status |
+|---|---|---|
+| **R1** | Refactor `runner.ts` → `runAgent(role, ...)`. Roles `orchestrator \| geo \| router`. Tool registry filtrado por rol. Sin cambios funcionales todavía. | ✅ 2026-05-15 (ADR-098) |
+| **R2** | Geo agent operativo (tool batch worker). `delegate_to_geo` con N=10 max iter. Tests con Excel real de 30 direcciones. | ✅ 2026-05-15 (ADR-099) |
+| **R3** | Router agent + handoff de conversación. UI agrega badge "modo routing". Lógica de "cuándo devolver control al orchestrator". | ✅ 2026-05-15 server-side completo (ADR-101). Migración 046 ✅ aplicada. **UI badge pendiente** (no bloquea demo OE-2). |
+| **R4** | Migrar tool `optimize_dispatch` actual → `propose_route_plan` del router agent (encaja con OE-3). Cleanup de tools redundantes. | ⏳ depende de R3 + OE-2 |
+
+### Riesgos conocidos (revisar en cada sesión antes de tocar agentes)
+
+1. **Regresión por refactor de runner.ts**: el orchestrator monolítico
+   funciona hoy. Partirlo en 3 introduce riesgo de regresión en flujos
+   demo (crear tiro, publicar). Mitigación: R1 es refactor PURO (cero
+   cambio funcional); R2/R3 activan los nuevos roles uno por uno.
+2. **Latencia geo agent**: 5-10 tool calls anidados = 8-15s extra.
+   Mitigación: UI progress bar + el geo agent solo se invoca por batch
+   workflows, nunca en chat conversacional rápido.
+3. **Handoff confusion (router agent)**: si el badge "modo routing" no es
+   claro, el user no sabe por qué la AI "sabe más" de rutas de repente.
+   Mitigación: copy explícito al entrar al modo + botón "salir de modo
+   routing".
+4. **State entre agentes**: si el router crea un dispatch y el user dice
+   "bórralo", el orchestrator necesita saber qué dispatch. Solución:
+   ambos comparten session state en BD (tabla `orchestrator_sessions` ya
+   existe).
+5. **Tests de regresión faltantes**: el orchestrator no tiene snapshot
+   tests del flujo demo. Riesgo de romper sin enterarse hasta producción.
+   Mitigación a discutir: snapshot test mínimo en R1 día 0 (recording de
+   3 conversaciones reales) ANTES del refactor.
+6. **Costo Google Routes en clustering paralelo** (Stream OE): la
+   variante `computeClusteredOptimizationPlan` (ADR-097) hace N llamadas
+   a VROOM en paralelo = N matrices Google Routes. Mitigación pendiente
+   OE-4: cache de pares (lat,lng) en matriz pre-clustering.
+
+### Orden de ejecución recomendado
+
+```
+OE-1 (✅ done) → R1 → R2 → OE-2 → R3 → OE-3 → R4 → OE-4
+```
+
+R1 va primero porque OE-2/OE-3 incluyen una tool `propose_route_plan`
+que diseñamos asumiendo que vive en el router agent (Stream R). Si
+hacemos OE-2 antes de R1, hay que migrar la tool después → trabajo
+duplicado.
+
 ---
 
-## ✅ Estado cerrado al 2026-05-14
+## ✅ Estado cerrado al 2026-05-15
+
+- ADR-097 — Sprint OE-1 (capas 1+2 del Optimization Engine):
+  package `@tripdrive/router` con `clusterStops` (bisección recursiva
+  determinística) + `assignClustersToVehicles` (greedy por haversine).
+  20 tests con `tsx --test`. Integración `computeClusteredOptimizationPlan`
+  en `optimizer-pipeline.ts` backward-compatible.
+- ADR-098 — Sprint R1 (refactor multi-agente runtime): `runner.ts` acepta
+  `role: 'orchestrator' | 'geo' | 'router'`. `TOOLS_BY_ROLE` filtra tools
+  por rol. Cero cambio funcional — los callers existentes pasan
+  `role: 'orchestrator'`.
+- ADR-099 — Sprint R2 (geo agent activo): `delegate_to_geo` tool en el
+  orchestrator + `runGeoAgent` sub-loop read-only con max 10 iteraciones.
+  El orchestrator ya NO ve `geocode_address`/`search_place` directos —
+  los usa via delegación. 21 tests unitarios + fixture de 30 direcciones
+  CDMX + `scripts/smoke-geo-agent.ts` para smoke test contra Anthropic
+  real (manual con API keys, ~$0.10 USD por run).
+- ADR-101 — Sprint R3 code-complete (router agent + handoff conversacional):
+  prompt real con conocimiento de OE capas 1-4, costos MXN, jornada legal.
+  Tools `enter_router_mode` (orchestrator) y `exit_router_mode` (router).
+  Endpoint `/api/orchestrator/chat` lee `active_agent_role` de la sesión y
+  emite eventos SSE `active_role` + `role_changed` para UI badge. Migración
+  046 escrita pero NO aplicada (esperando autorización post-demo). El
+  código tiene fallback defensivo a `'orchestrator'` si la columna no
+  existe → deploy puede ir antes que la migración sin breakage. 34 tests
+  orchestrator pasan.
+- ADR-100 — Sprint OE-2 (Capa 4 del Optimization Engine):
+  `@tripdrive/router/cost.ts` + `propose.ts` (cost MXN + ranking
+  cheapest/balanced/fastest); `apps/platform/src/lib/propose-plans.ts`
+  (orquestación con clustering paralelo); endpoint POST
+  `/api/orchestrator/_internal/propose-routes` con hardening C1;
+  migration 045 `customers.optimizer_costs jsonb` aplicada al tenant
+  VerdFrut (resto via `scripts/migrate-all-tenants.sh`);
+  `scripts/demo-propose-routes.mjs` CLI listo para demo con cliente.
+  43 tests pasan (router) + 21 (orchestrator).
+- Script `scripts/measure-orchestrator-tokens.ts` (baseline 5k tok / 19 tools).
+- Plan multi-agente runtime (Stream R) documentado en este roadmap.
 
 ---
 
-## ✅ Estado cerrado al 2026-05-13
+## ✅ Estado cerrado al 2026-05-13 y previos
 
 ```
 ✅ Fase 0  — Fundación (monorepo, schema, Docker)

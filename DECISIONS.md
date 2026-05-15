@@ -5359,6 +5359,319 @@ Esto requiere:
 - Issue #276 — slider en UI: "balance entre rapidez y costo" como en
   Google Maps "evitar peajes / vía rápida".
 
+---
+
+## [2026-05-15] ADR-097: Sprint 1 Optimization Engine — package @tripdrive/router
+
+**Contexto:** ADR-096 definió la arquitectura de 5 capas del Optimization Engine. Sprint 1 (capas 1+2: clustering geográfico + asignación cluster→vehículo) necesita un lugar para vivir. Las opciones eran (a) meter la lógica en `apps/platform/src/lib/`, (b) crear un nuevo package del workspace.
+
+**Decisión:** Crear package `@tripdrive/router` (puro, sin dependencias de BD ni Next.js). Expone `clusterStops`, `assignClustersToVehicles`, `centroid` y los tipos `GeoPoint` / `RouterVehicle`. Integración en `apps/platform/src/lib/optimizer-pipeline.ts` via nueva función `computeClusteredOptimizationPlan` que dispara N llamadas a VROOM en paralelo, una por cluster.
+
+Algoritmo de clustering: bisección recursiva por eje de mayor spread (split en mediana por índice, no por valor → balance exacto). Determinístico (mismo input ⇒ mismo output) con tie-breaking explícito por id lexicográfico para coordenadas duplicadas.
+
+Algoritmo de asignación: greedy — para cada cluster, vehículo cuyo depot minimiza haversine al centroide. En empate gana el primero del array (orden controlado por caller). Mismas premisas que la spec en `OPTIMIZATION_ENGINE.md`.
+
+Tests: 20 unitarios pasando con `tsx --test` (Node nativo `--experimental-strip-types` no resolvió bien imports extensionless entre archivos fuente). Cubren determinismo, balance, edge cases (k=1, todos los puntos colocados, k > stops), y el caso VerdFrut sur CDMX 22 stops.
+
+**Alternativas consideradas:**
+- *Meter clustering en `apps/platform/src/lib/`:* descartado porque la tool `propose_route_plan` (Sprint 2) vivirá en `@tripdrive/orchestrator`, que no puede depender de Next.js. Separar ahora evita refactor luego.
+- *K-means clásico:* descartado por la spec (no determinístico por random seeds, balance no garantizado, no aprovecha grilla urbana MX).
+- *Modificar `computeOptimizationPlan` con flag `useClustering`:* descartado porque la función ya hace muchas validaciones (driverIds, depot overrides, shift window). Agregar branching interno la volvería poco legible. Mejor: función separada `computeClusteredOptimizationPlan` que reusa la legacy como sub-rutina, una vez por vehículo.
+- *Node `--experimental-strip-types` para tests:* funciona pero requiere extensiones `.ts` explícitas en imports, lo que rompe el type-check downstream (apps que importan `@tripdrive/router` no tienen `allowImportingTsExtensions`). `tsx` (+50KB devDep) resuelve ambos casos sin trade-offs.
+
+**Riesgos / Limitaciones:**
+- **Latencia paralela:** N llamadas concurrentes a VROOM = max(latencias) en vez de suma. Cada call paga su matriz Google Routes propia → costo de API se multiplica. Mitigación pendiente Sprint 4: cache de pares (lat,lng) en matriz pre-clustering.
+- **Bisección asume zona convexa:** si los stops forman herradura o L, los splits por mediana pueden separar mal (ver "Limitaciones conocidas" en OPTIMIZATION_ENGINE.md líneas 100-108). V1 acepta esto; V1.1 agrega k-means+capacity como fallback.
+- **Capacidad de vehículo ignorada:** el clustering divide por count, no por `demand[]`. Si dos tiendas vecinas saturan capacidad cada una, no caben juntas aunque sean geográficamente coherentes. Mitigación V1.1: bin-packing post-cluster que swap stops entre clusters vecinos.
+- **Depots compartidos (caso VerdFrut CEDA):** la asignación greedy degenera a "primer vehículo en remaining". Aceptable porque el dispatcher controla el orden del array; no aceptable cuando entren múltiples CEDIS (Toluca, Tetelco) — ahí el greedy se vuelve útil naturalmente.
+- **Backward compatibility:** `computeOptimizationPlan` legacy queda intacta. Sólo callers nuevos (orchestrator, próxima tool `propose_route_plan`) usan la variante clustered. Sin riesgo de regresión en flujos existentes.
+
+**Oportunidades de mejora:**
+- Sprint 1 día 5 (pendiente): correr A/B contra tiros existentes (CDMX y Toluca) y documentar % de mejora real (target en OPTIMIZATION_ENGINE.md líneas 403-408: -33% km, < 280 km vs 421 baseline).
+- Sprint 2: agregar `proposePlans(stops, vehiclesAvailable, constraints)` que itera K = minVehicles..maxVehicles y devuelve 3 alternativas (más económica / balanced / más rápida). Requiere migración 045 para `customers.optimizer_costs jsonb`.
+- Considerar mover `haversineMeters` de `@tripdrive/utils/gps` a un sub-export específico (`@tripdrive/utils/geo`) si crece la API geoespacial.
+
+**Refs:**
+- ADR-096 — arquitectura de 5 capas (spec original).
+- OPTIMIZATION_ENGINE.md — spec técnica completa.
+- packages/router/src/clustering.ts — implementación capa 1.
+- packages/router/src/assignment.ts — implementación capa 2.
+- apps/platform/src/lib/optimizer-pipeline.ts:206+ — integración `computeClusteredOptimizationPlan`.
+
+---
+
+## [2026-05-15] ADR-098: Multi-agente runtime — refactor del runner por rol (Sprint R1)
+
+**Contexto:** El orchestrator AI (`@tripdrive/orchestrator`) hoy es monolítico: un system prompt + 19 tools que cubren geo, routing, dispatch, catalog, data y edit. Medición 2026-05-15 (`scripts/measure-orchestrator-tokens.ts`): ~5k tokens por turno baseline. El user reporta que la calidad de output en geocoding y routing es mediocre: el modelo se distrae con tools de otros dominios y a veces "olvida" el contexto cuando una conversación cruza dominios.
+
+Después de evaluar 3 opciones (mantener monolítico, partir en sub-agentes runtime, pipeline determinístico), decidimos **partir en sub-agentes runtime con dos patrones de invocación distintos** (ver ROADMAP.md → Stream R). Motivación principal del user: **calidad > costo**, confirmado explícitamente 2026-05-15.
+
+**Decisión:** Sprint R1 — refactor PURO de `runner.ts` para que acepte un parámetro `role: 'orchestrator' | 'geo' | 'router'`. Cero cambio funcional en producción: el caller existente (`apps/platform/src/app/api/orchestrator/chat/route.ts`) pasa explícitamente `role: 'orchestrator'`, y ese rol mantiene los 19 tools actuales. Los roles `geo` y `router` están cableados estructuralmente pero responden con stub defensivo si alguien los invoca por accidente (Sprint R2/R3 los activan con prompts reales).
+
+Patrones de invocación por rol (planeados para R2/R3):
+- **geo** = tool batch worker: el orchestrator invoca via mega-tool `delegate_to_geo` con input estructurado. Sub-agente corre 5-10 tool calls en loop, devuelve resultado estructurado. NO conversa con el user.
+- **router** = conversation handoff: el orchestrator detecta intent de routing y entrega la conversación. El user ve un badge "modo routing". Control vuelve al orchestrator cuando el user cambia de tema o el router cierra el flujo.
+
+Cambios concretos en R1:
+1. Type `AgentRole = 'orchestrator' | 'geo' | 'router'` en `packages/orchestrator/src/types.ts`.
+2. `prompts/index.ts` exporta `SYSTEM_PROMPTS: Record<AgentRole, string>`. `geo` y `router` tienen stubs defensivos que rehúsan actuar.
+3. `tools/role-mapping.ts` con `TOOLS_BY_ROLE` — define qué tools ve cada rol. `orchestrator` mantiene todos (backward compat); `geo` y `router` tienen subsets focalizados (pero todavía no usados).
+4. `runner.ts`: `RunnerInput` gana `role?: AgentRole` (default `'orchestrator'`). El filtrado de tools ahora es intersección (rol AND customer plan AND callerRole).
+5. Caller en `route.ts` pasa `role: 'orchestrator'` explícito (no cambia comportamiento, deja huella para futuros lectores).
+
+**Alternativas consideradas:**
+- *Mantener monolítico, sólo mejorar el system prompt:* descartado porque el problema no es el prompt (es chico), es la dispersión de 19 tools que confunden al modelo cuando una conversación cruza dominios. Más prompt no resuelve eso.
+- *Claude Agent SDK como framework:* descartado. El loop actual en `runner.ts` (188 líneas) ya hace lo que necesitamos. Agregar SDK = nueva dep + curva de aprendizaje + acoplamiento con un producto en flujo de cambios, sin beneficio claro. Mejor extender lo nuestro.
+- *Skills (Claude Code):* descartado. Skills son dev-time, no runtime productivo. No aplican.
+- *Sub-agentes para CADA dominio (geo, routing, dispatch, catalog, data, edit):* descartado por overhead. Cada delegación = round-trip extra. Solo geo y router porque son los dos cuellos de calidad reales reportados por el user.
+- *Pipeline determinístico (código decide qué prompt usar, sin tool-use anidado):* alternativa válida pero más invasiva — requiere clasificador de intent upstream, lo que mete latencia en CADA turno (no solo cuando se necesita especialista). El patrón de sub-agente con delegación on-demand es más quirúrgico.
+- *Activar geo/router prompts ya en R1:* descartado por riesgo. Sin tests de regresión del orchestrator monolítico, cambiar 2 prompts a la vez introduce un blast radius grande. R1 = refactor puro; R2/R3 = activación gradual con tests dedicados.
+
+**Riesgos / Limitaciones:**
+- **Tests de regresión faltantes:** el orchestrator monolítico no tiene snapshot tests. El refactor R1 es estructural (cero cambio funcional intencional), pero un bug sutil podría pasar desapercibido hasta R2/R3. Mitigación pendiente: snapshot test mínimo del flujo demo "armar tiro CDMX 21 stops" antes de R2.
+- **Default `role: 'orchestrator'` esconde el cambio:** los callers que no sepan del refactor seguirán funcionando, lo que es bueno para backward compat pero malo para auditoría. Mitigación: el caller principal ya lo pasa explícito; futuros endpoints deben hacer lo mismo.
+- **Allowlist de customers cruza con role filter:** un customer puede tener `ai_tools_allowlist` que incluya tools que ahora no están en el rol. El filtro de R1 es intersección (correcto), pero un customer que tenía `optimize_dispatch` en allowlist y termina en rol `geo` no lo vería. En R1 nadie está en rol `geo` todavía, así que no rompe nada — pero R3 debe revisar customer allowlists antes de activar router.
+- **Doble fuente de verdad (registry global + role mapping):** si alguien agrega un tool nuevo al registry y olvida ponerlo en `TOOLS_BY_ROLE`, queda inaccesible para todos los roles. Es defensa por defecto (seguro) pero puede confundir. Mitigación pendiente R2: warning en dev mode si hay tools en registry no asignadas a ningún rol.
+
+**Oportunidades de mejora:**
+- Sprint R2: activar geo agent con prompt real + tool `delegate_to_geo` en orchestrator. Tests con Excel real de 30 direcciones (proveer un fixture en `scripts/test-data/`).
+- Sprint R3: activar router agent con handoff. UI agrega indicador visual del modo activo. Necesita un decision tree explícito ("¿cuándo el orchestrator hace handoff?") — probablemente keyword detection inicial, intent classifier ML después.
+- Considerar mover `runOrchestrator` → `runAgent` (rename) cuando R2/R3 estén en producción. Por ahora mantengo el nombre legacy para no romper imports.
+- Hacer un `tools/audit-roles.ts` que valide en CI que cada tool del registry esté asignado a al menos un rol.
+
+**Refs:**
+- ROADMAP.md → Stream R (sprints R1-R4 + riesgos).
+- ADR-090..094 — orquestador original y tools previos.
+- ADR-096 — Optimization Engine arquitectura (Stream OE depende de Stream R para la tool `propose_route_plan`).
+- scripts/measure-orchestrator-tokens.ts — baseline de medición.
+- packages/orchestrator/src/types.ts — `AgentRole`.
+- packages/orchestrator/src/prompts/index.ts — `SYSTEM_PROMPTS` por rol.
+- packages/orchestrator/src/tools/role-mapping.ts — `TOOLS_BY_ROLE`.
+- packages/orchestrator/src/runner.ts — `RunnerInput.role`.
+
+---
+
+## [2026-05-15] ADR-099: Sprint R2 — geo agent activo (delegate_to_geo)
+
+**Contexto:** R1 (ADR-098) dejó la estructura para sub-agentes pero solo el rol `orchestrator` cableado en producción. El rol `geo` tenía stub defensivo. R2 activa el geo agent como **tool batch worker**: el orchestrator invoca via `delegate_to_geo` con input estructurado (task + addresses + stop_ids), el sub-agente corre un loop interno de hasta 10 iteraciones de tool calls, y devuelve resultado estructurado al orchestrator. NO conversa con el user.
+
+Motivación reportada por user 2026-05-15: el orchestrator generalista hace mal el work geo porque se distrae con 19 tools en su prompt. Un especialista con prompt focalizado (geocoding + search Places + validación) y 3 tools subset debe mejorar calidad. Confirmado principio "calidad > costo".
+
+**Decisión:**
+
+1. **Geo agent es READ-ONLY**. `TOOLS_BY_ROLE.geo` contiene solo `geocode_address`, `search_place`, `search_stores`. NO `create_store` ni `bulk_create_stores` — esos requieren confirmation del user y se mantienen en el orchestrator. Patrón: el geo agent propone, el orchestrator pide confirmación al user, el orchestrator escribe.
+
+2. **El orchestrator NO ve geo tools crudas**. `TOOLS_BY_ROLE.orchestrator` ya NO incluye `geocode_address`/`search_place` (sí incluye writes `create_store`/`bulk_create_stores`). Esto FUERZA delegación: todo geo work pasa por `delegate_to_geo`.
+
+3. **Sub-loop independiente** (`runGeoAgent` en `geo-runner.ts`):
+   - Anthropic call propio (cost duplicado por turno que delega — aceptado por principio calidad > costo).
+   - NO emite eventos SSE al user. El orchestrator emite un solo `tool_use_start` para `delegate_to_geo` y al final el user ve el summary.
+   - Max iterations default 10 (configurable hasta 25). Cap defensivo de 50 addresses por delegación — batches mayores se parten.
+   - Defensa en profundidad: si por bug un tool con `requires_confirmation` se asigna al rol geo, el sub-runner lo rechaza en duro.
+   - Audit: cada tool call interno se inserta en `orchestrator_actions` con session_id del orchestrator (parent). Migración pendiente: columna `delegated_from` para distinguir audit de sub-agente.
+
+4. **Tool `delegate_to_geo`** (en orchestrator, `is_write: false`, sin confirmation):
+   - Args: `task` (descripción natural), `addresses?[]`, `stop_ids?[]`, `max_iterations?`.
+   - Validación: task no vacío, ≤1000 chars, ≤50 addresses, ≤50 stop_ids, max_iterations en [1,25].
+   - Output: `{ summary, iterations_used, stop_reason, tool_calls[], usage }`. Siempre `ok: true` desde el orchestrator (el éxito real se refleja en `stop_reason`); esto preserva tool_calls intentados aún cuando hubo error interno.
+
+5. **Prompt del geo agent** (`prompts/geo.ts`): instrucciones para batch processing, sin invención, reporte de location_type, formato estandarizado del mensaje final (RESUMEN / RESULTADOS / DUDAS / SIGUIENTE PASO). Explícito: "no haces preguntas (no hay user para responderlas)".
+
+6. **Mismo modelo** (Sonnet 4.6 default) en ambos roles. Configurable via `GEO_AGENT_MODEL` env por si en producción queremos probar Haiku para batches puros.
+
+**Alternativas consideradas:**
+- *Geo agent con write tools (create_store / bulk_create_stores):* descartado. El sub-loop no soporta `requires_confirmation` (es batch worker sin user a quien preguntar). Si el geo agent pudiera crear, el user perdería el control. Pattern actual (geo propone → orchestrator confirma → orchestrator escribe) es más seguro.
+- *Mantener geocode_address visible al orchestrator también:* descartado. Si está disponible, el modelo lo va a llamar directo para "geocodifica esta dirección" en lugar de delegar — perdiendo el beneficio de la especialización. Cleaner: forzar delegación siempre, incluso para single-address.
+- *Geo agent como tool con streaming (eventos SSE al user durante el sub-loop):* descartado para R2. El sub-loop es batch — la UX correcta es "spinner durante el proceso, summary al final", no "ver cada geocode en tiempo real". Si la latencia es problema (5-15s para batches grandes), R2.1 puede agregar progress events tipo "procesando 12/30".
+- *Modelo Haiku para el geo agent (3x más barato):* deferred. Para R2 quiero ver calidad con Sonnet primero antes de optimizar costo. `GEO_AGENT_MODEL` env permite cambiar sin código.
+- *No exponer `runGeoAgent` desde el index del package:* descartado. Lo exporto porque tests y scripts admin (smoke test, batch jobs en cron) lo necesitan. En producción se invoca solo via `delegate_to_geo`.
+- *Validar args con JSON schema antes de llamar el sub-runner (Zod o ajv):* descartado por simplicidad. La validación manual en el handler (líneas ~85-120 de delegate.ts) cubre los casos críticos sin agregar dep. Cuando R3 agregue más delegate_* tools, considerar centralizar.
+
+**Riesgos / Limitaciones:**
+- **Doble llamada a Anthropic por turno con delegación**: cada vez que el orchestrator usa `delegate_to_geo`, son 2 conversaciones Anthropic en paralelo (orchestrator + geo). Costo aprox 2x el monolítico para ese turno. Aceptado por principio calidad > costo, pero monitorear si pasa de $0.50/turno en producción.
+- **Latencia perceptible**: el sub-loop con 10 iteraciones puede tardar 8-15s. UI muestra spinner pero el user puede pensar que se colgó. Mitigación pendiente R2.1: emit progress events tipo "geo agent: procesando 12/30 direcciones".
+- **El orchestrator puede no entender cuándo delegar**: si el prompt del orchestrator no es claro, el modelo puede intentar llamar `geocode_address` directo (que ya no tiene) y fallar. Mitigación: agregué párrafo explícito al system prompt del orchestrator (líneas 27-29 de `prompts/system.ts`). Probar con el smoke test contra demo real.
+- **Audit incompleto sin migración `delegated_from`**: las tool calls del sub-loop quedan en `orchestrator_actions` mezcladas con las del parent session. Hace difícil saber qué calls fueron auto-vs-delegadas. Migración 045 pendiente: agregar columna `delegated_from session_id` NULLABLE. Mientras tanto, todo se sigue auditando bajo la session padre (no se pierde nada — solo se pierde la jerarquía).
+- **Cap de 50 addresses por delegación es arbitrario**: vino de "intuición + costo prudente". Si un customer real tiene 200 stores que validar, el orchestrator necesita partir en 4 llamadas a delegate_to_geo. Funciona pero es feo. Cuando aparezca el caso, considerar streaming chunked en una sola tool call (R2.2).
+- **Fuzzy_match real no existe**: el prompt del geo agent menciona "detectar duplicados" usando `search_stores` con palabras clave del resultado. Esto funciona con suerte pero no es robusto. Tool dedicado `fuzzy_match_store` con embedding similarity sería mejor (R2.3 o R4).
+- **Smoke test cuesta $$ y requiere keys**: `scripts/smoke-geo-agent.ts` corre contra Anthropic + Google reales (~$0.10/run). NO se puede integrar a CI automático sin secrets. Aceptado: el test es manual; las invariantes que sí se validan en CI están en `role-mapping.test.ts` + `delegate.test.ts` + `geo-runner.test.ts` (21 tests unitarios).
+- **El geo agent puede entrar en loop tonto**: el system prompt dice "max 10 iteraciones" pero si el modelo decide reintentar la misma dirección 10 veces (porque siempre falla), agota el budget sin avanzar. Mitigación heurística pendiente: detectar repetición exacta de args en `runGeoAgent` y cortar.
+
+**Oportunidades de mejora:**
+- R2.1: progress events del geo agent (UI muestra "12/30 direcciones procesadas").
+- R2.2: streaming chunked para batches grandes (>50 addresses).
+- R2.3: tool `fuzzy_match_store` con embedding similarity (Voyage o OpenAI embeddings) en lugar de `search_stores` keyword.
+- Migración 045: columna `orchestrator_actions.delegated_from` para audit jerárquico.
+- Probar Haiku 4.5 para el geo agent — batches puros no requieren razonamiento profundo. Si calidad se mantiene, ahorro 3x.
+- Test de invariante adicional: que `SYSTEM_PROMPTS.geo` no contenga referencias a tools que NO están en `TOOLS_BY_ROLE.geo` (catch typos en el prompt).
+
+**Refs:**
+- ROADMAP.md → Stream R, R2 ✅.
+- ADR-098 — Sprint R1, refactor del runner.
+- packages/orchestrator/src/geo-runner.ts — `runGeoAgent` sub-loop.
+- packages/orchestrator/src/prompts/geo.ts — system prompt del geo agent.
+- packages/orchestrator/src/tools/delegate.ts — tool `delegate_to_geo`.
+- packages/orchestrator/src/tools/role-mapping.ts — `TOOLS_BY_ROLE.orchestrator` ya no incluye `geocode_address`/`search_place`.
+- packages/orchestrator/src/prompts/system.ts:27-29 — instrucción al orchestrator de usar `delegate_to_geo`.
+- scripts/test-data/cdmx-30-addresses.json — fixture smoke test.
+- scripts/smoke-geo-agent.ts — runner del smoke test (manual con API keys).
+
+---
+
+## [2026-05-15] ADR-100: Sprint OE-2 — Capa 4 (propuesta de N alternativas con costo MXN)
+
+**Contexto:** OE-1 (ADR-097) entregó clustering + asignación geográfica determinística pero todavía no responde la pregunta de negocio que el cliente VerdFrut/NETO reportó esta misma sesión: **"cuánto cuesta cada opción y cuánto km recorre?"**. Su contrato de renta los limita por km y el cliente tiene demo esta noche 2026-05-15 — necesita poder presentar 2-3 alternativas de plan con precio MXN al dispatcher para que decida.
+
+OE-2 cierra ese gap implementando la Capa 4 del Optimization Engine (OPTIMIZATION_ENGINE.md líneas 188-258): generación de múltiples opciones para K=minVehicles..maxVehicles, cálculo de costo MXN por opción, y ranking de hasta 3 representativas (cheapest / balanced / fastest).
+
+**Decisión:** Implementación dividida entre package puro + orquestación en platform + endpoint interno + CLI de demo.
+
+1. **`@tripdrive/router/cost.ts`** — lógica pura de cálculo de costo MXN:
+   - `OptimizerCostsConfig` (6 escalares: combustible, desgaste, salario, overhead, jornada máx, max stops/vehículo).
+   - `parseCostsConfig(raw)` — merge defensivo con DEFAULT_COSTS para jsonb mal formado (key faltante, valor fuera de rango, tipo wrong → cae a default).
+   - `computePlanCost(metrics, config)` y `computeCostBreakdown(metrics, config)` — fórmula `km*(fuel+wear) + hrs*wage + N*overhead`. Redondeo a 2 decimales.
+   - `isPlanFeasible(metrics, config)` — verifica jornada del chofer más cargado ≤ max_hours_per_driver.
+
+2. **`@tripdrive/router/propose.ts`** — ranking puro:
+   - `rankAndPickAlternatives(options, config)` — toma N opciones evaluadas y devuelve hasta 3 representativas con labels (`cheapest` | `balanced` | `fastest`). Si una misma opción gana varias categorías, aparece UNA vez con múltiples labels. Si nada es factible, devuelve la "menos mala" sin labels (UX edge).
+   - `computeKRange(stopCount, vehiclesAvailable, config)` — `[minK = ceil(stops/maxStopsPerVehicle), maxK = min(available, floor(stops/4))]`.
+
+3. **`apps/platform/src/lib/propose-plans.ts`** — orquestación (NO pure, lee BD + llama VROOM):
+   - Carga `customers.optimizer_costs` (post merge con defaults).
+   - Por cada K en [minK, maxK] en **paralelo via Promise.allSettled**: llama `computeClusteredOptimizationPlan` (ADR-097, capa 3) → métricas → costo → opción raw.
+   - Llama `rankAndPickAlternatives` y devuelve hasta 3 alternativas con labels.
+   - Detecta `alwaysUnassignedStoreIds` (intersección de unassigned de TODAS las opciones — flag para que el user revise antes de aplicar).
+
+4. **Endpoint `POST /api/orchestrator/_internal/propose-routes`**:
+   - **Hardening C1**: customer_id derivado server-side desde `user_profiles` (NUNCA del body). Idéntico patrón que `_internal/optimize` (ADR-095).
+   - Token interno `INTERNAL_AGENT_TOKEN`.
+   - 3 modos input: (A) `dispatch_id` existente, (B) `stop_ids + vehicle_ids` explícitos, (C) `stop_ids + zone_id` (autodetect vehículos activos).
+   - `maxDuration: 90s` (hasta 5 K × N clusters × VROOM ~10s = 50-90s peor caso).
+   - Output: alternativas con labels, métricas, cost breakdown, lista de rutas por opción.
+
+5. **Migración 045** `customers.optimizer_costs jsonb DEFAULT '{...}'`. Idempotente (`ADD COLUMN IF NOT EXISTS`). Aplicada al tenant VerdFrut via MCP. Defaults MX 2026 (Kangoo 14 km/l, gasolina $35/L, chofer $15k/mes 200h = $80/h).
+
+6. **CLI `scripts/demo-propose-routes.mjs`**: para demo de esta noche. Llama el endpoint y formatea output en terminal con emojis 💰⚖️⚡, breakdown de costo MXN por categoría, y comparativa "cambiar de económica a rápida cuesta $X más pero ahorra Yh".
+
+**Alternativas consideradas:**
+- *Cálculo de costo en el endpoint en lugar del package:* descartado. La lógica del costo es pura — quiero testearla sin levantar BD. Separación package (pure) / platform (I/O) es consistente con ADR-097.
+- *Ranking con K-fija (sin explorar minK..maxK):* descartado. El value prop ES mostrar trade-offs entre usar 2 vs 3 vehículos. Si fijamos K, el dispatcher pierde la opción "más rápida con un vehículo extra".
+- *Serializar VROOM calls (no paralelizar):* descartado por latencia. Con 3 K × 3 clusters cada uno serializado = 9 × 10s = 90s. Paralelo: max(latencias) ≈ 15s. Trade-off: costo Google Routes se multiplica (cache miss en cada call). Aceptado por principio calidad > costo + necesidad de demo.
+- *Devolver TODAS las alternativas (no solo 3):* descartado por UX. La spec (líneas 252-256) dice 3 es el cap óptimo para el dispatcher; más opciones es decision fatigue.
+- *Hacer write inmediato (apply_route_plan en el mismo endpoint):* descartado. El user explícitamente debe elegir cuál aplicar; mezclar propose+apply rompe el patrón "te muestro, decides, aplico". El apply queda para OE-3.
+- *UI en lugar de CLI para esta noche:* descartado por tiempo. La UI conversacional necesita primero R3 (router agent + handoff). El CLI le da al user una demo presentable en ~3 horas, no días.
+- *Validar args con Zod:* descartado para mantener simple. Validación manual en el endpoint cubre los casos críticos (UUIDs, longitudes). Cuando OE-3 traiga la tool conversacional `propose_route_plan`, centralizar.
+
+**Riesgos / Limitaciones:**
+- **Costo Google Routes en paralelo**: N clusters × K alternativas = hasta 15 matrices de tráfico por llamada de demo. A ~$0.005 por matrix call, una propuesta de 21 stops puede costar $0.05 USD en Google. Acumulado en demos diarias: ~$1.50/mes. Aceptable mientras no escale a 100+ propuestas/día. Mitigación pendiente (OE-4): cache de pares (lat,lng).
+- **Migración aplicada solo al tenant VerdFrut**: el MCP de Supabase está vinculado al project_ref `hidlxgajcjbtlwyxerhy`. Otros tenants quedan sin la columna `optimizer_costs` → `parseCostsConfig(null)` devuelve DEFAULT_COSTS, así que el feature funciona pero el customer no puede overridear. Aplicar a otros tenants via `scripts/migrate-all-tenants.sh` antes del próximo cliente productivo.
+- **`computeClusteredOptimizationPlan` por K = código duplicado relativo al monolítico**: para K=1 podríamos llamar `computeOptimizationPlan` directo (más eficiente). El código actual siempre va por la variante clustered, lo que con K=1 es overhead innecesario. Optimización menor; ignorada hasta que mida en prod.
+- **`alwaysUnassignedStoreIds` puede ser misleading**: si solo evalué K=1 y K=2 y un stop falló en K=1 pero pasó en K=2, NO aparece como "always". Pero si solo evalué K=2 y falló, sí aparece. Eso confunde — el flag depende de cuántas opciones se computaron. Mitigación: el output incluye `total_evaluated` y `k_explored` para que el caller lo interprete con contexto.
+- **El endpoint maxDuration=90s puede agotarse**: con K=5 y 50+ stops, hemos visto pipelines de 60-80s. Si el demo de hoy tiene un tiro muy grande, puede timeout. Mitigación de emergencia: el CLI imprime el tiempo elapsed para que se sepa cuándo escalar.
+- **Sin tests de la orquestación (`propose-plans.ts`)**: solo testée `cost.ts` y `propose.ts` (puros). La orquestación requiere mockear BD + VROOM, sustancial. Aceptado para shipping rápido; OE-3 puede agregar un integration test contra el endpoint real.
+- **Cap de feasibility hard-coded a `max_hours_per_driver`**: si el cliente quiere flexibilizar (ej. "permite 10h por hoy con bono"), tendría que editar el JSONB. UI admin para esto queda fuera de OE-2.
+- **Costos en MXN, no multi-moneda**: TripDrive solo opera MX hoy. Cuando entre cliente USA/CO, refactorizar `optimizer_costs` para incluir `currency`.
+- **El CLI requiere INTERNAL_AGENT_TOKEN + Next dev/prod corriendo**: el user que corre el demo necesita acceso a `.env.local` con el token y al servidor (`pnpm dev` o producción). Documentado en el header del script.
+
+**Oportunidades de mejora:**
+- OE-3: tool `propose_route_plan` y `apply_route_plan` en `@tripdrive/orchestrator` (depende de Stream R3 → router agent host).
+- OE-3: UI `RouteProposalCard` con map preview por cluster (Mapbox GL JS); 3 cards apiladas con costo + jornada + botón "elegir".
+- OE-4: cache de matriz Google Routes (pares lat,lng frecuentes).
+- OE-4: A/B testing del default (cheapest vs balanced) y métrica de adopción.
+- R3+OE-3: cuando el router agent esté activo, mover `optimize_dispatch` legacy → `propose_route_plan` (deprecate la primera).
+- Reportería: registrar en `orchestrator_actions` cada llamada a propose-routes con la opción elegida — KPI de adopción del feature.
+- UI admin para editar `customers.optimizer_costs` (forms con sliders, presets por tipo de vehículo).
+- Heurística "siempre proponer K-1 y K+1 de la opción actual del dispatch" para que el user vea el diff incremental.
+
+**Refs:**
+- ADR-096 — Optimization Engine arquitectura 5 capas.
+- ADR-097 — Sprint OE-1 (capas 1+2).
+- OPTIMIZATION_ENGINE.md líneas 188-258 — spec original de Capa 4.
+- supabase/migrations/00000000000045_customers_optimizer_costs.sql — migración aplicada.
+- packages/router/src/cost.ts — fórmula MXN + parseCostsConfig defensivo.
+- packages/router/src/propose.ts — `rankAndPickAlternatives` + `computeKRange`.
+- apps/platform/src/lib/propose-plans.ts — orquestación.
+- apps/platform/src/app/api/orchestrator/_internal/propose-routes/route.ts — endpoint.
+- scripts/demo-propose-routes.mjs — CLI de demo (uso inmediato para cliente).
+
+---
+
+## [2026-05-15] ADR-101: Sprint R3 — router agent activo (conversation handoff)
+
+**Contexto:** Stream R definió 2 patrones de delegación a sub-agentes: **batch worker** (R2 / geo agent, sin user interaction) y **conversation handoff** (R3 / router agent, toma la conversación con el user). R3 implementa el segundo. Motivación: el routing es la feature central del producto (ADR-096) y necesita un especialista conversacional con prompt rico (capas 1-4, costos MXN, jornada legal) en lugar de competir por atención con 19 tools del orchestrator generalista.
+
+R3 también desbloquea OE-3 (UI `RouteProposalCard` + tools `propose_route_plan`/`apply_route_plan`) que vivirán dentro del router agent.
+
+**Decisión:** Implementar handoff persistente entre turnos via estado en BD.
+
+1. **`orchestrator_sessions.active_agent_role` TEXT DEFAULT 'orchestrator'** (migración 046). Persiste qué agente maneja el próximo turno. Check constraint restringe a `('orchestrator', 'router', 'geo')`. Sesiones existentes adquieren default automáticamente → cero cambio de comportamiento.
+
+2. **Tool `enter_router_mode`** (en orchestrator):
+   - Args: `reason` (string, requerido — para audit).
+   - Handler: `UPDATE orchestrator_sessions SET active_agent_role='router' WHERE id=session AND customer_id=...`
+   - El próximo turno del user es manejado por el router automáticamente (el endpoint relee el rol al inicio del turno).
+
+3. **Tool `exit_router_mode`** (en router):
+   - Args: `outcome` (string, requerido — resumen para que el orchestrator tenga contexto al retomar).
+   - Handler: `UPDATE` el rol a `'orchestrator'`.
+   - Simetría garantizada: el router siempre puede salir; no hay forma de quedar atrapado.
+
+4. **Endpoint `/api/orchestrator/chat`**:
+   - Al inicio del turno: lee `active_agent_role` con cast defensivo. Si la columna no existe (migración 046 no aplicada) o devuelve valor desconocido, fallback a `'orchestrator'`.
+   - Emite evento SSE `{ type: 'active_role', role }` antes del loop para que la UI pinte el badge.
+   - Pasa `role` al runner (`runOrchestrator({ role: initialRole, ... })`).
+   - Al final del turno: relee el rol y, si cambió, emite `{ type: 'role_changed', from, to }`.
+
+5. **System prompt del router** (`prompts/router.ts`, ~120 líneas):
+   - Conocimiento explícito de las 4 capas del Optimization Engine.
+   - Fórmula de cálculo MXN + constantes defaults.
+   - Constraints duros (jornada 9h LFT MX, max stops por vehículo).
+   - Patrón de presentación de alternativas con emojis 💰⚖️⚡.
+   - Reglas duras: plan antes de actuar, no inventar, honestidad de constraints, brevedad MX.
+
+6. **System prompt del orchestrator actualizado**: ítem 8 nuevo explicando cuándo invocar `enter_router_mode` ("user pide armar tiro, optimizar, mover paradas, comparar alternativas"). Negativo explícito: queries pasivas como "qué tiros hay hoy" las maneja el orchestrator directo, no delega.
+
+**Alternativas consideradas:**
+- *Intent classifier upstream (decisor pre-LLM)*: descartado. Agregaría un modelo ML antes de cada turno o reglas keyword frágiles. Dejar que el LLM-orchestrator decida vía `enter_router_mode` es más confiable, más auditable, y costo idéntico (la tool call es una decisión, no un modelo extra).
+- *Estado en memoria del servidor (no en BD)*: descartado. Next.js server es stateless entre requests; el handoff DEBE persistir.
+- *Cookie del cliente con el rol*: descartado. El cliente puede manipular cookies; el rol debe vivir server-side.
+- *Tool con efecto inmediato en el mismo turno (sin esperar al próximo)*: descartado. Cambiar el system prompt en medio de un loop confunde al modelo (la conversación que llevó hasta acá no fue con el router). Patrón "el handoff se materializa en el próximo turno" es más limpio.
+- *Migración no idempotente que TIRE error si ya existe el constraint*: descartado por el patrón actual del repo. Idempotencia via `DO $$ ... IF NOT EXISTS` permite re-run seguro.
+- *Router agent con writes destructivos sin confirmation*: descartado. El router conversa con el user, así que SÍ debe soportar pausas por `requires_confirmation` (a diferencia del geo agent). Tools como `reassign_driver` mantienen `requires_confirmation=true`. Test `'router PUEDE tener tools con requires_confirmation'` documenta y vigila esta decisión.
+- *Activar router con migración aplicada en producción YA*: descartado. El user está en demo de OE-2 esta noche; aplicar otra DDL en paralelo introduce riesgo. Código defensivo permite deploy sin migrar; migración va después del demo.
+
+**Riesgos / Limitaciones:**
+- **Migración 046 pendiente de aplicar**: el código tiene fallback a `'orchestrator'` si la columna no existe, así que deploy sin migrar NO rompe el chat actual. Pero hasta aplicar 046, `enter_router_mode` falla con error "¿Migración 046 aplicada?" y el rol nunca cambia. Funcionalmente equivale a R1 (refactor puro). Aplicar 046 cuando el demo cierre.
+- **Loop "enter → exit → enter → exit"**: si el orchestrator y router se confunden y se pasan el turno, podemos entrar en ping-pong. Los prompts dicen "no salgas silenciosamente / no entres por queries pasivas". Mitigación: el loop del runner tiene max 12 iteraciones — si el modelo gasta iteraciones llamándose a sí mismo, el budget se agota. Cap natural.
+- **Audit incompleto del cambio de rol**: el UPDATE de `active_agent_role` no se inserta en `orchestrator_actions` como una "action" propia (solo va el `enter_router_mode` tool call). Si en debugging queremos un timeline limpio de "cuándo se cambió el rol", hay que reconstruirlo de tools en el message log. Aceptable; OE-4 puede agregar columna `role_change_at` o tabla aparte.
+- **UI badge pendiente**: el endpoint emite `active_role` y `role_changed` pero el frontend del chat todavía no los consume. Cuando la UI se actualice, el dispatcher verá "modo routing" claramente. Mientras tanto, el cambio es transparente — el user solo nota que las respuestas son más profundas en temas de routing.
+- **Sesión legacy sin `active_agent_role`**: sesiones creadas pre-migración 046 NO tienen la columna. El SELECT defensivo cae a `'orchestrator'`. Tras aplicar 046, todas las filas adquieren el default automáticamente → consistencia restaurada sin migración de datos.
+- **Capacity del router prompt**: ~3500 tokens. Cuando R4 agregue `propose_route_plan` y `apply_route_plan`, el prompt crece. Si pasa de ~5k tokens individualmente, el beneficio sobre el monolítico se diluye. Monitorear con `scripts/measure-orchestrator-tokens.ts` extendido a per-role.
+- **El router tiene `optimize_dispatch` Y eventualmente `propose_route_plan`**: redundancia temporal. R4 desactiva el primero. Si un usuario fuerza el legacy, ambos coexisten — puede confundir al modelo cuál elegir. El prompt del router NO menciona `optimize_dispatch`, solo `propose_route_plan` (cuando exista). Suficiente por ahora.
+- **`enter_router_mode` no verifica que el user PUEDA usar routing**: si un customer no tiene el feature `optimization` habilitado en su plan, el orchestrator podría intentar handoff y el router intentaría tools que el customer no tiene en allowlist → resultado raro. Mitigación pendiente: validar en el handler de `enter_router_mode` que el customer tenga `optimization` feature flag.
+
+**Oportunidades de mejora:**
+- UI: badge "modo routing" en el chat header. Botón "salir de modo" que llama al endpoint para forzar `exit_router_mode` desde el cliente.
+- Animación o color del input cuando el rol cambia, para indicar visualmente la transición.
+- `orchestrator_actions.agent_role` column para auditar qué agente originó cada tool call (mejor jerarquía vs solo session_id).
+- Métrica de adopción: % de sesiones que entran a modo router al menos una vez. KPI directo del valor del feature.
+- Auto-exit por timeout: si el modo router lleva N turnos sin acción de routing (solo small-talk), forzar exit. Evita lock-in accidental.
+- Permitir al user override "/orchestrator" / "/router" como prefijos del mensaje para forzar el modo. Útil para debug.
+- Test integración manual: crear sesión, enviar "arma un tiro", verificar que el modelo llama `enter_router_mode`. Pendiente porque requiere API key + servidor levantado.
+
+**Refs:**
+- ROADMAP.md → Stream R, R3 code-complete (pendiente aplicar migración 046 + UI badge).
+- ADR-098 — Sprint R1, base de roles.
+- ADR-099 — Sprint R2, geo agent (patrón batch worker, distinto de R3).
+- supabase/migrations/00000000000046_orchestrator_session_active_agent.sql — escrita, NO aplicada todavía.
+- packages/orchestrator/src/prompts/router.ts — system prompt real (~3.5k tokens).
+- packages/orchestrator/src/tools/delegate.ts — `enter_router_mode`, `exit_router_mode`.
+- packages/orchestrator/src/tools/role-mapping.ts — `TOOLS_BY_ROLE.router` con `exit_router_mode`.
+- packages/orchestrator/src/prompts/system.ts:32 — ítem 8 del orchestrator menciona `enter_router_mode`.
+- apps/platform/src/app/api/orchestrator/chat/route.ts:147-165 — lectura defensiva de `active_agent_role`.
+- apps/platform/src/app/api/orchestrator/chat/route.ts:256-302 — paso del rol al runner + detección de cambio + eventos SSE.
+- packages/orchestrator/src/router-handoff.test.ts — 13 tests de invariantes (todos pasan).
+
 
 
 
