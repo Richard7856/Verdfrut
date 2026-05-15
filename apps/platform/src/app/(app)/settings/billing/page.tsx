@@ -13,10 +13,11 @@ import { requireRole } from '@/lib/auth';
 import { createServiceRoleClient } from '@tripdrive/supabase/server';
 import {
   getStripe,
-  getPriceIds,
+  getPriceIdsForTier,
+  getMinimumsForTier,
   computeExtrasFromSeats,
-  PRO_LICENSE_MIN_ADMINS,
-  PRO_LICENSE_MIN_DRIVERS,
+  anyTierConfigured,
+  type CustomerTier,
 } from '@/lib/stripe/client';
 import { BillingActions } from './billing-actions';
 
@@ -91,7 +92,12 @@ export default async function BillingPage({ searchParams }: Props) {
   const adminCount = adminSeats.count ?? 0;
   const driverCount = driverSeats.count ?? 0;
 
-  const stripeConfigured = getStripe() !== null && getPriceIds() !== null;
+  // Stripe configurado = SDK + al menos un tier completo (3 price IDs).
+  const customerTier = (customer?.tier as CustomerTier | null) ?? 'pro';
+  const stripeConfigured =
+    getStripe() !== null &&
+    (getPriceIdsForTier(customerTier) !== null || anyTierConfigured());
+  const { minAdmins, minDrivers } = getMinimumsForTier(customerTier);
 
   const status = customer?.subscription_status ?? null;
   const statusInfo = status ? STATUS_LABEL[status] : null;
@@ -162,7 +168,8 @@ export default async function BillingPage({ searchParams }: Props) {
 
       {/* Breakdown de seats vs licencia base */}
       {(() => {
-        const { extraAdmins, extraDrivers } = computeExtrasFromSeats(adminCount, driverCount);
+        const { extraAdmins, extraDrivers } = computeExtrasFromSeats(adminCount, driverCount, customerTier);
+        const tierLabel = customerTier === 'starter' ? 'Operación' : customerTier === 'enterprise' ? 'Enterprise' : 'Pro';
         return (
           <Card className="mb-4 border-[var(--color-border)] bg-[var(--vf-surface-2)] p-4">
             <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
@@ -173,10 +180,10 @@ export default async function BillingPage({ searchParams }: Props) {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm font-semibold text-[var(--color-text)]">
-                    Licencia Pro base
+                    Licencia {tierLabel} base
                   </p>
                   <p className="text-[11px] text-[var(--color-text-muted)]">
-                    Incluye hasta {PRO_LICENSE_MIN_ADMINS} admin + {PRO_LICENSE_MIN_DRIVERS} choferes sin costo extra
+                    Incluye hasta {minAdmins} admin + {minDrivers} choferes sin costo extra
                   </p>
                 </div>
                 <span className="rounded-md bg-[var(--vf-green-950)] px-2 py-0.5 text-[10px] uppercase tracking-wide text-[var(--vf-green-300)]">
@@ -189,14 +196,14 @@ export default async function BillingPage({ searchParams }: Props) {
               <SeatRow
                 label="Admin / dispatcher"
                 count={adminCount}
-                minIncluded={PRO_LICENSE_MIN_ADMINS}
+                minIncluded={minAdmins}
                 extras={extraAdmins}
                 lastSynced={customer?.last_synced_admin_seats ?? null}
               />
               <SeatRow
                 label="Choferes"
                 count={driverCount}
-                minIncluded={PRO_LICENSE_MIN_DRIVERS}
+                minIncluded={minDrivers}
                 extras={extraDrivers}
                 lastSynced={customer?.last_synced_driver_seats ?? null}
               />

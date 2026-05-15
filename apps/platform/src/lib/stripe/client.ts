@@ -60,60 +60,158 @@ export function requireStripe(): StripeNS {
 }
 
 /**
- * Modelo de precios Pro tier (ADR-103):
- *  - `base`: licencia Pro mensual que incluye `MIN_ADMINS_INCLUDED` admins
- *    + `MIN_DRIVERS_INCLUDED` choferes. El cliente paga la base aunque tenga
- *    solo 1 admin — es el piso comercial ("desde $9,350/mes" en landing).
- *  - `extraAdmin`: por cada admin/dispatcher activo arriba del mínimo.
- *  - `extraDriver`: por cada chofer activo arriba del mínimo.
+ * Modelo de precios por tier (ADR-104, extiende ADR-103):
  *
- * IMPORTANTE: el "minimum included" NO vive en Stripe — vive en estas
- * constantes. Si decides cambiar el bundle (ej. base incluye 1 admin + 3
- * choferes en lugar de 2+5), actualizas acá y syncSeats recalcula extras
- * en el próximo cambio sin migración.
+ * Cada tier (starter | pro | enterprise) tiene 3 line items con sus propios
+ * mínimos incluidos en la base. La licencia base es siempre × 1; los extras
+ * cobran solo cuando los seats activos exceden el mínimo del tier.
+ *
+ * Pricing (landing 2026-05-15):
+ *   starter (Operación):  $3,270  base = 1 admin + 3 choferes incluidos
+ *                         $1,500  /admin extra · $590 /chofer extra
+ *   pro:                  $9,350  base = 2 admins + 5 choferes incluidos
+ *                         $3,200  /admin extra · $590 /chofer extra
+ *   enterprise:           $12,450 base = 2 admins + 5 choferes incluidos
+ *                         $4,500  /admin extra · $690 /chofer extra
+ *
+ * IMPORTANTE: los mínimos viven en código (no en Stripe). Si cambias el
+ * bundle, edita las constantes y el próximo syncSeats recalcula extras
+ * con proration automática.
  */
-export const PRO_LICENSE_MIN_ADMINS = 2;
-export const PRO_LICENSE_MIN_DRIVERS = 5;
 
-export interface ProPriceIds {
+export type CustomerTier = 'starter' | 'pro' | 'enterprise';
+
+interface TierConfig {
+  minAdmins: number;
+  minDrivers: number;
+  envKeyBase: string;
+  envKeyExtraAdmin: string;
+  envKeyExtraDriver: string;
+}
+
+const TIER_CONFIG: Record<CustomerTier, TierConfig> = {
+  starter: {
+    minAdmins: 1,
+    minDrivers: 3,
+    envKeyBase: 'STRIPE_PRICE_ID_STARTER_BASE',
+    envKeyExtraAdmin: 'STRIPE_PRICE_ID_STARTER_EXTRA_ADMIN',
+    envKeyExtraDriver: 'STRIPE_PRICE_ID_STARTER_EXTRA_DRIVER',
+  },
+  pro: {
+    minAdmins: 2,
+    minDrivers: 5,
+    envKeyBase: 'STRIPE_PRICE_ID_PRO_BASE',
+    envKeyExtraAdmin: 'STRIPE_PRICE_ID_PRO_EXTRA_ADMIN',
+    envKeyExtraDriver: 'STRIPE_PRICE_ID_PRO_EXTRA_DRIVER',
+  },
+  enterprise: {
+    minAdmins: 2,
+    minDrivers: 5,
+    envKeyBase: 'STRIPE_PRICE_ID_ENTERPRISE_BASE',
+    envKeyExtraAdmin: 'STRIPE_PRICE_ID_ENTERPRISE_EXTRA_ADMIN',
+    envKeyExtraDriver: 'STRIPE_PRICE_ID_ENTERPRISE_EXTRA_DRIVER',
+  },
+};
+
+export interface TierPriceIds {
   base: string;
   extraAdmin: string;
   extraDriver: string;
 }
 
-export function getPriceIds(): ProPriceIds | null {
-  const base = process.env.STRIPE_PRICE_ID_BASE;
-  const extraAdmin = process.env.STRIPE_PRICE_ID_EXTRA_ADMIN;
-  const extraDriver = process.env.STRIPE_PRICE_ID_EXTRA_DRIVER;
+export interface TierMinimums {
+  minAdmins: number;
+  minDrivers: number;
+}
+
+/**
+ * Mapeo desde el nombre comercial de la landing al enum customer_tier.
+ * La landing usa "operacion" en español; BD usa el enum normalizado.
+ */
+export function planNameToTier(plan: string): CustomerTier {
+  if (plan === 'operacion' || plan === 'starter') return 'starter';
+  if (plan === 'enterprise') return 'enterprise';
+  return 'pro';
+}
+
+export function getMinimumsForTier(tier: CustomerTier): TierMinimums {
+  const cfg = TIER_CONFIG[tier];
+  return { minAdmins: cfg.minAdmins, minDrivers: cfg.minDrivers };
+}
+
+/**
+ * Devuelve los 3 price IDs del tier o null si alguno falta en env. Útil para
+ * UI defensiva (mostrar warning sin tirar) y para validar al inicio del flow
+ * antes de pegarle a Stripe.
+ */
+export function getPriceIdsForTier(tier: CustomerTier): TierPriceIds | null {
+  const cfg = TIER_CONFIG[tier];
+  const base = process.env[cfg.envKeyBase];
+  const extraAdmin = process.env[cfg.envKeyExtraAdmin];
+  const extraDriver = process.env[cfg.envKeyExtraDriver];
   if (!base || !extraAdmin || !extraDriver) return null;
   return { base, extraAdmin, extraDriver };
 }
 
-export function requirePriceIds(): ProPriceIds {
-  const ids = getPriceIds();
+export function requirePriceIdsForTier(tier: CustomerTier): TierPriceIds {
+  const ids = getPriceIdsForTier(tier);
   if (!ids) {
+    const cfg = TIER_CONFIG[tier];
     throw new Error(
-      'Faltan price IDs en env vars: STRIPE_PRICE_ID_BASE, ' +
-        'STRIPE_PRICE_ID_EXTRA_ADMIN, STRIPE_PRICE_ID_EXTRA_DRIVER.',
+      `Faltan price IDs del tier ${tier} en env vars: ${cfg.envKeyBase}, ${cfg.envKeyExtraAdmin}, ${cfg.envKeyExtraDriver}.`,
     );
   }
   return ids;
 }
 
 /**
- * Calcula extras a cobrar sobre el mínimo incluido en la base. Math.max
- * evita quantities negativas si por alguna razón hay menos seats activos
- * que el mínimo (ej. customer desactivó todos sus drivers, sigue pagando
- * el piso pero no debe cobrarse extras adicionales).
+ * Health-check: ¿al menos un tier tiene todos sus price IDs configurados?
+ * UI de /settings/billing y /empezar lo usan para decidir si mostrar el flow
+ * o un warning amable. Sin ningún tier configurado, billing es invisible.
  */
-export function computeExtrasFromSeats(adminCount: number, driverCount: number): {
-  extraAdmins: number;
-  extraDrivers: number;
-} {
+export function anyTierConfigured(): boolean {
+  return (
+    getPriceIdsForTier('starter') !== null ||
+    getPriceIdsForTier('pro') !== null ||
+    getPriceIdsForTier('enterprise') !== null
+  );
+}
+
+/**
+ * Calcula extras a cobrar sobre el mínimo del tier. Math.max evita quantities
+ * negativas — si un customer desactiva todos sus seats, sigue pagando el piso
+ * de la base pero no se le cobran extras adicionales.
+ */
+export function computeExtrasFromSeats(
+  adminCount: number,
+  driverCount: number,
+  tier: CustomerTier,
+): { extraAdmins: number; extraDrivers: number } {
+  const { minAdmins, minDrivers } = getMinimumsForTier(tier);
   return {
-    extraAdmins: Math.max(0, adminCount - PRO_LICENSE_MIN_ADMINS),
-    extraDrivers: Math.max(0, driverCount - PRO_LICENSE_MIN_DRIVERS),
+    extraAdmins: Math.max(0, adminCount - minAdmins),
+    extraDrivers: Math.max(0, driverCount - minDrivers),
   };
+}
+
+// ─── Aliases legacy ──────────────────────────────────────────────────
+// Antes (ADR-103) el código asumía un solo tier (Pro). Estos exports se
+// mantienen para que callers que aún no migraron sigan compilando, pero
+// internamente delegan al tier "pro" para preservar comportamiento.
+
+/** @deprecated usa getMinimumsForTier(tier) */
+export const PRO_LICENSE_MIN_ADMINS = TIER_CONFIG.pro.minAdmins;
+/** @deprecated usa getMinimumsForTier(tier) */
+export const PRO_LICENSE_MIN_DRIVERS = TIER_CONFIG.pro.minDrivers;
+
+/** @deprecated usa getPriceIdsForTier(tier) */
+export function getPriceIds(): TierPriceIds | null {
+  return getPriceIdsForTier('pro');
+}
+
+/** @deprecated usa requirePriceIdsForTier(tier) */
+export function requirePriceIds(): TierPriceIds {
+  return requirePriceIdsForTier('pro');
 }
 
 /**

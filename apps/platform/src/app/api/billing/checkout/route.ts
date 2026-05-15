@@ -20,9 +20,10 @@ import { createServiceRoleClient } from '@tripdrive/supabase/server';
 import { logger } from '@tripdrive/observability';
 import {
   requireStripe,
-  requirePriceIds,
+  requirePriceIdsForTier,
   getReturnUrls,
   computeExtrasFromSeats,
+  type CustomerTier,
 } from '@/lib/stripe/client';
 
 export const runtime = 'nodejs';
@@ -34,11 +35,9 @@ export async function POST(): Promise<NextResponse> {
   const profile = await requireRole('admin');
 
   let stripe;
-  let priceIds;
   let urls;
   try {
     stripe = requireStripe();
-    priceIds = requirePriceIds();
     urls = getReturnUrls();
   } catch (err) {
     return NextResponse.json(
@@ -67,12 +66,26 @@ export async function POST(): Promise<NextResponse> {
 
   const { data: customer, error: cErr } = await admin
     .from('customers')
-    .select('id, name, stripe_customer_id, stripe_subscription_id, subscription_status')
+    .select(
+      'id, name, tier, stripe_customer_id, stripe_subscription_id, subscription_status',
+    )
     .eq('id', customerId)
     .maybeSingle();
   if (cErr || !customer) {
     return NextResponse.json(
       { error: `No se pudo cargar el customer: ${cErr?.message ?? 'no encontrado'}` },
+      { status: 500 },
+    );
+  }
+
+  // Resolver price IDs del tier de este customer.
+  const customerTier = (customer.tier as CustomerTier | null) ?? 'pro';
+  let priceIds;
+  try {
+    priceIds = requirePriceIdsForTier(customerTier);
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Tier sin configurar' },
       { status: 500 },
     );
   }
@@ -143,6 +156,7 @@ export async function POST(): Promise<NextResponse> {
   const { extraAdmins, extraDrivers } = computeExtrasFromSeats(
     adminRes.count ?? 0,
     driverRes.count ?? 0,
+    customerTier,
   );
 
   // 5. Crear Checkout Session subscription mode con 3 line items: base

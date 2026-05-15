@@ -15,8 +15,9 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { logger } from '@tripdrive/observability';
 import {
   requireStripe,
-  requirePriceIds,
+  requirePriceIdsForTier,
   getReturnUrls,
+  planNameToTier,
 } from '@/lib/stripe/client';
 import { createServiceRoleClient } from '@tripdrive/supabase/server';
 
@@ -34,11 +35,9 @@ const EMAIL_RX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   let stripe;
-  let priceIds;
   let urls;
   try {
     stripe = requireStripe();
-    priceIds = requirePriceIds();
     urls = getReturnUrls();
   } catch (err) {
     return NextResponse.json(
@@ -87,6 +86,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const plan = planRaw === 'pro' || planRaw === 'operacion' || planRaw === 'enterprise'
     ? planRaw
     : 'pro';
+  // Map al enum customer_tier de BD + resolver price IDs del tier elegido.
+  const tier = planNameToTier(plan);
+  let priceIds;
+  try {
+    priceIds = requirePriceIdsForTier(tier);
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Tier sin configurar' },
+      { status: 503 },
+    );
+  }
 
   if (companyName.length < 2 || companyName.length > 80) {
     return NextResponse.json({ error: 'Nombre de empresa inválido (2-80 chars).' }, { status: 400 });

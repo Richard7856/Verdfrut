@@ -5766,6 +5766,73 @@ R3 también desbloquea OE-3 (UI `RouteProposalCard` + tools `propose_route_plan`
 - apps/platform/src/proxy.ts — `/api/billing/webhook` agregado a PUBLIC_PATHS.
 - DEPLOY_CHECKLIST.md — env vars + Stripe Dashboard setup.
 
+---
+
+## [2026-05-15] ADR-104: Billing tier-aware — 3 tiers × 3 line items
+
+**Contexto:** ADR-103 entregó el modelo "licencia base + extras sobre mínimo" pero hardcoded a un solo tier (Pro). La landing tiene 3 tiers comerciales (Operación / Pro / Enterprise) con precios y mínimos distintos. Para que cualquier visitante de la landing pueda auto-onboardear en su tier preferido sin tocar código, hay que generalizar el modelo a 3 tiers.
+
+Pricing de la landing 2026-05-15:
+- Operación (starter): mín 1 admin + 3 chofer = $3,270/mes · admin extra $1,500 · chofer extra $590
+- Pro: mín 2 admin + 5 chofer = $9,350/mes · admin extra $3,200 · chofer extra $590
+- Enterprise: mín 2 admin + 5 chofer = $12,450/mes · admin extra $4,500 · chofer extra $690
+
+**Decisión:**
+
+1. **Constante `TIER_CONFIG`** en `lib/stripe/client.ts`: mapa de `'starter' | 'pro' | 'enterprise'` a `{ minAdmins, minDrivers, envKeyBase, envKeyExtraAdmin, envKeyExtraDriver }`. Toda la lógica de pricing/seats consulta este config — no hay if/else por tier dispersos.
+
+2. **9 productos + 9 prices creados via Stripe MCP** (no en dashboard manual):
+   - acct_1TX7PSRUYXlqZae9 (cuenta `Tripdrive` live mode)
+   - Todos recurring monthly currency=mxn
+   - IDs documentados en DEPLOY_CHECKLIST.md tabla de env vars
+
+3. **API tier-aware**: `getPriceIdsForTier(tier)` reemplaza el viejo `getPriceIds()` que asumía Pro. `getMinimumsForTier(tier)` devuelve `{minAdmins, minDrivers}` del tier. `computeExtrasFromSeats(adminCount, driverCount, tier)` ahora requiere el tier para aplicar el mínimo correcto. `planNameToTier('operacion')` normaliza el plan comercial al enum BD.
+
+4. **Backward-compat**: exports `PRO_LICENSE_MIN_ADMINS`, `getPriceIds()`, `requirePriceIds()` quedan como `@deprecated` delegando a tier='pro'. Cero callers internos los usan ya — están solo para que cualquier consumidor externo de la API legacy siga compilando.
+
+5. **Stripe SDK + tier-aware en endpoints**: checkout, signup, syncSeats, /settings/billing UI — todos leen `customer.tier` (o `plan` en signup) y resuelven price IDs + mínimos por tier. La UI etiqueta "Licencia [Operación|Pro|Enterprise] base · Incluye X admin + Y choferes" según el tier real.
+
+6. **Landing wired para 3 tiers**: las 3 cards de la sección de pricing tienen ahora `<a href="/empezar?plan=<tier>" class="btn-primary">💳 Empezar [Tier]</a>` + "agendar demo" como CTA secundaria. Antes solo Pro tenía self-serve.
+
+7. **Mínimos en código (no en Stripe)**: si el cliente decide cambiar el bundle ("Pro ahora incluye 3 admin + 6 chofer"), editar `TIER_CONFIG.pro.minAdmins = 3` y el próximo syncSeats recalcula extras automáticamente con proration. No hay migración de BD ni rebuild de productos.
+
+8. **Env vars**: pasaron de 3 (`STRIPE_PRICE_ID_{BASE,EXTRA_ADMIN,EXTRA_DRIVER}`) a 9 (`STRIPE_PRICE_ID_{STARTER,PRO,ENTERPRISE}_{BASE,EXTRA_ADMIN,EXTRA_DRIVER}`). Defensa: `anyTierConfigured()` chequea que al menos un tier completo esté seteado antes de exponer billing en UI; tiers individuales sin configurar muestran "tier sin configurar" como error legible.
+
+**Alternativas consideradas:**
+- *1 JSON env var (STRIPE_PRICES_JSON)*: descartado. Una coma corrupta rompe el parsing y bloquea billing entero; 9 env vars discretas degradan tier por tier.
+- *Mínimos en BD por customer (customers.min_admins_included etc)*: descartado. Los mínimos son globales por tier, no per-customer. Si en el futuro queremos customer-specific (ej. deal especial con un cliente "te dejo el bundle Pro con 10 choferes incluidos"), agregamos columnas opcionales en customers que overrideen el TIER_CONFIG.
+- *Stripe Tiered Pricing (mode='graduated')*: descartado. Stripe soporta tiered pricing nativo (precio cambia por volumen), pero nuestro modelo es flat-per-seat + base flat — más simple con 3 line items separados.
+- *Mantener 2-line-item model con quantity floor*: descartado. Stripe permite mínimos en checkout pero no facturable como "incluido sin costo" — la transparencia de "licencia base + extras" en la factura es mejor para el cliente.
+- *Crear productos via Stripe Dashboard manual*: descartado dado que el MCP de Stripe estaba disponible y configurar 9 productos a mano toma ~30 min con riesgo de typo en precios. El MCP los creó atómicamente con IDs auditables.
+
+**Riesgos / Limitaciones:**
+- **Si el cliente cambia de tier mid-cycle**: el código no maneja la transición (Pro → Enterprise upgrade). Stripe puede manejarlo vía proration, pero requiere update manual de subscription items en el dashboard o nuevo endpoint `/api/billing/change-tier`. Phase 2.
+- **9 env vars en Vercel**: más superficie de error humano (typo en un env). Mitigación: `getPriceIdsForTier(tier)` retorna null si cualquier de los 3 IDs del tier falta, y la UI muestra warning específico por tier.
+- **Productos en live mode desde día 1**: las 9 entradas viven en `livemode: true` en Stripe. Si quieres probar con tarjetas de test (`4242 4242 4242 4242`), necesitas crear duplicados en test mode O cambiar `STRIPE_SECRET_KEY` a sk_test_ y los price_id seguirán siendo live (rechazará). Solución: crear los 9 en test mode también (mismo proceso vía MCP cuando se conecte una API key de test).
+- **Tier `starter` vs etiqueta `Operación`**: el enum BD usa `starter` por consistencia con producto SaaS estándar; la UI siempre traduce a "Operación" para el cliente. Si algún día cambiamos la etiqueta comercial otra vez (ej. "Esencial"), solo se toca UI sin migrar BD.
+- **Self-serve para Enterprise puede ser overkill**: tiers altos suelen venir con onboarding asistido y negociación. Hoy la landing los manda al mismo flow self-serve que Pro/Operación. Si vemos abuso (gente comprando Enterprise sin tener flota grande), podemos gatear con CTA "Hablar con ventas" como primario + checkout self-serve detrás.
+- **Productos viejos (Admin seat / Driver seat) quedan activos**: el código ya no los referencia, pero quedan visibles en el dashboard de Stripe. Archivarlos manualmente cuando confirme que ningún customer existente sigue suscrito a ellos.
+- **No hay test automatizado del flow tier-aware**: mockear Stripe es sustancial. Validación manual con tarjeta de prueba en cada tier.
+
+**Oportunidades de mejora:**
+- Cron `sync-all-customers-tiers` 1×/día — reconcilia drift y captura customers que perdieron tier por inconsistencia.
+- Endpoint `/api/billing/change-tier` para upgrade/downgrade manual desde UI.
+- Tiered pricing en Stripe para descuentos por volumen (ej. "11+ choferes extra → -10%").
+- A/B test de la posición del CTA self-serve vs demo en cada card de pricing.
+- Test mode setup: crear los 9 productos en test mode usando el mismo flow.
+
+**Refs:**
+- ADR-103 — modelo base + extras (precursor con 1 tier).
+- supabase/migrations/00000000000047_customers_stripe_billing.sql — schema sin cambios (ya teníamos `tier` en customers).
+- apps/platform/src/lib/stripe/client.ts — `TIER_CONFIG`, `getPriceIdsForTier`, `getMinimumsForTier`, `planNameToTier`, `computeExtrasFromSeats(tier)`.
+- apps/platform/src/lib/stripe/sync-seats.ts — usa `customer.tier` para resolver price IDs.
+- apps/platform/src/app/api/billing/checkout/route.ts — tier-aware.
+- apps/platform/src/app/api/billing/signup/route.ts — `planNameToTier(plan)` + `requirePriceIdsForTier`.
+- apps/platform/src/app/(app)/settings/billing/page.tsx — UI tier-aware.
+- apps/platform/src/app/empezar/page.tsx — acepta los 3 plans.
+- apps/landing/index.html — 3 CTAs `💳 Empezar [Tier]` cableados a `/empezar?plan=<tier>`.
+- DEPLOY_CHECKLIST.md — tabla de 9 env vars con los price IDs reales.
+
 
 
 

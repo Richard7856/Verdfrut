@@ -10,7 +10,7 @@
 
 import { redirect } from 'next/navigation';
 import { SignupForm } from './signup-form';
-import { getStripe, getPriceIds } from '@/lib/stripe/client';
+import { getStripe, getPriceIdsForTier, planNameToTier } from '@/lib/stripe/client';
 
 export const metadata = {
   title: 'Empezar Pro — TripDrive',
@@ -25,13 +25,14 @@ interface Props {
 export default async function EmpezarPage({ searchParams }: Props) {
   const { plan, success } = await searchParams;
 
-  // Solo aceptamos 'pro' por ahora — los otros tiers (operación, enterprise)
-  // siguen como "contáctanos" en la landing porque requieren más config.
-  // Si llega cualquier otra cosa, defaulteamos a pro.
-  const selectedPlan = plan === 'operacion' || plan === 'enterprise' ? plan : 'pro';
+  // Aceptamos los 3 tiers: operacion, pro, enterprise. Cualquier otro valor
+  // defaultea a pro (el más popular).
+  const selectedPlan: 'operacion' | 'pro' | 'enterprise' =
+    plan === 'operacion' || plan === 'enterprise' ? plan : 'pro';
 
-  // Si Stripe no está configurado, no tiene sentido renderizar el form.
-  const stripeReady = getStripe() !== null && getPriceIds() !== null;
+  // Si Stripe no está configurado para este tier, mostramos warning amable.
+  const tier = planNameToTier(selectedPlan);
+  const stripeReady = getStripe() !== null && getPriceIdsForTier(tier) !== null;
   if (!stripeReady) {
     return (
       <main className="mx-auto max-w-md p-6 pt-16">
@@ -81,13 +82,20 @@ export default async function EmpezarPage({ searchParams }: Props) {
           ← Volver a tripdrive.xyz
         </a>
       </div>
-      <h1 className="text-2xl font-semibold">Empezar TripDrive {selectedPlan === 'pro' ? 'Pro' : selectedPlan}</h1>
+      <h1 className="text-2xl font-semibold">
+        Empezar TripDrive{' '}
+        {selectedPlan === 'pro'
+          ? 'Pro'
+          : selectedPlan === 'enterprise'
+            ? 'Enterprise'
+            : 'Operación'}
+      </h1>
       <p className="mt-2 text-sm text-muted-foreground">
         Llena estos datos y pasamos a la pasarela de pago. Al confirmar tu suscripción
         te llega un correo para activar tu cuenta de administrador.
       </p>
       <div className="mt-6">
-        <SignupForm plan={selectedPlan as 'pro' | 'operacion' | 'enterprise'} />
+        <SignupForm plan={selectedPlan} />
       </div>
       <p className="mt-6 text-[11px] text-muted-foreground">
         Al continuar aceptas nuestros{' '}

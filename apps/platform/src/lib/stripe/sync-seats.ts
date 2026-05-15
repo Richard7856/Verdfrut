@@ -17,7 +17,12 @@ import 'server-only';
 
 import { createServiceRoleClient } from '@tripdrive/supabase/server';
 import { logger } from '@tripdrive/observability';
-import { getStripe, getPriceIds, computeExtrasFromSeats } from './client';
+import {
+  getStripe,
+  getPriceIdsForTier,
+  computeExtrasFromSeats,
+  type CustomerTier,
+} from './client';
 
 export type SyncReason =
   | 'driver_created'
@@ -60,18 +65,15 @@ export async function syncSeats(opts: SyncSeatsOptions): Promise<SyncSeatsResult
   if (!stripe) {
     return { ok: true, skipped: true, skipReason: 'stripe_not_configured' };
   }
-  const priceIds = getPriceIds();
-  if (!priceIds) {
-    return { ok: true, skipped: true, skipReason: 'price_ids_not_configured' };
-  }
 
   const admin = createServiceRoleClient();
 
-  // 1. Cargar customer + subscription_id + last_synced.
+  // 1. Cargar customer + tier + subscription_id + last_synced. El tier es
+  //    crítico porque define qué set de price IDs y qué mínimos aplican.
   const { data: customer, error: cErr } = await admin
     .from('customers')
     .select(
-      'id, stripe_subscription_id, last_synced_admin_seats, last_synced_driver_seats',
+      'id, tier, stripe_subscription_id, last_synced_admin_seats, last_synced_driver_seats',
     )
     .eq('id', opts.customerId)
     .maybeSingle();
@@ -80,6 +82,18 @@ export async function syncSeats(opts: SyncSeatsOptions): Promise<SyncSeatsResult
   }
   if (!customer.stripe_subscription_id) {
     return { ok: true, skipped: true, skipReason: 'no_active_subscription' };
+  }
+
+  // Resolver price IDs del tier del customer. Si el tier no está
+  // configurado (env vars faltantes para ese tier), salimos limpio.
+  const tier = (customer.tier as CustomerTier | null) ?? 'pro';
+  const priceIds = getPriceIdsForTier(tier);
+  if (!priceIds) {
+    return {
+      ok: true,
+      skipped: true,
+      skipReason: `price_ids_not_configured_for_tier_${tier}`,
+    };
   }
 
   // 2. Contar seats activos por tipo. Las queries son baratas (RLS con
@@ -128,10 +142,9 @@ export async function syncSeats(opts: SyncSeatsOptions): Promise<SyncSeatsResult
     };
   }
 
-  // 3. Calcular EXTRAS sobre el mínimo incluido en la licencia base.
-  //    El customer paga el piso aunque tenga menos seats; solo los excedentes
-  //    suben quantity en Stripe.
-  const { extraAdmins, extraDrivers } = computeExtrasFromSeats(newAdmin, newDriver);
+  // 3. Calcular EXTRAS sobre el mínimo del tier del customer. El piso lo
+  //    cubre la base; solo los excedentes suben quantity en Stripe.
+  const { extraAdmins, extraDrivers } = computeExtrasFromSeats(newAdmin, newDriver, tier);
 
   // 4. Fetch subscription para conocer los item IDs (Stripe pide item.id en
   //    el update, no price.id). 1 RTT extra aceptable; cachear en BD sería

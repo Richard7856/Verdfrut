@@ -40,9 +40,15 @@ Las 3 apps (`tripdrive-platform`, `tripdrive-driver`, `tripdrive-control-plane`)
 | `TENANT_BBOX_LNG_MAX` | `-86.5` (default) | No |
 | **`STRIPE_SECRET_KEY`** | `sk_test_...` o `sk_live_...` desde Stripe Dashboard → Developers → API keys | ⚠ **Sí para billing.** Sin esto, /settings/billing muestra warning y syncSeats es no-op silencioso. Resto del sistema sigue funcionando. |
 | **`STRIPE_WEBHOOK_SECRET`** | `whsec_...` desde el endpoint del webhook en Stripe Dashboard | ⚠ **Sí para procesar eventos** (confirmación de pago, renovaciones). Si falta, el webhook rechaza con 503 y Stripe reintenta hasta darse por vencido. |
-| **`STRIPE_PRICE_ID_BASE`** | `price_...` del Product "TripDrive Pro — Licencia base" ($9,350 MXN/mes, recurring monthly) | ⚠ Sí — checkout falla con 500 si no está |
-| **`STRIPE_PRICE_ID_EXTRA_ADMIN`** | `price_...` del Product "TripDrive Pro — Admin extra" ($3,200 MXN/mes, recurring monthly) | ⚠ Sí — syncSeats falla si hay extras y no está |
-| **`STRIPE_PRICE_ID_EXTRA_DRIVER`** | `price_...` del Product "TripDrive Pro — Chofer extra" ($590 MXN/mes, recurring monthly) | ⚠ Sí — syncSeats falla si hay extras y no está |
+| **`STRIPE_PRICE_ID_STARTER_BASE`** | `price_1TXTc6RUYXlqZae9lxliSDaT` ($3,270 MXN/mes) | Sí para tier Operación |
+| **`STRIPE_PRICE_ID_STARTER_EXTRA_ADMIN`** | `price_1TXTcNRUYXlqZae95xFRlGOS` ($1,500 MXN/mes) | Sí para tier Operación |
+| **`STRIPE_PRICE_ID_STARTER_EXTRA_DRIVER`** | `price_1TXTcbRUYXlqZae9sMKv2W6a` ($590 MXN/mes) | Sí para tier Operación |
+| **`STRIPE_PRICE_ID_PRO_BASE`** | `price_1TXTcsRUYXlqZae9vYa2CpH7` ($9,350 MXN/mes) | ⚠ Sí para tier Pro |
+| **`STRIPE_PRICE_ID_PRO_EXTRA_ADMIN`** | `price_1TXTd3RUYXlqZae9ERWJoUNf` ($3,200 MXN/mes) | ⚠ Sí para tier Pro |
+| **`STRIPE_PRICE_ID_PRO_EXTRA_DRIVER`** | `price_1TXTdLRUYXlqZae9E96YghZC` ($590 MXN/mes) | ⚠ Sí para tier Pro |
+| **`STRIPE_PRICE_ID_ENTERPRISE_BASE`** | `price_1TXTdZRUYXlqZae9ESfQCJ2A` ($12,450 MXN/mes) | Sí para tier Enterprise |
+| **`STRIPE_PRICE_ID_ENTERPRISE_EXTRA_ADMIN`** | `price_1TXTdkRUYXlqZae9m68KNL2w` ($4,500 MXN/mes) | Sí para tier Enterprise |
+| **`STRIPE_PRICE_ID_ENTERPRISE_EXTRA_DRIVER`** | `price_1TXTe1RUYXlqZae9EDk9De7N` ($690 MXN/mes) | Sí para tier Enterprise |
 | `NEXT_PUBLIC_BILLING_RETURN_URL` | Base URL para retorno desde Stripe checkout (ej. `https://tripdrive.xyz`). Si falta, cae a `NEXT_PUBLIC_PLATFORM_URL` o localhost | No (default funciona en prod si hay PLATFORM_URL) |
 
 ### Driver (`tripdrive-driver`)
@@ -69,37 +75,31 @@ Las 3 apps (`tripdrive-platform`, `tripdrive-driver`, `tripdrive-control-plane`)
 
 ---
 
-## 💳 Stripe Dashboard — setup inicial (~15 min)
+## 💳 Stripe Dashboard — setup inicial
 
-Antes de cobrar al primer cliente, configurar en https://dashboard.stripe.com:
+**Modelo**: una sola Subscription por customer con 3 line items, cualquiera
+de los 3 tiers:
+- Licencia base (siempre × 1) — piso comercial con admins/choferes incluidos
+- Admin extra (× N) — por cada admin/dispatcher arriba del mínimo del tier
+- Chofer extra (× N) — por cada chofer arriba del mínimo del tier
 
-### 1. Crear los 3 Products del plan Pro
+Los mínimos por tier viven en `lib/stripe/client.ts` (no en Stripe):
 
-**Modelo**: una sola Subscription con 3 line items por customer:
-- Licencia base (siempre × 1) — piso comercial que incluye 2 admins + 5 choferes
-- Admin extra (× N) — por cada admin/dispatcher arriba de 2
-- Chofer extra (× N) — por cada chofer arriba de 5
+| Tier | Min admins | Min choferes | Base/mes | Admin extra | Chofer extra |
+|---|---|---|---|---|---|
+| Operación (starter) | 1 | 3 | $3,270 | $1,500 | $590 |
+| Pro | 2 | 5 | $9,350 | $3,200 | $590 |
+| Enterprise | 2 | 5 | $12,450 | $4,500 | $690 |
 
-El minimum (2 admin + 5 driver) vive como constante en código
-(`PRO_LICENSE_MIN_ADMINS`, `PRO_LICENSE_MIN_DRIVERS` en `lib/stripe/client.ts`),
-NO en Stripe — si quieres cambiarlo, edita ahí y al siguiente cambio de seats
-todo se recalcula con proration.
+### 1. Productos ya creados (2026-05-15 via Claude MCP)
 
-**Product 1: "TripDrive Pro — Licencia base"**
-- Tipo: Recurring · Billing: Monthly · Currency: MXN
-- Precio: **$9,350 MXN** (= 2 × $3,200 admin + 5 × $590 chofer; mínimo de la landing)
-- Description (opcional): "Incluye 2 admins + 5 choferes. Extras se cobran aparte."
-- → copia el `price_id` (`price_...`) → `STRIPE_PRICE_ID_BASE`
+Los 9 productos + 9 precios recurring MXN ya viven en la cuenta Stripe
+`Tripdrive` (`acct_1TX7PSRUYXlqZae9`). Solo tienes que copiar los `price_id`
+a las env vars de Vercel (ya están listados en la tabla de arriba).
 
-**Product 2: "TripDrive Pro — Admin extra"**
-- Tipo: Recurring · Billing: Monthly · Currency: MXN
-- Precio: **$3,200 MXN** por seat
-- → copia el `price_id` → `STRIPE_PRICE_ID_EXTRA_ADMIN`
-
-**Product 3: "TripDrive Pro — Chofer extra"**
-- Tipo: Recurring · Billing: Monthly · Currency: MXN
-- Precio: **$590 MXN** por seat
-- → copia el `price_id` → `STRIPE_PRICE_ID_EXTRA_DRIVER`
+Si necesitas recrearlos en otra cuenta (test mode o nueva org):
+- 3 productos para Operación · 3 para Pro · 3 para Enterprise
+- Cada uno: Recurring · Monthly · Currency MXN · precio según tabla
 
 ### 2. Crear webhook endpoint
 
