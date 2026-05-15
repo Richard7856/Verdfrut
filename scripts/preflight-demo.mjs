@@ -49,9 +49,10 @@ function parseArgs() {
 
 const checks = [];
 
-function record(name, ok, detail) {
-  checks.push({ name, ok, detail });
-  console.log(`${ok ? '✅' : '❌'} ${name}${detail ? `  — ${detail}` : ''}`);
+function record(name, ok, detail, optional = false) {
+  checks.push({ name, ok, detail, optional });
+  const icon = ok ? '✅' : optional ? '⚠️ ' : '❌';
+  console.log(`${icon} ${name}${detail ? `  — ${detail}` : ''}`);
 }
 
 async function main() {
@@ -71,13 +72,19 @@ async function main() {
     record(`env: ${e}`, Boolean(process.env[e]), process.env[e] ? '(set)' : 'falta — revisa .env.local');
   }
 
-  // Anthropic + Google solo si vas a tocar el chat / geo agent. Para OE-2 CLI no es estrictamente necesario,
-  // pero documentamos.
-  if (process.env.ANTHROPIC_API_KEY) record('env: ANTHROPIC_API_KEY (opcional para CLI demo)', true, 'set');
-  else record('env: ANTHROPIC_API_KEY (opcional para CLI demo)', false, 'OK ausente si no usas chat en demo');
-
-  if (process.env.GOOGLE_GEOCODING_API_KEY) record('env: GOOGLE_GEOCODING_API_KEY (opcional)', true);
-  else record('env: GOOGLE_GEOCODING_API_KEY (opcional)', false, 'OK ausente si no usas geocoding');
+  // Anthropic + Google solo si vas a tocar el chat / geo agent. Para OE-2 CLI no es estrictamente necesario.
+  record(
+    'env: ANTHROPIC_API_KEY (opcional para CLI demo)',
+    Boolean(process.env.ANTHROPIC_API_KEY),
+    process.env.ANTHROPIC_API_KEY ? 'set' : 'ausente — OK si no usas chat en demo',
+    true,
+  );
+  record(
+    'env: GOOGLE_GEOCODING_API_KEY (opcional)',
+    Boolean(process.env.GOOGLE_GEOCODING_API_KEY),
+    process.env.GOOGLE_GEOCODING_API_KEY ? 'set' : 'ausente — OK si no usas geocoding',
+    true,
+  );
 
   // ─── 2. Args ───
   if (!args.user) {
@@ -97,100 +104,103 @@ async function main() {
     process.exit(1);
   }
 
-  // ─── 3. Supabase: migraciones + user + dispatch ───
-  const { createClient } = await import('@supabase/supabase-js');
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY,
-    { auth: { autoRefreshToken: false, persistSession: false } },
-  );
+  // ─── 3. Supabase REST API: migraciones + user + dispatch ───
+  // Usamos fetch directo a /rest/v1/ (mismo patrón que create-cdmx-dispatch.mjs)
+  // para no depender del SDK @supabase/supabase-js fuera del workspace.
+  const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const sbHeaders = {
+    apikey: SERVICE_KEY,
+    Authorization: `Bearer ${SERVICE_KEY}`,
+    'Content-Type': 'application/json',
+  };
+
+  async function sbSelect(path) {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers: sbHeaders });
+    const status = res.status;
+    let body = null;
+    try {
+      body = await res.json();
+    } catch {
+      body = null;
+    }
+    return { status, body, ok: res.ok };
+  }
 
   // 3a. customers.optimizer_costs existe (mig 045)?
-  try {
-    const { error } = await supabase.from('customers').select('optimizer_costs').limit(1);
+  {
+    const { ok, body } = await sbSelect('customers?select=optimizer_costs&limit=1');
     record(
       'migración 045 (customers.optimizer_costs)',
-      !error,
-      error ? error.message : 'columna existe',
+      ok,
+      ok ? 'columna existe' : (body?.message ?? `HTTP ${body?.code ?? '?'}`),
     );
-  } catch (e) {
-    record('migración 045', false, e.message);
   }
 
   // 3b. orchestrator_sessions.active_agent_role existe (mig 046)?
-  try {
-    const { error } = await supabase
-      .from('orchestrator_sessions')
-      .select('active_agent_role')
-      .limit(1);
+  {
+    const { ok, body } = await sbSelect('orchestrator_sessions?select=active_agent_role&limit=1');
     record(
       'migración 046 (orchestrator_sessions.active_agent_role)',
-      !error,
-      error ? error.message : 'columna existe',
+      ok,
+      ok ? 'columna existe' : (body?.message ?? `HTTP ${body?.code ?? '?'}`),
     );
-  } catch (e) {
-    record('migración 046', false, e.message);
   }
 
   // 3c. User existe y es admin/dispatcher activo
-  try {
-    const { data, error } = await supabase
-      .from('user_profiles')
-      .select('id, role, is_active, customer_id')
-      .eq('id', args.user)
-      .maybeSingle();
-    if (error || !data) {
-      record('user existe', false, error?.message ?? 'no encontrado');
+  {
+    const { ok, body } = await sbSelect(
+      `user_profiles?id=eq.${args.user}&select=id,role,is_active,customer_id&limit=1`,
+    );
+    if (!ok || !Array.isArray(body) || body.length === 0) {
+      record('user existe', false, body?.message ?? 'no encontrado');
     } else {
-      record('user existe', true, `role=${data.role}, customer_id=${data.customer_id.slice(0, 8)}...`);
+      const u = body[0];
+      record('user existe', true, `role=${u.role}, customer_id=${u.customer_id?.slice(0, 8)}...`);
       record(
         'user es admin/dispatcher activo',
-        ['admin', 'dispatcher'].includes(data.role) && data.is_active,
-        data.is_active ? `role=${data.role}` : 'inactivo',
+        ['admin', 'dispatcher'].includes(u.role) && u.is_active,
+        u.is_active ? `role=${u.role}` : 'inactivo',
       );
     }
-  } catch (e) {
-    record('user check', false, e.message);
   }
 
   // 3d. Si pasaron --dispatch, validar que existe y tiene rutas con paradas
   if (args.dispatch) {
-    try {
-      const { data: dispatch } = await supabase
-        .from('dispatches')
-        .select('id, name, date, status')
-        .eq('id', args.dispatch)
-        .maybeSingle();
-      if (!dispatch) {
-        record('dispatch existe', false, 'no encontrado');
-      } else {
-        record('dispatch existe', true, `${dispatch.name} (${dispatch.date}, ${dispatch.status})`);
+    const { ok, body } = await sbSelect(
+      `dispatches?id=eq.${args.dispatch}&select=id,name,date,status&limit=1`,
+    );
+    if (!ok || !Array.isArray(body) || body.length === 0) {
+      record('dispatch existe', false, body?.message ?? 'no encontrado');
+    } else {
+      const d = body[0];
+      record('dispatch existe', true, `${d.name} (${d.date}, ${d.status})`);
 
-        const { data: routes } = await supabase
-          .from('routes')
-          .select('id, name, vehicle_id, status')
-          .eq('dispatch_id', args.dispatch);
-        record('dispatch tiene rutas', (routes ?? []).length > 0, `${(routes ?? []).length} rutas`);
+      const r = await sbSelect(
+        `routes?dispatch_id=eq.${args.dispatch}&select=id,name,vehicle_id,status`,
+      );
+      const routes = Array.isArray(r.body) ? r.body : [];
+      record('dispatch tiene rutas', routes.length > 0, `${routes.length} rutas`);
 
-        if (routes && routes.length > 0) {
-          const routeIds = routes.map((r) => r.id);
-          const { data: stops } = await supabase
-            .from('stops')
-            .select('id, store_id, route_id')
-            .in('route_id', routeIds);
-          const uniqueStores = new Set((stops ?? []).map((s) => s.store_id));
-          record('dispatch tiene tiendas', uniqueStores.size > 0, `${uniqueStores.size} tiendas únicas en ${stops?.length ?? 0} paradas`);
+      if (routes.length > 0) {
+        const routeIdsCsv = routes.map((rt) => rt.id).join(',');
+        const s = await sbSelect(
+          `stops?route_id=in.(${routeIdsCsv})&select=id,store_id,route_id`,
+        );
+        const stops = Array.isArray(s.body) ? s.body : [];
+        const uniqueStores = new Set(stops.map((st) => st.store_id));
+        record(
+          'dispatch tiene tiendas',
+          uniqueStores.size > 0,
+          `${uniqueStores.size} tiendas únicas en ${stops.length} paradas`,
+        );
 
-          // Idoneidad para demo: ≥10 stops para que la propuesta sea interesante
-          if (uniqueStores.size < 5) {
-            record('demo-worthy (≥5 stops)', false, `solo ${uniqueStores.size} — propuesta poco interesante`);
-          } else {
-            record('demo-worthy (≥5 stops)', true);
-          }
+        if (uniqueStores.size < 5) {
+          record('demo-worthy (≥5 stops)', false, `solo ${uniqueStores.size} — propuesta poco interesante`);
+        } else {
+          record('demo-worthy (≥5 stops)', true);
         }
       }
-    } catch (e) {
-      record('dispatch check', false, e.message);
     }
   } else {
     console.log('ℹ️  --dispatch no pasado, salto verificación de tiro específico.');
@@ -225,12 +235,17 @@ async function main() {
   // ─── Resumen ───
   console.log();
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-  const fails = checks.filter((c) => !c.ok);
+  const fails = checks.filter((c) => !c.ok && !c.optional);
+  const optionalMissing = checks.filter((c) => !c.ok && c.optional);
   if (fails.length === 0) {
-    console.log('✅ Pre-flight OK. Listo para demo.');
+    if (optionalMissing.length > 0) {
+      console.log(`✅ Pre-flight OK. (${optionalMissing.length} opcional/es ausente/s, no bloquea demo.)`);
+    } else {
+      console.log('✅ Pre-flight OK. Listo para demo.');
+    }
     process.exit(0);
   } else {
-    console.log(`❌ ${fails.length} check(s) fallaron:`);
+    console.log(`❌ ${fails.length} check(s) crítico(s) fallaron:`);
     for (const f of fails) {
       console.log(`   · ${f.name}${f.detail ? `: ${f.detail}` : ''}`);
     }
