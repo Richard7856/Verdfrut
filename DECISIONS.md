@@ -6473,6 +6473,77 @@ Adicional: **catálogo y rutas legacy no taggeaban `is_sandbox`** todavía. crea
 - apps/platform/src/app/(app)/stores/import/actions.ts:bulkImportStores — tag is_sandbox cookie-based.
 
 
+## [2026-05-16] ADR-114: Workbench WB-2 — Frecuencias por tienda
+
+**Contexto:** El admin no tenía visibilidad analítica sobre el comportamiento histórico de cada tienda. Preguntas básicas como *"¿cuántas veces visitamos TOL-1422 esta semana?", "¿cuál es el kg promedio que entregamos a Soriana Toluca?", "¿qué tiendas activas llevan 3 semanas sin visita?"* requerían exportar a Excel, cruzar manualmente con stops + routes, y filtrar por status='completed' en BD. Inviable para uso diario.
+
+Esta visibilidad es **foundation del Workbench**: WB-3 (sugerencia de zonas) y WB-4 (recomendación de flotilla) necesitan datos de frecuencia/volumen por tienda para sus heurísticas. Sin WB-2 esos algoritmos no tienen input de calidad.
+
+Adicional: detectar tiendas **stale** (activas pero sin visita reciente) es alarma temprana de churn comercial — el cliente paga seat pero el cliente final no recibe. Hoy el dispatcher se entera cuando llega la queja, no antes.
+
+**Decisión:**
+
+1. **Helper batch `getStoreFrequencyStats(storeIds, windowDays=30)`** en `lib/queries/store-frequencies.ts`:
+   - Una sola query SQL con join implícito stops + routes vía supabase-js embed (`routes!inner(is_sandbox, date)`).
+   - Filtra `routes.is_sandbox = false` Y `routes.date >= now - windowDays`. **Las stats SIEMPRE reflejan operación real, sin importar el modo Workbench actual** del admin. La planeación no genera historia.
+   - Calcula por tienda: `visits` (count stops `status='completed'`), `totalKg` (sum `load[0]`), `kgPerVisit` (avg), `lastVisitAt` (max `actual_arrival_at` o fallback `planned`), `visitsPerWeek` (proyección lineal `visits * 7 / windowDays`).
+   - Tiendas sin visitas reciben registro con `visits=0` + `lastVisitAt=null` para que la UI los diferencie de "no consultadas".
+   - Falla silenciosa: si el SQL revienta, devuelve Map con zeros para no romper la página entera.
+
+2. **Helper `formatRelativeDate(iso)`**: "hoy", "ayer", "hace 3 d", "hace 2 sem", "hace 1 m". Reusable para otros componentes que muestren tiempo relativo.
+
+3. **Tres columnas nuevas en `/settings/stores`** después del nombre/zona:
+   - **`Frec`**: `1.4 v/sem` (mono tabular nums) con tooltip que muestra el conteo absoluto en la ventana. "—" si sin visitas.
+   - **`Kg / visita`**: `120` o "—". Right-aligned.
+   - **`Última visita`**: relativo ("hace 2 d") con icono ⚠️ y color amber si supera el umbral stale.
+
+4. **Banner stale arriba de la tabla** cuando hay tiendas activas sin visita en 21+ días:
+   - Mensaje: `⚠️ N tienda(s) activa(s) sin visita en 21+ días. Pueden ser candidatas a revisar con el comercial.`
+   - Link toggle `?stale=1` para filtrar la lista a solo las stale; cuando filtro activo, link "Ver todas" para volver.
+   - Si N=0, no se muestra el banner (UI limpia).
+
+5. **Constantes del módulo**:
+   - `FREQUENCY_WINDOW_DAYS = 30`: ventana de análisis. Balance entre "tendencia reciente" y "suficiente muestra".
+   - `STALE_THRESHOLD_DAYS = 21` (3 semanas): umbral para considerar una tienda "abandonada". Tiendas activas con `lastVisitAt > 21d ago` o sin visita en la ventana se marcan stale. Si el cliente típico visita 1×/sem, 3 semanas sin visita es claramente anómalo.
+
+**Alternativas consideradas:**
+- *Pre-computar stats en una tabla materializada `store_frequencies_mv`*: descartado para WB-2 MVP. Costo: ~50-200ms por query batch de 200 tiendas (verificado en producción VerdFrut). Hasta los 1000-2000 stores no vale la pena el overhead de mantener una vista materializada con triggers de refresh. Si emerge tenants con 5000+ tiendas, migrar.
+- *Contar también `skipped` como visita*: descartado. El admin quiere "qué tiendas SÍ recibieron mercancía"; skipped es lo opuesto. Sí podemos exponer skipped en un drill-down futuro ("la tienda fue omitida 3 veces en los últimos 30 días"), pero no debe inflar el contador de visitas.
+- *Ventana configurable por user via UI*: descartado por scope. 30 días es el default razonable; admin que necesite otra puede ajustar la constante. Cuando emerja un caso real, agregar selector arriba de la tabla.
+- *Tiendas inactivas también en stale*: descartado. Una tienda inactiva por definición NO debería estar recibiendo; flaggearla como stale es ruido. Solo activas alertean.
+- *Definir stale por `< X visits/week` en lugar de tiempo desde última*: descartado. La frecuencia promedio puede esconder lapsos largos (5 visitas hace 4 semanas + 0 después = 1.25/sem proyectado). "Tiempo desde última visita" captura el síntoma real (abandono actual) sin promediar histórico.
+- *Mostrar las stats en página de detalle `/settings/stores/[id]`*: ya existe esa página pero queremos los stats VISIBLES en la lista — el admin escanea sin abrir cada detalle. Lista es el lugar correcto. Detalle puede agregar drill-down (gráfica) en futuras fases.
+- *Filtro stale como tab en lugar de query param*: descartado. ?stale=1 es bookmarkable, comparte URL al equipo, y se preserva entre navegaciones. Más alineado con el patrón de filtros del resto del proyecto.
+- *Auto-archivar tiendas stale > 60 días*: descartado por riesgo. Una decisión de archivo automática puede equivocarse (vacaciones, problema temporal). Mejor el banner que invita al admin a revisar.
+
+**Riesgos / Limitaciones:**
+- **Performance con 1000+ tiendas**: la query es un `stops INNER JOIN routes` filtrado por `store_id IN (...) AND routes.is_sandbox=false AND routes.date >= ...`. Postgres usa `idx_stops_route_id` + filtros de routes. Estimado: 200-500ms para 1000 tiendas con 30 días de actividad. Si supera 1s, agregar índice compuesto `(store_id, route_id)` o materializar.
+- **`visitsPerWeek` es proyección lineal**: una tienda con 4 visitas concentradas en los últimos 7 días reporta 4 v/sem aunque las 3 semanas previas no tuvo nada. Para WB-2 es aceptable; análisis de patrones más sutiles (tendencia, estacionalidad) viene en fases posteriores.
+- **`lastVisitAt` incluye `planned_arrival_at` como fallback**: si la única "visita" en la ventana fue una ruta planeada pero nunca ejecutada (cancelada antes de salir), la tienda no figura stale aunque no haya recibido nada. Trade-off: capturar planeación futura vs falsos positivos. Para WB-2 priorizamos cero-falsos-positivos.
+- **Stale threshold hardcodeado**: 21 días razonable para VerdFrut/NETO (clientes con frecuencia semanal). Para clientes con frecuencia diferente (B2C diario, mensual industrial) el threshold pierde sentido. Mitigación futura: configurable por customer en `customers.workbench_overrides`.
+- **No cuenta con frecuencia "objetivo"**: el dispatcher no puede declarar *"esta tienda debería visitarse 2 v/sem"* y comparar con el real. Eso sería **WB-3** (sugerencias) — necesita capturar la intención del admin para detectar gaps de servicio.
+- **Sandbox impact**: el filtro `is_sandbox=false` es correcto pero si el admin armó un sandbox completo con paradas "completed" simulando ejecución (caso edge), esas no aparecen — correcto. Si emerge confusión, agregar una nota visible.
+- **Sin caching cross-request**: cada render del page consulta la BD. Para una empresa con uso intensivo (5+ admins refrescando seguido), considerar cache de 60s con `unstable_cache`. Hoy sin caché es OK.
+- **No probado con catálogo masivo**: validamos con ~200 tiendas (VerdFrut). 5000 tiendas no se probó.
+
+**Oportunidades de mejora:**
+- Drill-down al hacer click en `Frec`: gráfica de barras por semana de los últimos 3 meses + drill-down a las rutas individuales.
+- Comparativa vs frecuencia esperada/objetivo (WB-3 captura esto).
+- Filtros adicionales: por zona (ya existe potencial pero no expuesto), por umbral de kg, por chofer que más visita.
+- Export CSV de la tabla con stats (para reuniones con el comercial).
+- Vista mapa con heatmap por frecuencia / kg (WB-5).
+- Notificación automática al admin cuando una tienda cruza el umbral stale (email diario / digest).
+- Stats agregadas por zona/ruta/chofer en `/reports`.
+- Acción inline en la fila stale: "Programar visita" → crea ruta DRAFT que la incluya.
+- Frecuencia esperada por tienda en `stores.target_visits_per_week` + alerta cuando real < target en una ventana.
+- Vista materializada `store_frequencies_mv` si el tenant excede 2000 tiendas.
+
+**Refs:**
+- ADR-112 / ADR-113 — Workbench foundation, motivación general.
+- apps/platform/src/lib/queries/store-frequencies.ts — helper batch + formatter.
+- apps/platform/src/app/(app)/settings/stores/page.tsx — UI: columnas + banner stale + filtro ?stale=1.
+
+
 
 
 
