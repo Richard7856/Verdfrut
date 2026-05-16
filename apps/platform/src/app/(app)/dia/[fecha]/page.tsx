@@ -19,9 +19,10 @@ import { countStopsForRoutes } from '@/lib/queries/routes';
 import { MultiRouteMapServer } from '@/components/map/multi-route-map-server';
 import { formatKilometers } from '@tripdrive/utils';
 import type { Route, RouteStatus } from '@tripdrive/types';
-import { DayFilters, type StatusBucket } from './day-filters';
+import { DayFilters, type StatusBucket, type RecentDayInfo } from './day-filters';
 import { OptimizeDayButton } from './optimize-day-button';
 import { QuickRouteButton } from './quick-route-button';
+import { createServerClient } from '@tripdrive/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -149,6 +150,22 @@ export default async function DiaDetailPage({ params, searchParams }: Props) {
     new Set(routes.map((r) => r.dispatchId).filter((x): x is string => Boolean(x))),
   );
 
+  // Nombres legibles de los tiros (en vez de mostrar UUID truncado).
+  const supabaseShared = await createServerClient();
+  const dispatchNameById = new Map<string, string>();
+  if (uniqueDispatchIds.length > 0) {
+    const { data: dispatchRows } = await supabaseShared
+      .from('dispatches')
+      .select('id, name')
+      .in('id', uniqueDispatchIds);
+    for (const d of dispatchRows ?? []) {
+      dispatchNameById.set(d.id as string, (d.name as string) ?? 'Tiro');
+    }
+  }
+
+  // Strip de últimos 7 días con actividad — para navegación rápida sin teclear.
+  const recentDays: RecentDayInfo[] = await buildRecentDaysStrip(fecha);
+
   return (
     <>
       <PageHeader
@@ -209,6 +226,7 @@ export default async function DiaDetailPage({ params, searchParams }: Props) {
           selectedZoneId={zoneParam || null}
           selectedStatusBuckets={selectedBuckets}
           counts={counts}
+          recentDays={recentDays}
         />
       </div>
 
@@ -265,25 +283,34 @@ export default async function DiaDetailPage({ params, searchParams }: Props) {
               const sc = stopCounts.get(r.id);
               return (
                 <li key={r.id}>
-                  <Link
-                    href={`/routes/${r.id}`}
-                    className="block rounded-md border border-[var(--color-border)] bg-[var(--vf-surface-2)] p-2.5 hover:bg-[var(--vf-surface-3)]"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-[var(--color-text)]">
-                          {vehicle?.alias ?? vehicle?.plate ?? r.name}
-                        </p>
-                        <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-                          {zonesById.get(r.zoneId)?.name ?? '—'}
-                          {driverProfile ? ` · ${driverProfile.fullName}` : ' · sin chofer'}
-                          {sc ? ` · ${sc.completed}/${sc.total} paradas` : ''}
-                          {r.totalDistanceMeters ? ` · ${formatKilometers(r.totalDistanceMeters)}` : ''}
-                        </p>
+                  <div className="flex items-start gap-2 rounded-md border border-[var(--color-border)] bg-[var(--vf-surface-2)] p-2.5 hover:bg-[var(--vf-surface-3)]">
+                    <Link href={`/routes/${r.id}`} className="block min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-[var(--color-text)]">
+                            {vehicle?.alias ?? vehicle?.plate ?? r.name}
+                          </p>
+                          <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+                            {zonesById.get(r.zoneId)?.name ?? '—'}
+                            {driverProfile ? ` · ${driverProfile.fullName}` : ' · sin chofer'}
+                            {sc ? ` · ${sc.completed}/${sc.total} paradas` : ''}
+                            {r.totalDistanceMeters ? ` · ${formatKilometers(r.totalDistanceMeters)}` : ''}
+                          </p>
+                        </div>
+                        <Badge tone={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Badge>
                       </div>
-                      <Badge tone={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Badge>
-                    </div>
-                  </Link>
+                    </Link>
+                    {/* PDF por ruta (no global) — cada camioneta tiene su layout. */}
+                    <a
+                      href={`/print/routes/${r.id}`}
+                      target="_blank"
+                      rel="noopener"
+                      title="Abrir PDF para esta camioneta"
+                      className="shrink-0 rounded-md border border-[var(--color-border)] bg-[var(--vf-surface-3)] px-2 py-1 text-xs text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                    >
+                      📄 PDF
+                    </a>
+                  </div>
                 </li>
               );
             })}
@@ -298,15 +325,19 @@ export default async function DiaDetailPage({ params, searchParams }: Props) {
               pertenece la ruta:
             </p>
             <div className="mt-2 flex flex-wrap gap-1.5">
-              {uniqueDispatchIds.map((id) => (
-                <Link
-                  key={id}
-                  href={`/dispatches/${id}`}
-                  className="rounded-md border border-[var(--color-border)] bg-[var(--vf-surface-3)] px-2 py-1 text-xs text-[var(--color-text)] hover:bg-[var(--vf-surface-2)]"
-                >
-                  Abrir plan {id.slice(0, 8)}…
-                </Link>
-              ))}
+              {uniqueDispatchIds.map((id) => {
+                const name = dispatchNameById.get(id) ?? `Tiro ${id.slice(0, 6)}`;
+                return (
+                  <Link
+                    key={id}
+                    href={`/dispatches/${id}`}
+                    className="rounded-md border border-[var(--color-border)] bg-[var(--vf-surface-3)] px-2 py-1 text-xs text-[var(--color-text)] hover:bg-[var(--vf-surface-2)]"
+                    title={`Abrir tiro ${name}`}
+                  >
+                    📋 {name}
+                  </Link>
+                );
+              })}
             </div>
           </div>
         )}
@@ -323,4 +354,43 @@ function Metric({ label, value, hint }: { label: string; value: string; hint?: s
       {hint && <p className="text-[10px] text-[var(--color-text-subtle)]">{hint}</p>}
     </div>
   );
+}
+
+/**
+ * Strip de últimos 7 días centrado alrededor del día actual mostrando cuántas
+ * rutas vivas (no canceladas, no sandbox) tiene cada uno. Single query batch
+ * para que sea barato. Sirve para jumps rápidos sin teclear fecha.
+ */
+async function buildRecentDaysStrip(centerDate: string): Promise<RecentDayInfo[]> {
+  // 3 días antes + actual + 3 días después = ventana de 7.
+  const center = new Date(`${centerDate}T00:00:00Z`);
+  const dates: string[] = [];
+  for (let i = -3; i <= 3; i++) {
+    const d = new Date(center);
+    d.setUTCDate(d.getUTCDate() + i);
+    dates.push(d.toISOString().slice(0, 10));
+  }
+  const supabase = await createServerClient();
+  const { data } = await supabase
+    .from('routes')
+    .select('date, status')
+    .in('date', dates)
+    .eq('is_sandbox', false)
+    .neq('status', 'CANCELLED');
+  type RouteRow = { date: string; status: string };
+  const rows = (data ?? []) as RouteRow[];
+
+  const LIVE_STATUSES = new Set(['PUBLISHED', 'IN_PROGRESS', 'INTERRUPTED']);
+  const stats = new Map<string, { count: number; live: boolean }>();
+  for (const d of dates) stats.set(d, { count: 0, live: false });
+  for (const r of rows) {
+    const entry = stats.get(r.date);
+    if (!entry) continue;
+    entry.count += 1;
+    if (LIVE_STATUSES.has(r.status)) entry.live = true;
+  }
+  return dates.map((d) => {
+    const s = stats.get(d)!;
+    return { date: d, routeCount: s.count, hasLive: s.live };
+  });
 }
