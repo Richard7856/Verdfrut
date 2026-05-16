@@ -211,9 +211,20 @@ export async function markRouteOptimized(
 }
 
 /**
- * OPTIMIZED → APPROVED.
+ * DRAFT|OPTIMIZED → APPROVED.
+ *
+ * Antes solo aceptaba OPTIMIZED, forzando al dispatcher a correr VROOM
+ * aunque ya tuviera el orden de paradas armado a mano (visual builder,
+ * edits manuales). Ahora también acepta DRAFT — el caller debe haber
+ * computado métricas básicas (haversine) antes para que el chofer reciba
+ * la ruta con km/ETA aproximados. El flag `optimization_skipped` se setea
+ * en TRUE cuando vino de DRAFT, para reportería + UI.
  */
-export async function approveRoute(id: string, approvedBy: string): Promise<void> {
+export async function approveRoute(
+  id: string,
+  approvedBy: string,
+  opts?: { skippedOptimization?: boolean },
+): Promise<void> {
   const supabase = await createServerClient();
   const { error } = await supabase
     .from('routes')
@@ -221,9 +232,10 @@ export async function approveRoute(id: string, approvedBy: string): Promise<void
       status: 'APPROVED',
       approved_at: new Date().toISOString(),
       approved_by: approvedBy,
+      ...(opts?.skippedOptimization ? { optimization_skipped: true } : {}),
     })
     .eq('id', id)
-    .eq('status', 'OPTIMIZED');
+    .in('status', ['DRAFT', 'OPTIMIZED']);
 
   if (error) throw new Error(`[routes.approve] ${error.message}`);
 }

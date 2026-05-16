@@ -931,6 +931,8 @@ export type Database = {
           version: number
           zone_id: string
           dispatch_id: string | null
+          /** ADR-108: TRUE si fue aprobada saltándose el optimizer (DRAFT → APPROVED). */
+          optimization_skipped: boolean
         }
         Insert: {
           actual_end_at?: string | null
@@ -958,6 +960,7 @@ export type Database = {
           version?: number
           zone_id: string
           dispatch_id?: string | null
+          optimization_skipped?: boolean
         }
         Update: {
           actual_end_at?: string | null
@@ -985,6 +988,7 @@ export type Database = {
           version?: number
           zone_id?: string
           dispatch_id?: string | null
+          optimization_skipped?: boolean
         }
         Relationships: []
       }

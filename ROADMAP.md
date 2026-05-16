@@ -15,7 +15,20 @@ output. El costo MXN es secundario hasta que veamos producción real con
 
 ## 🎯 Próximas prioridades (post-OE-3)
 
-### 🥇 Stream UX — Unificar el concepto "Día" (eliminar "Tiros" del modelo mental)
+### 🥇 Stream UX-Routes — Flexibilizar máquina de estados de rutas
+
+**Por qué**: el state machine `DRAFT → OPTIMIZED → APPROVED → PUBLISHED`
+obligaba a correr VROOM aunque el dispatcher ya tuviera el orden bueno
+(visual builder, edits manuales). El optimizer **re-ordenaba y borraba
+el trabajo manual** del dispatcher. Feedback explícito del cliente.
+
+| Sprint | Entrega | Status |
+|---|---|---|
+| **UXR-1** | `approveRoute` acepta DRAFT u OPTIMIZED. `approveRouteAction` computa haversine si DRAFT. Nuevo `approveAndPublishRouteAction` (1-click DRAFT→APPROVED→PUBLISHED+push). UI con botón `🚀 Publicar directo`. Flag `optimization_skipped` en BD para audit. | ✅ 2026-05-15 (ADR-108) |
+| **UXR-2** | Badge UI "🤖 Optimizada" vs "✋ Manual" en cards y detalles. Driver app muestra aviso "orden manual" cuando aplique. | ⏳ quick win (~1h) |
+| **UXR-3** | KPI dashboard `% rutas manuales` + tool `publish_route_direct` en orchestrator. | ⏳ on-demand |
+
+### 🥈 Stream UX — Unificar el concepto "Día" (eliminar "Tiros" del modelo mental)
 
 **Por qué**: el concepto "tiro = contenedor de N rutas" era nuestro,
 no del cliente. Customers nuevos veían "Día" y "Tiros" en sidebar sin

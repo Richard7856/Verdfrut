@@ -5990,6 +5990,72 @@ Sin cache, cada llamada paga el costo total aunque 95% de los pares ya fueron ca
 - apps/platform/src/lib/optimizer.ts — `OptimizeContext.customerId` + integración en `buildOptimizerMatrix`.
 - apps/platform/src/lib/optimizer-pipeline.ts — resolución de customer_id desde vehicles[0].
 
+---
+
+## [2026-05-15] ADR-108: state machine flexible — publicar sin pasar por VROOM
+
+**Contexto:** La máquina de estados de rutas era `DRAFT → OPTIMIZED → APPROVED → PUBLISHED`. Cada transición requería pasar por la anterior. El optimizer (VROOM) era OBLIGATORIO entre DRAFT y APPROVED — no había shortcut.
+
+Feedback del dispatcher (2026-05-15): "Si ya armé la ruta a mano o con el visual builder y tengo el orden que quiero, forzarme a correr VROOM **re-ordena y borra mi trabajo**. Quiero poder publicar tal cual está." Caso de uso real: usaste el visual builder, asignaste tiendas a camionetas en el orden que las quieres, click Publicar — pero el botón no existía sin pasar por optimize.
+
+Además: el dispatcher no tenía manera clara de "publicar este orden manual" — solo "Optimizar → Aprobar → Publicar" en 3 clicks separados con confirmaciones en cada uno.
+
+**Decisión:**
+
+1. **`approveRoute()` ahora acepta DRAFT u OPTIMIZED**:
+   - Antes: solo `.eq('status', 'OPTIMIZED')`. Bloqueaba DRAFT.
+   - Ahora: `.in('status', ['DRAFT', 'OPTIMIZED'])`. Nueva opción `opts.skippedOptimization` setea el flag de audit cuando vino de DRAFT.
+
+2. **Migración 051 — `routes.optimization_skipped BOOLEAN DEFAULT false`**:
+   - Marca rutas que pasaron DRAFT → APPROVED sin VROOM. Sirve para:
+     - Badge UI "manual" vs "optimizada"
+     - Reportería (% de rutas que evitan el optimizer)
+     - Aviso al chofer en su app: "secuencia armada manualmente"
+
+3. **`approveRouteAction(routeId)` con path DRAFT**:
+   - Detecta status del route. Si DRAFT, computa métricas haversine via `recalculateRouteMetrics(id)` (función existente que usa el path de ETAs). Si OPTIMIZED, comportamiento legacy (VROOM ya dejó las métricas).
+   - Pasa `skippedOptimization: true` a `approveRoute` para que se marque el flag.
+
+4. **Nueva action `approveAndPublishRouteAction(routeId)`** — atajo en un click:
+   - DRAFT → haversine + APPROVED + PUBLISHED + push al chofer.
+   - OPTIMIZED → APPROVED + PUBLISHED + push.
+   - APPROVED → PUBLISHED + push (idempotente).
+   - Validación: requiere driver asignado antes (sin chofer no hay destinatario del push). Error legible.
+
+5. **UI `route-actions.tsx`**:
+   - DRAFT status ahora tiene 3 botones: `[Optimizar con VROOM]` (legacy) + `[🚀 Publicar directo]` (nuevo) + `[Cancelar]`.
+   - OPTIMIZED status ahora tiene 4 botones: `[Re-optimizar]` + `[Aprobar]` + `[🚀 Publicar directo]` (atajo) + `[Cancelar]`.
+   - Publicar directo dispara confirm: "El chofer recibirá las paradas en el ORDEN ACTUAL. No se va a re-optimizar."
+
+**Alternativas consideradas:**
+- *Eliminar status OPTIMIZED del todo*: descartado. El status es útil cuando SÍ se corre VROOM para distinguir "post-optimizer" de "post-manual". Datos históricos también dependen de saber qué pasó.
+- *Botón "Aprobar sin optimizar" en lugar de "Publicar directo"*: descartado. El user típicamente quiere terminar el flow (publicar al chofer), no quedarse en APPROVED para revisar. El atajo de 1-click es la mejor UX. APPROVED status sigue accesible vía "Aprobar" si el dispatcher quiere revisión intermedia (caso raro).
+- *Hard gate: DRAFT publica solo si dispatcher tiene rol "manager"*: descartado por overengineering. Cualquier admin/dispatcher tiene el juicio para decidir si su orden manual es suficiente. La confirmación textual es protección suficiente.
+- *Push del chofer NO obligatorio*: descartado. Sin push, el chofer no se entera de la publicación hasta que abra la app. Forzar driver asignado mantiene el contrato "publicar = avisar al chofer".
+
+**Riesgos / Limitaciones:**
+- **Haversine vs VROOM en distancia**: el cómputo manual (haversine + sequence actual) puede sobreestimar km vs el orden óptimo. El chofer ve la métrica "245 km estimados" en su app — si la realidad es 180km porque VROOM hubiera elegido mejor, ese delta queda como "manual planning cost". Aceptado: dispatcher elige el trade-off cuando publica directo.
+- **No hay aviso al chofer en su app de "manual"**: el flag `optimization_skipped` existe pero el driver app todavía no lo lee. UI badge "manual" en `/routes/[id]` y en `/dia` queda como TODO de quick-win siguiente.
+- **Reportería sin filtro por `optimization_skipped`**: las métricas operativas no segmentan aún. KPI "% rutas manuales" pendiente en `/reports`.
+- **Dispatcher puede "olvidar" optimizar**: si el orden manual es muy malo (cruza la zona 3 veces), el chofer sufre. Mitigación: el confirm dice claramente que no se va a recalcular; ningún flow oculta esa decisión.
+- **AI tool del orchestrator no expone `publish_direct`**: hoy `publishRoute` legacy obliga APPROVED. El AI puede usar `approveRouteAction` + `publishRouteAction` por separado. Si el user quiere "publica directo Roja", la AI tiene que orquestar 2 calls. Sub-óptimo pero funciona; nueva tool `publish_route_direct` pendiente.
+
+**Oportunidades de mejora:**
+- Badge UI "🤖 Optimizada" vs "✋ Manual" en cards de ruta + dispatch detail.
+- KPI dashboard: `% rutas con optimization_skipped=true` por mes + zona.
+- Aviso al chofer en su app: "Tu ruta de hoy fue armada manualmente — el orden puede no ser el más corto. Si ves algo raro, avisa al dispatcher."
+- Nueva tool del orchestrator `publish_route_direct(route_id)` para el chat: "publica la Verde directo, ya está como quiero".
+- Si `optimization_skipped=true` Y la versión del optimizer cambió luego, sugerir re-optimizar antes de publicar (opt-in).
+- Botón "Publicar todo el día directo" en `/dia/[fecha]` cuando hay N rutas DRAFT con chofer asignado.
+
+**Refs:**
+- ADR-035 — state machine original.
+- supabase/migrations/00000000000051_routes_optimization_skipped.sql — flag de audit.
+- apps/platform/src/lib/queries/routes.ts:223-244 — `approveRoute` con `opts.skippedOptimization`.
+- apps/platform/src/app/(app)/routes/actions.ts — `approveRouteAction` con haversine en DRAFT path + `approveAndPublishRouteAction` (atajo).
+- apps/platform/src/app/(app)/routes/[id]/route-actions.tsx — botones nuevos en DRAFT y OPTIMIZED.
+- packages/supabase/src/database.ts — `routes.optimization_skipped` en types.
+
 
 
 

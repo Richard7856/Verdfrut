@@ -506,13 +506,46 @@ export async function reoptimizeRouteAction(
   }
 }
 
+/**
+ * Aprueba una ruta (DRAFT|OPTIMIZED → APPROVED).
+ *
+ * ADR-108: si la ruta está en DRAFT, el caller indica que aceptamos el orden
+ * actual de las paradas tal cual (dispatcher armó manual o usó visual builder
+ * y no quiere que VROOM re-ordene). Computamos métricas con haversine para
+ * que el chofer reciba km/ETA aproximados, marcamos `optimization_skipped=true`
+ * para audit, y dejamos pasar a APPROVED.
+ *
+ * Si está en OPTIMIZED, mantenemos comportamiento legacy: las métricas ya
+ * existen (VROOM las puso), solo cambia el status.
+ */
 export async function approveRouteAction(routeId: string): Promise<ActionResult> {
   const profile = await requireRole('admin', 'dispatcher');
   return runAction(async () => {
     const id = requireUuid('routeId', routeId);
-    await approveRoute(id, profile.id);
+    const route = await getRoute(id);
+    if (!route) throw new ValidationError('routeId', 'Ruta no existe');
+    if (route.status !== 'DRAFT' && route.status !== 'OPTIMIZED') {
+      throw new ValidationError(
+        'status',
+        `Solo se puede aprobar DRAFT u OPTIMIZED (actual: ${route.status})`,
+      );
+    }
+
+    const skippedOptimization = route.status === 'DRAFT';
+    if (skippedOptimization) {
+      // Computar haversine para que la ruta tenga distance/duration/ETAs
+      // razonables aunque no hubo VROOM. Misma función que usa
+      // recalculateRouteEtasAction.
+      await recalculateRouteMetrics(id);
+    }
+
+    await approveRoute(id, profile.id, { skippedOptimization });
     revalidatePath('/routes');
     revalidatePath(`/routes/${id}`);
+    if (route.dispatchId) {
+      revalidatePath(`/dispatches/${route.dispatchId}`);
+      revalidatePath(`/dia/${route.date}`);
+    }
   });
 }
 
@@ -535,6 +568,61 @@ export async function publishRouteAction(routeId: string): Promise<ActionResult>
 
     revalidatePath('/routes');
     revalidatePath(`/routes/${id}`);
+  });
+}
+
+/**
+ * ADR-108: aprobar + publicar en una sola operación desde DRAFT u OPTIMIZED.
+ *
+ * Use case: dispatcher armó la ruta visualmente (visual builder / edits
+ * manuales / chat AI), ya tiene el orden como quiere, y solo quiere
+ * mandarla al chofer SIN pasar por las 3 transiciones manuales
+ * (optimizar → aprobar → publicar). Click "Publicar directo" hace todo.
+ *
+ * Internamente: si DRAFT → computa haversine + marca optimization_skipped
+ * + approve + publish. Si OPTIMIZED → solo approve + publish.
+ * Si APPROVED → solo publish (idempotente).
+ */
+export async function approveAndPublishRouteAction(routeId: string): Promise<ActionResult> {
+  const profile = await requireRole('admin', 'dispatcher');
+  return runAction(async () => {
+    const id = requireUuid('routeId', routeId);
+    const route = await getRoute(id);
+    if (!route) throw new ValidationError('routeId', 'Ruta no existe');
+    if (!route.driverId) {
+      throw new ValidationError(
+        'driverId',
+        'Asigna un chofer antes de publicar (el push notification no tiene destinatario).',
+      );
+    }
+    if (!['DRAFT', 'OPTIMIZED', 'APPROVED'].includes(route.status)) {
+      throw new ValidationError(
+        'status',
+        `Solo DRAFT, OPTIMIZED o APPROVED se pueden publicar (actual: ${route.status})`,
+      );
+    }
+
+    // 1. Si DRAFT u OPTIMIZED → aprobar primero (con haversine si DRAFT).
+    if (route.status === 'DRAFT' || route.status === 'OPTIMIZED') {
+      const skippedOptimization = route.status === 'DRAFT';
+      if (skippedOptimization) {
+        await recalculateRouteMetrics(id);
+      }
+      await approveRoute(id, profile.id, { skippedOptimization });
+    }
+
+    // 2. Publicar.
+    await publishRoute(id, profile.id);
+    await notifyDriverOfPublishedRoute(id).catch((err) => {
+      console.warn(`[approveAndPublishRoute] push falló (no crítico):`, err);
+    });
+
+    revalidatePath('/routes');
+    revalidatePath(`/routes/${id}`);
+    if (route.dispatchId) {
+      revalidatePath(`/dispatches/${route.dispatchId}`);
+      revalidatePath(`/dia/${route.date}`);
+    }
   });
 }
 
