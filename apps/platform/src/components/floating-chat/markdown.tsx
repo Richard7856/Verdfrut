@@ -10,8 +10,12 @@
 //   - 1. 2. 3. numbered lists
 //   - Tablas GFM (| col | col |\n|---|---|\n| val | val |)
 //   - Párrafos
+//   - [label](url) — links (Stream AI Fase A: tool results devuelven URL
+//     a la entidad creada para que el user navegue con 1 click).
+//     URLs relativas (/dispatches/123) o absolutas (https://...) — distinguen
+//     por prefijo. Las externas abren en nueva pestaña.
 //
-// No soporta: links, images, blockquotes, html, nested formatting.
+// No soporta: images, blockquotes, html, nested formatting.
 // Si se necesita más adelante: swap a react-markdown + remark-gfm.
 
 'use client';
@@ -224,20 +228,42 @@ function BlockNode({ block }: { block: Block }) {
 // ─── Renderer inline (bold/italic/code) ───
 
 function renderInline(text: string): ReactNode {
-  // Parser greedy left-to-right que reconoce: **bold**, __bold__, `code`, *italic*
+  // Parser greedy left-to-right que reconoce: [label](url), **bold**, __bold__,
+  // `code`, *italic*. El link va primero en el alternation para que tenga
+  // prioridad sobre **/__/* dentro del label.
   const nodes: ReactNode[] = [];
   let cursor = 0;
   let key = 0;
 
-  // Patrón: **...** | __...__ | `...` | *...* | otro
-  const re = /(\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|\*[^*\n]+\*)/g;
+  // Patrón: [text](url) | **...** | __...__ | `...` | *...*
+  const re = /(\[[^\]\n]+\]\([^)\s]+\)|\*\*[^*]+\*\*|__[^_]+__|`[^`]+`|\*[^*\n]+\*)/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     if (m.index > cursor) {
       nodes.push(text.slice(cursor, m.index));
     }
     const token = m[0];
-    if (token.startsWith('**') || token.startsWith('__')) {
+    if (token.startsWith('[')) {
+      // [label](url)
+      const linkMatch = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      if (linkMatch) {
+        const [, label, url] = linkMatch;
+        const isExternal = /^https?:\/\//.test(url!);
+        nodes.push(
+          <a
+            key={key++}
+            href={url}
+            target={isExternal ? '_blank' : undefined}
+            rel={isExternal ? 'noopener noreferrer' : undefined}
+            className="text-emerald-400 underline decoration-emerald-400/40 underline-offset-2 hover:decoration-emerald-300 hover:text-emerald-300"
+          >
+            {label}
+          </a>,
+        );
+      } else {
+        nodes.push(token);
+      }
+    } else if (token.startsWith('**') || token.startsWith('__')) {
       nodes.push(
         <strong key={key++} className="font-semibold text-white">
           {token.slice(2, -2)}

@@ -177,8 +177,8 @@ const optimize_dispatch: ToolDefinition<OptimizeDispatchArgs, OptimizeResult> = 
         : 0;
 
     const summary = data.applied
-      ? `✅ Tiro "${data.dispatch.name}" optimizado y publicado: ${data.after.routeCount} ruta(s), ${data.after.storeCount} parada(s). ${distanceDeltaPct >= 0 ? '+' : ''}${distanceDeltaPct}% distancia · ${durationDeltaPct >= 0 ? '+' : ''}${durationDeltaPct}% duración vs plan anterior.`
-      : `📋 Plan calculado (no aplicado): ${data.after.routeCount} ruta(s), ${data.after.storeCount} parada(s). ${distanceDeltaPct >= 0 ? '+' : ''}${distanceDeltaPct}% distancia · ${durationDeltaPct >= 0 ? '+' : ''}${durationDeltaPct}% duración. Usa apply=true para ejecutar.`;
+      ? `✅ Tiro [${data.dispatch.name}](/dispatches/${args.dispatch_id}) optimizado y publicado: ${data.after.routeCount} ruta(s), ${data.after.storeCount} parada(s). ${distanceDeltaPct >= 0 ? '+' : ''}${distanceDeltaPct}% distancia · ${durationDeltaPct >= 0 ? '+' : ''}${durationDeltaPct}% duración vs plan anterior.`
+      : `📋 Plan calculado para el [tiro](/dispatches/${args.dispatch_id}) (no aplicado): ${data.after.routeCount} ruta(s), ${data.after.storeCount} parada(s). ${distanceDeltaPct >= 0 ? '+' : ''}${distanceDeltaPct}% distancia · ${durationDeltaPct >= 0 ? '+' : ''}${durationDeltaPct}% duración. Usa apply=true para ejecutar.`;
 
     return {
       ok: true,
@@ -345,7 +345,7 @@ const propose_route_plan: ToolDefinition<ProposeRoutePlanArgs, ProposeRoutePlanR
     const cheapest = data.alternatives.find((a) => a.labels.includes('cheapest'));
 
     const dispatchSuffix = data.dispatch?.id
-      ? ` · Ver propuestas con map preview en /dispatches/${data.dispatch.id}/propose`
+      ? ` · [Ver propuestas con mapa](/dispatches/${data.dispatch.id}/propose)`
       : '';
     const cheapestSuffix = cheapest
       ? `Más económica: ${cheapest.vehicle_count} vehículo(s), ${cheapest.metrics.total_km} km, $${cheapest.cost.total_mxn.toLocaleString('es-MX')} MXN.`
@@ -460,7 +460,7 @@ const apply_route_plan: ToolDefinition<ApplyRoutePlanArgs, ApplyRoutePlanResult>
     }
 
     const data = (await res.json()) as ApplyRoutePlanResult & { ok: boolean };
-    const summary = `✅ Plan aplicado. ${data.new_route_ids.length} ruta(s) nueva(s), ${(data.total_distance_meters / 1000).toFixed(0)} km, ${(data.total_duration_seconds / 3600).toFixed(1)} h manejo. ${data.unassigned_store_ids.length > 0 ? `⚠ ${data.unassigned_store_ids.length} tienda(s) sin asignar — revisar.` : ''}`;
+    const summary = `✅ Plan aplicado al [tiro](/dispatches/${args.dispatch_id}). ${data.new_route_ids.length} ruta(s) nueva(s), ${(data.total_distance_meters / 1000).toFixed(0)} km, ${(data.total_duration_seconds / 3600).toFixed(1)} h manejo. ${data.unassigned_store_ids.length > 0 ? `⚠ ${data.unassigned_store_ids.length} tienda(s) sin asignar — revisar.` : ''}`;
 
     return { ok: true, data, summary };
   },

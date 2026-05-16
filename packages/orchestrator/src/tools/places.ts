@@ -413,7 +413,7 @@ const create_store: ToolDefinition<CreateStoreArgs, CreateStoreResult> = {
         code: data.code as string,
         name: data.name as string,
       },
-      summary: `Tienda "${code}" creada en ${address}.`,
+      summary: `Tienda [${code}](/settings/stores/${data.id}) creada en ${address}.`,
     };
   },
 };
@@ -657,7 +657,7 @@ const update_store: ToolDefinition<UpdateStoreArgs, UpdateStoreResult> = {
         name: data.name as string,
         updated_fields: updatedFields,
       },
-      summary: `Tienda "${data.code}" actualizada (${updatedFields.length} campo${updatedFields.length > 1 ? 's' : ''}: ${updatedFields.join(', ')}).`,
+      summary: `Tienda [${data.code}](/settings/stores/${data.id}) actualizada (${updatedFields.length} campo${updatedFields.length > 1 ? 's' : ''}: ${updatedFields.join(', ')}).`,
     };
   },
 };
@@ -750,7 +750,7 @@ const archive_store: ToolDefinition<ArchiveStoreArgs, ArchiveStoreResult> = {
         name: data.name as string,
         reason,
       },
-      summary: `Tienda "${data.code}" archivada. Motivo: "${reason}".`,
+      summary: `Tienda [${data.code}](/settings/stores/${data.id}) archivada. Motivo: "${reason}".`,
     };
   },
 };

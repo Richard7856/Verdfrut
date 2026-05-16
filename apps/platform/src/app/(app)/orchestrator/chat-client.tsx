@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Card, Button, Textarea, Badge } from '@tripdrive/ui';
+import { Markdown } from '@/components/floating-chat/markdown';
 
 type Role = 'user' | 'assistant' | 'tool';
 type AgentRole = 'orchestrator' | 'router' | 'geo';
@@ -721,7 +722,11 @@ function TurnView({ turn }: { turn: ChatTurn }) {
           )}
         </div>
         {summary && (
-          <p className="mt-1 text-sm text-[var(--color-text)]">{summary}</p>
+          <div className="mt-1 text-sm text-[var(--color-text)]">
+            {/* Markdown para que los links [label](url) de tool results
+                (Stream AI Fase A) se rendericen clickeables. */}
+            <Markdown text={summary} />
+          </div>
         )}
         {errorMsg && (
           <p className="mt-1 text-sm text-[var(--vf-crit,#dc2626)]">⚠ {errorMsg}</p>

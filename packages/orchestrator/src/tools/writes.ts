@@ -96,7 +96,8 @@ const create_dispatch: ToolDefinition<CreateDispatchArgs, { dispatch_id: string;
     return {
       ok: true,
       data: { dispatch_id: data.id as string, name: data.name as string },
-      summary: `Tiro "${name}" creado para ${args.date}. ID: ${data.id}.`,
+      // Link clickeable al detalle del tiro recién creado (Stream AI Fase A).
+      summary: `Tiro [${name}](/dispatches/${data.id}) creado para ${args.date}.`,
     };
   },
 };
@@ -309,7 +310,7 @@ const add_route_to_dispatch: ToolDefinition<AddRouteArgs, AddRouteResult> = {
         unmatched_codes: unmatched,
       },
       summary:
-        `Ruta "${routeName}" creada con ${sequenceList.length} parada(s).` +
+        `Ruta [${routeName}](/routes/${route.id}) creada con ${sequenceList.length} parada(s).` +
         (unmatched.length > 0
           ? ` No incluidas: ${unmatched.join(', ')} — el usuario debe revisarlas.`
           : ''),
@@ -432,7 +433,7 @@ const add_stop_to_route: ToolDefinition<AddStopArgs, { stop_id: string; sequence
     return {
       ok: true,
       data: { stop_id: newStop.id as string, sequence: newStop.sequence as number },
-      summary: `Tienda ${code} agregada como parada #${newStop.sequence} en la ruta.`,
+      summary: `Tienda ${code} agregada como parada #${newStop.sequence} en la [ruta](/routes/${args.route_id}).`,
     };
   },
 };
@@ -527,7 +528,7 @@ const move_stop: ToolDefinition<MoveStopArgs, { stops_renumbered: number }> = {
     return {
       ok: true,
       data: { stops_renumbered: reordered.length },
-      summary: `Parada movida de #${args.from_sequence} a #${args.to_sequence}. ${reordered.length} secuencia(s) re-enumeradas.`,
+      summary: `Parada movida de #${args.from_sequence} a #${args.to_sequence} en la [ruta](/routes/${args.route_id}). ${reordered.length} secuencia(s) re-enumeradas.`,
     };
   },
 };
@@ -606,7 +607,7 @@ const remove_stop: ToolDefinition<RemoveStopArgs, { route_id: string; removed_se
     return {
       ok: true,
       data: { route_id: stop.route_id as string, removed_sequence: removedSeq },
-      summary: `Parada eliminada (era #${removedSeq}). ${following?.length ?? 0} parada(s) re-enumeradas.`,
+      summary: `Parada eliminada (era #${removedSeq}) de la [ruta](/routes/${stop.route_id}). ${following?.length ?? 0} parada(s) re-enumeradas.`,
     };
   },
 };
@@ -717,7 +718,7 @@ const publish_dispatch: ToolDefinition<PublishDispatchArgs, PublishResult> = {
         drivers_assigned: routes.length,
         total_stops: totalStops,
       },
-      summary: `Tiro publicado: ${routes.length} ruta(s), ${totalStops} parada(s). Los choferes verán las rutas en su app.`,
+      summary: `[Tiro](/dispatches/${args.dispatch_id}) publicado: ${routes.length} ruta(s), ${totalStops} parada(s). Los choferes verán las rutas en su app.`,
     };
   },
 };
@@ -789,7 +790,7 @@ const cancel_dispatch: ToolDefinition<CancelDispatchArgs, { routes_cancelled: nu
     return {
       ok: true,
       data: { routes_cancelled: routeIds.length },
-      summary: `Tiro cancelado. ${routeIds.length} ruta(s) afectada(s).`,
+      summary: `[Tiro](/dispatches/${args.dispatch_id}) cancelado. ${routeIds.length} ruta(s) afectada(s).`,
     };
   },
 };
@@ -892,8 +893,8 @@ const reassign_driver: ToolDefinition<ReassignDriverArgs, { route_id: string; pr
         new_driver_id: args.new_driver_id,
       },
       summary: prev
-        ? `Chofer cambiado. El anterior pierde acceso, el nuevo recibe la asignación.`
-        : `Chofer asignado a la ruta.`,
+        ? `Chofer cambiado en la [ruta](/routes/${args.route_id}). El anterior pierde acceso, el nuevo recibe la asignación.`
+        : `Chofer asignado a la [ruta](/routes/${args.route_id}).`,
     };
   },
 };

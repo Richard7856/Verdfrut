@@ -399,7 +399,11 @@ function TurnBubble({ turn }: { turn: ChatTurn }) {
           <span>{turn.toolName}</span>
         </div>
         {turn.toolResult?.summary && (
-          <div className="mt-1 text-zinc-300">{turn.toolResult.summary}</div>
+          <div className="mt-1 text-zinc-300">
+            {/* Markdown renderer para que los links [label](url) que devuelven
+                las tools (Stream AI Fase A) se rendericen clickeables. */}
+            <Markdown text={turn.toolResult.summary} />
+          </div>
         )}
         {turn.toolResult?.error && (
           <div className="mt-1 text-red-400">{turn.toolResult.error}</div>

@@ -183,7 +183,7 @@ const update_driver: ToolDefinition<UpdateDriverArgs, UpdateDriverResult> = {
         full_name: finalName,
         updated_fields: updatedFields,
       },
-      summary: `Chofer "${finalName}" actualizado (${updatedFields.length} campo${updatedFields.length > 1 ? 's' : ''}: ${updatedFields.join(', ')}).`,
+      summary: `Chofer **${finalName}** actualizado (${updatedFields.length} campo${updatedFields.length > 1 ? 's' : ''}: ${updatedFields.join(', ')}). [Ver lista de choferes](/drivers).`,
     };
   },
 };
@@ -424,7 +424,7 @@ const update_vehicle: ToolDefinition<UpdateVehicleArgs, UpdateVehicleResult> = {
         alias: data.alias as string | null,
         updated_fields: updatedFields,
       },
-      summary: `Vehículo ${data.plate}${data.alias ? ` (${data.alias})` : ''} actualizado (${updatedFields.length} campo${updatedFields.length > 1 ? 's' : ''}: ${updatedFields.join(', ')}).`,
+      summary: `Vehículo [${data.plate}${data.alias ? ` (${data.alias})` : ''}](/settings/vehicles/${data.id}) actualizado (${updatedFields.length} campo${updatedFields.length > 1 ? 's' : ''}: ${updatedFields.join(', ')}).`,
     };
   },
 };
@@ -495,7 +495,7 @@ const create_zone: ToolDefinition<CreateZoneArgs, CreateZoneResult> = {
         code: data.code as string,
         name: data.name as string,
       },
-      summary: `Zona "${name}" (${code}) creada.`,
+      summary: `Zona **${name}** (${code}) creada. [Ver zonas](/settings/zones).`,
     };
   },
 };
@@ -594,7 +594,7 @@ const update_zone: ToolDefinition<UpdateZoneArgs, UpdateZoneResult> = {
         name: data.name as string,
         updated_fields: updatedFields,
       },
-      summary: `Zona "${data.name}" actualizada (${updatedFields.join(', ')}).`,
+      summary: `Zona **${data.name}** actualizada (${updatedFields.join(', ')}). [Ver zonas](/settings/zones).`,
     };
   },
 };
