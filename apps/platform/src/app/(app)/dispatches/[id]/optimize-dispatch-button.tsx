@@ -92,14 +92,14 @@ export function OptimizeDispatchButton({
     <>
       <Button
         type="button"
-        variant="primary"
+        variant="secondary"
         size="sm"
         onClick={() => setOpen(true)}
         disabled={pending || hasPostPublishRoutes}
         title={
           hasPostPublishRoutes
             ? 'Hay rutas ya publicadas — usa "Re-optimizar con tráfico" en cada ruta individual.'
-            : 'Optimiza todas las rutas del tiro'
+            : 'Optimiza el orden de las rutas sin mostrar alternativas. Para comparar costos, usa "Ver propuestas con costo".'
         }
         isLoading={pending}
       >
@@ -120,7 +120,8 @@ export function OptimizeDispatchButton({
             </h3>
             <p className="mt-1 text-xs text-[var(--color-text-muted)]">
               Las dos opciones reordenan paradas. La diferencia es si pueden cambiarlas
-              de camioneta o no.
+              de camioneta o no. <strong>Si quieres comparar alternativas con costo
+              MXN antes de aplicar, usa el botón "Ver propuestas con costo".</strong>
             </p>
 
             <div className="mt-4 flex flex-col gap-2">

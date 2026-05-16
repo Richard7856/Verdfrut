@@ -190,17 +190,20 @@ export default async function DispatchDetailPage({ params }: Props) {
             Rutas del tiro
           </h2>
           <div className="flex items-center gap-2">
-            {/* OE-3: ver propuestas con costo MXN (3 alternativas). Solo en
-                pre-publicación y con paradas — propose requiere stops para
-                clusterizar. */}
+            {/* OE-3 (ADR-100): propose es el camino recomendado — 3 alternativas
+                con costo MXN comparables side-by-side. Promovido a primary tras
+                ADR-109 (optimize_dispatch tool del LLM deprecado en favor de
+                propose+apply). El botón Optimizar de abajo sigue para flujos
+                rápidos donde no se necesitan alternativas. */}
             {canOptimizeDispatch && (
               <Link href={`/dispatches/${dispatch.id}/propose`}>
-                <Button type="button" variant="secondary" size="sm">
-                  ⚡ Ver propuestas con costo
+                <Button type="button" variant="primary" size="sm">
+                  💰 Ver propuestas con costo
                 </Button>
               </Link>
             )}
-            {/* Optimizar tiro completo (modo across o within). */}
+            {/* Optimizar tiro completo (modo across o within). Secundario porque
+                no muestra alternativas — útil solo para re-ordenar in-place. */}
             <OptimizeDispatchButton
               dispatchId={dispatch.id}
               canOptimize={canOptimizeDispatch}
