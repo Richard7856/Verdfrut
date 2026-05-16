@@ -21,6 +21,7 @@ import { formatKilometers } from '@tripdrive/utils';
 import type { Route, RouteStatus } from '@tripdrive/types';
 import { DayFilters, type StatusBucket } from './day-filters';
 import { OptimizeDayButton } from './optimize-day-button';
+import { QuickRouteButton } from './quick-route-button';
 
 export const dynamic = 'force-dynamic';
 
@@ -174,6 +175,29 @@ export default async function DiaDetailPage({ params, searchParams }: Props) {
             >
               🗺️ Armar día visual
             </Link>
+            {/* ADR-119 / UX-Fase 3: ruta huérfana sin tiro previo. */}
+            <QuickRouteButton
+              fecha={fecha}
+              vehicles={vehicles
+                .filter((v) => v.isActive)
+                .map((v) => ({
+                  id: v.id,
+                  alias: v.alias,
+                  plate: v.plate,
+                  zoneId: v.zoneId,
+                }))}
+              drivers={zoneDrivers
+                .filter((d) => d.isActive)
+                .map((d) => {
+                  const userId = driverUserIds.get(d.id);
+                  const fullName = userId ? userById.get(userId)?.fullName ?? '(sin nombre)' : '(sin nombre)';
+                  return { id: d.id, fullName, zoneId: d.zoneId };
+                })}
+              zones={zones
+                .filter((z) => z.isActive)
+                .map((z) => ({ id: z.id, code: z.code, name: z.name }))}
+              defaultZoneId={zoneParam || null}
+            />
           </div>
         }
       />

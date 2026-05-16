@@ -6859,6 +6859,68 @@ Adicional: introduce la **"Frecuencia"** como concepto operativo visible, antici
 - apps/platform/src/app/(app)/settings/workbench/workbench-manager.tsx — discovery final.
 
 
+## [2026-05-16] ADR-119: UX-Fase 3 (Opción A) — relax routes.dispatch_id NOT NULL + ruta huérfana desde /dia
+
+**Contexto:** ADR-040 (2026-04) impuso `routes.dispatch_id NOT NULL` bajo el principio "toda ruta vive dentro de un tiro". Eso tenía sentido cuando el dispatcher entraba por `/dispatches` y armaba tiros como contenedores antes de las rutas. Pero `/dia` emergió como entry-point primario (ADR-088, hide /dispatches del sidebar, vista unificada del día) y ahí el dispatcher piensa en términos de "rutas del día" — el tiro es un detalle de implementación que estorba.
+
+Forzar la creación de un tiro antes de cada ruta crea fricción: el dispatcher quiere "agregar una Kangoo Roja al día para hacer 3 paradas" pero el sistema le obliga primero a "crear un tiro". Esa friction es la última deuda mental del modelo viejo en el flow nuevo.
+
+**Decisión:**
+
+1. **Migración 053**: `ALTER TABLE routes ALTER COLUMN dispatch_id DROP NOT NULL`. No backfill — todas las rutas existentes mantienen su dispatch_id (ADR-040). Solo las NUEVAS pueden ser huérfanas si el flow lo decide. Aplicada al tenant VerdFrut via MCP.
+
+2. **Server action `createOrphanRouteAction({date, vehicleId, zoneId, driverId?})`**:
+   - Validación: UUIDs + fecha YYYY-MM-DD.
+   - Reusa `createDraftRoute` con `dispatchId: null`.
+   - El status arranca DRAFT (igual que rutas con dispatch — la state machine no cambia).
+   - is_sandbox hereda del cookie del request (ADR-113) — si admin está en modo planeación, la ruta queda sandbox.
+   - Revalida `/dia/[fecha]` + `/routes`.
+
+3. **`<QuickRouteButton>`** en `/dia/[fecha]`:
+   - Botón "➕ Nueva ruta" junto a "🗺️ Armar día visual".
+   - Modal compacto con dropdowns: Camioneta (required) + Zona (required) + Chofer (optional, filtrado por zona).
+   - Auto-select de zona cuando se elige camioneta (zona del vehículo).
+   - Submit → server action → redirect a `/routes/[id]` para agregar paradas.
+
+4. **Alcance MÍNIMO (Opción A)**:
+   - Solo relax NOT NULL + nuevo flow desde /dia.
+   - **`/dispatches` sigue intacto**: el concepto plan/tiro existe en BD y URLs. Todo el código legacy que asume dispatch_id (createAndOptimizeRoute, share tokens, visual builder, propose flow) funciona igual.
+   - Eliminación completa del concepto plan (auto-grupo por date+zone) queda diferida a UX-Fase 3b — si emerge demanda real. Mientras tanto las rutas huérfanas conviven con las que tienen dispatch_id.
+
+**Alternativas consideradas:**
+- *Fase 3 completa (eliminar concepto plan)*: descartado por scope/riesgo. 43 archivos referencian dispatch_id. Refactor masivo con probabilidad de regresiones en orchestrator, share links, optimize flow, propose page. El usuario explícitamente pidió Opción A (minimal) primero. Opción B si emerge demanda real.
+- *Auto-crear dispatch al guardar la ruta orphan*: descartado. Reintroduce la fricción que estamos quitando. El admin no quiere un dispatch para una ruta puntual.
+- *Status enum nuevo "STANDALONE"*: descartado. La state machine ya soporta DRAFT/OPTIMIZED/APPROVED/PUBLISHED para cualquier ruta. Diferenciar standalone agregaría complejidad sin valor.
+- *Modal de creación más rico (selección de paradas inline)*: descartado por scope. El admin crea la ruta vacía y luego va a `/routes/[id]` para agregar paradas — mismo flow que el visual builder. Mantener simétrico.
+- *Crear directamente con paradas pre-seleccionadas del mapa de /dia*: nice-to-have. Si emerge demanda, agregar bulk → "crear ruta con estas N paradas". Pendiente.
+
+**Riesgos / Limitaciones:**
+- **El optimizer-pipeline legacy (`createAndOptimizeRoute`) sigue auto-creando dispatch**: ese flow tiene su propia lógica que NO se beneficia del cambio. Solo el QuickRouteButton entrega rutas verdaderamente huérfanas. Si el admin va a `/routes/new`, sigue armando dispatch implícito.
+- **Las rutas huérfanas no aparecen en `/dispatches/[id]/page.tsx`**: porque no tienen dispatch_id. Aparecen en `/dia/[fecha]` y `/routes` listing — los caminos correctos del nuevo modelo.
+- **Share token vive en dispatch**: una ruta huérfana NO se puede compartir via link público hoy. Si emerge demanda, agregar share token a route directamente (UX-Fase 3c).
+- **Reportes y métricas pueden agruparse por dispatch_id**: `/reports` agrega por fecha+zona, no por dispatch, así que los orphans se incluyen sin problema. Pero auditorías que filtren `dispatch_id IS NOT NULL` perderían orphans — revisar si emerge.
+- **`/dispatches/[id]/propose` no opera sobre orphan**: el flow propose requiere un dispatch como contexto. Orphan no participa. Aceptable — propose es para refinar grupos pre-existentes.
+- **Share token de dispatch enseñará lista incompleta**: si una ruta huérfana del día NO está bajo un dispatch share, el cliente externo no la verá. Aceptado para Opción A.
+- **No probamos con flujos mixtos extensos**: testing rápido en local. Casos como "agregar parada a ruta huérfana" → debería funcionar porque /routes/[id] no asume dispatch_id, pero validar.
+- **No reverse-migration**: si en producción queremos volver a NOT NULL (porque emergió un problema), debemos primero asegurar que no hay orphans en BD (`WHERE dispatch_id IS NULL`) y luego ALTER COLUMN. Migración de retroceso requiere cuidado.
+
+**Oportunidades de mejora:**
+- UX-Fase 3b: `/dispatches/[id]/page.tsx` se vuelve UN modo de visualización (filtra por dispatch_id), no fuente única. Rutas huérfanas + agrupadas coexisten en /dia uniformemente.
+- Pre-seleccionar paradas del mapa al crear orphan route ("estas 5 las quiero juntas").
+- Share token a nivel ruta para compartir orphan al cliente.
+- Migración data: dispatch implícito auto-creado para legacy ↔ ruta huérfana cuando aplique.
+- AI agent: el orchestrator entiende "crea ruta para hoy con Kangoo Roja sin armar tiro" usando este action.
+- Cleanup: `createAndOptimizeRoute` puede simplificarse si el dispatch auto-create se vuelve opcional.
+
+**Refs:**
+- ADR-040 — original NOT NULL.
+- ADR-088 (memory) — hide /dispatches del sidebar.
+- supabase/migrations/00000000000053_routes_dispatch_id_nullable.sql — migración.
+- apps/platform/src/app/(app)/dia/[fecha]/orphan-route-action.ts — server action.
+- apps/platform/src/app/(app)/dia/[fecha]/quick-route-button.tsx — modal cliente.
+- apps/platform/src/app/(app)/dia/[fecha]/page.tsx — integración del botón.
+
+
 
 
 
