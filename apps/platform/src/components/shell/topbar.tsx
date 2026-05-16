@@ -5,6 +5,8 @@ import type { UserProfile } from '@tripdrive/types';
 import { LogoutButton } from './logout-button';
 import { ThemeToggle } from './theme-toggle';
 import { SoundToggle } from './sound-toggle';
+import { WorkbenchToggle } from './workbench-toggle';
+import { getCurrentMode } from '@/lib/workbench-mode';
 
 const ROLE_LABELS: Record<UserProfile['role'], string> = {
   admin: 'Administrador',
@@ -13,7 +15,14 @@ const ROLE_LABELS: Record<UserProfile['role'], string> = {
   driver: 'Chofer',
 };
 
-export function Topbar({ profile }: { profile: UserProfile }) {
+export async function Topbar({ profile }: { profile: UserProfile }) {
+  // ADR-112: Workbench toggle visible solo para admin/dispatcher (zone_manager
+  // no opera tiros). El modo lo lee de la cookie del request server-side.
+  const mode =
+    profile.role === 'admin' || profile.role === 'dispatcher'
+      ? await getCurrentMode()
+      : 'real';
+
   return (
     <header
       className="flex h-[var(--vf-top-h)] items-center gap-3 px-[18px]"
@@ -31,6 +40,9 @@ export function Topbar({ profile }: { profile: UserProfile }) {
 
       {/* Acciones a la derecha */}
       <div className="ml-auto flex items-center gap-2.5">
+        {(profile.role === 'admin' || profile.role === 'dispatcher') && (
+          <WorkbenchToggle mode={mode} />
+        )}
         {/* Toggle de sonido visible solo para admin/dispatcher (los que reciben notifs). */}
         {(profile.role === 'admin' || profile.role === 'dispatcher') && <SoundToggle />}
         <ThemeToggle />

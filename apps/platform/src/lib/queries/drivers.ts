@@ -5,6 +5,7 @@ import 'server-only';
 import { createServerClient } from '@tripdrive/supabase/server';
 import type { TableUpdate } from '@tripdrive/supabase';
 import type { Driver } from '@tripdrive/types';
+import { isSandboxMode } from '@/lib/workbench-mode';
 
 interface DriverRow {
   id: string;
@@ -39,11 +40,19 @@ function toDriver(row: DriverRow): Driver {
   };
 }
 
-export async function listDrivers(opts?: { zoneId?: string; activeOnly?: boolean }): Promise<Driver[]> {
+export async function listDrivers(opts?: {
+  zoneId?: string;
+  activeOnly?: boolean;
+  /** ADR-112: en real filtra is_sandbox=false; en sandbox no filtra. */
+  sandbox?: boolean;
+}): Promise<Driver[]> {
   const supabase = await createServerClient();
   let q = supabase.from('drivers').select(DRIVER_COLS);
   if (opts?.zoneId) q = q.eq('zone_id', opts.zoneId);
   if (opts?.activeOnly) q = q.eq('is_active', true);
+
+  const sandbox = opts?.sandbox ?? (await isSandboxMode());
+  if (!sandbox) q = q.eq('is_sandbox', false);
 
   const { data, error } = await q;
   if (error) throw new Error(`[drivers.list] ${error.message}`);

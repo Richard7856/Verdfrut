@@ -7,6 +7,7 @@ import { requireProfile } from '@/lib/auth';
 import { createServerClient } from '@tripdrive/supabase/server';
 import { Sidebar } from '@/components/shell/sidebar';
 import { Topbar } from '@/components/shell/topbar';
+import { WorkbenchBanner } from '@/components/shell/workbench-banner';
 import { IncidentToastListener } from '@/components/notifications/incident-toast-listener';
 import { FloatingChat } from '@/components/floating-chat/floating-chat';
 import { getCurrentCustomerBranding, brandingCss } from '@/lib/branding';
@@ -38,6 +39,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <Sidebar role={profile.role} initialOpenIncidentsCount={initialOpenIncidentsCount} />
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <Topbar profile={profile} />
+          {(profile.role === 'admin' || profile.role === 'dispatcher') && (
+            <WorkbenchBanner />
+          )}
           <main className="vf-scroll vf-main flex-1 overflow-y-auto">
             <div className="vf-main-inner mx-auto max-w-7xl p-6">{children}</div>
           </main>

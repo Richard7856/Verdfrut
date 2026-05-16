@@ -6,6 +6,7 @@ import 'server-only';
 import { createServerClient } from '@tripdrive/supabase/server';
 import { logger } from '@tripdrive/observability';
 import type { Route, RouteStatus } from '@tripdrive/types';
+import { isSandboxMode } from '@/lib/workbench-mode';
 
 interface RouteRow {
   id: string;
@@ -86,14 +87,20 @@ export async function listRoutes(opts?: {
   offset?: number;
   /** Máximo de filas a devolver. Default ROUTES_PAGE_SIZE. */
   limit?: number;
+  /** ADR-112: override del modo Workbench. Por default lee la cookie del request. */
+  sandbox?: boolean;
 }): Promise<{ rows: Route[]; total: number }> {
   const supabase = await createServerClient();
   const limit = opts?.limit ?? ROUTES_PAGE_SIZE;
   const offset = opts?.offset ?? 0;
+  // ADR-112: por default filtramos por el modo Workbench del request. El caller
+  // puede forzar real (cron, share page, internal APIs) pasando sandbox=false.
+  const sandbox = opts?.sandbox ?? (await isSandboxMode());
 
   let q = supabase
     .from('routes')
     .select(ROUTE_COLS, { count: 'exact' })
+    .eq('is_sandbox', sandbox)
     .order('date', { ascending: false })
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);

@@ -19,6 +19,7 @@ import {
   ValidationError,
   type ActionResult,
 } from '@/lib/validation';
+import { isSandboxMode } from '@/lib/workbench-mode';
 
 const MAX_NAME_LEN = 80;
 const MAX_NOTES_LEN = 500;
@@ -56,6 +57,8 @@ export async function createDispatchAction(
     }
 
     const supabase = await createServerClient();
+    // ADR-112: tag is_sandbox según el modo Workbench del caller.
+    const sandbox = await isSandboxMode();
     const { data, error } = await supabase
       .from('dispatches')
       .insert({
@@ -64,6 +67,7 @@ export async function createDispatchAction(
         zone_id: input.zoneId,
         notes: notes || null,
         created_by: profile.id,
+        is_sandbox: sandbox,
       })
       .select('id')
       .single();

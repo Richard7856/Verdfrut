@@ -211,17 +211,20 @@ export interface RouteBundle {
  * RLS restringe a las rutas del chofer; no filtramos por driver_id explícito.
  */
 export async function getDriverRouteForDate(date: string): Promise<Route | null> {
+  // ADR-112: defensa is_sandbox=false — el chofer no debe ver rutas hipotéticas.
   const [inProgressRes, publishedRes] = await Promise.all([
     supabase
       .from('routes')
       .select(ROUTE_COLS)
       .eq('status', 'IN_PROGRESS')
+      .eq('is_sandbox', false)
       .order('date', { ascending: true })
       .limit(1),
     supabase
       .from('routes')
       .select(ROUTE_COLS)
       .eq('status', 'PUBLISHED')
+      .eq('is_sandbox', false)
       .gte('date', date)
       .order('date', { ascending: true })
       .order('updated_at', { ascending: false })

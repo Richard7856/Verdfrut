@@ -101,6 +101,9 @@ export async function syncSeats(opts: SyncSeatsOptions): Promise<SyncSeatsResult
   //
   //    Admin seats = user_profiles con role IN ('admin','dispatcher') AND is_active.
   //    Driver seats = drivers IS_ACTIVE (la tabla drivers ya está scoped por customer).
+  // ADR-112: drivers/admins sandbox NO cuentan para Stripe — son hipotéticos
+  // del modo planeación, no consumen seats reales. user_profiles no tiene
+  // is_sandbox por ahora (no se "agregan" admins hipotéticos en WB-1 MVP).
   const [adminRes, driverRes] = await Promise.all([
     admin
       .from('user_profiles')
@@ -112,7 +115,8 @@ export async function syncSeats(opts: SyncSeatsOptions): Promise<SyncSeatsResult
       .from('drivers')
       .select('id', { count: 'exact', head: true })
       .eq('customer_id', opts.customerId)
-      .eq('is_active', true),
+      .eq('is_active', true)
+      .eq('is_sandbox', false),
   ]);
   if (adminRes.error || driverRes.error) {
     return {

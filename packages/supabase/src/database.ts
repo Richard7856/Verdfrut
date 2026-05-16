@@ -445,6 +445,8 @@ export type Database = {
           public_share_token: string | null
           /** HARDENING C2. Expira el acceso público al link. */
           public_share_expires_at: string | null
+          /** ADR-112 / Workbench WB-1: true = tiro de planeación, no operación real. */
+          is_sandbox: boolean
         }
         Insert: {
           id?: string
@@ -459,6 +461,7 @@ export type Database = {
           updated_at?: string
           public_share_token?: string | null
           public_share_expires_at?: string | null
+          is_sandbox?: boolean
         }
         Update: {
           id?: string
@@ -473,6 +476,7 @@ export type Database = {
           updated_at?: string
           public_share_token?: string | null
           public_share_expires_at?: string | null
+          is_sandbox?: boolean
         }
         Relationships: []
       }
@@ -486,6 +490,8 @@ export type Database = {
           license_number: string | null
           user_id: string
           zone_id: string
+          /** ADR-112: true = chofer hipotético del modo planeación. */
+          is_sandbox: boolean
         }
         Insert: {
           created_at?: string
@@ -496,6 +502,7 @@ export type Database = {
           license_number?: string | null
           user_id: string
           zone_id: string
+          is_sandbox?: boolean
         }
         Update: {
           created_at?: string
@@ -506,6 +513,7 @@ export type Database = {
           license_number?: string | null
           user_id?: string
           zone_id?: string
+          is_sandbox?: boolean
         }
         Relationships: []
       }
@@ -933,6 +941,8 @@ export type Database = {
           dispatch_id: string | null
           /** ADR-108: TRUE si fue aprobada saltándose el optimizer (DRAFT → APPROVED). */
           optimization_skipped: boolean
+          /** ADR-112: TRUE si la ruta vive en el sandbox de planeación. */
+          is_sandbox: boolean
         }
         Insert: {
           actual_end_at?: string | null
@@ -961,6 +971,7 @@ export type Database = {
           zone_id: string
           dispatch_id?: string | null
           optimization_skipped?: boolean
+          is_sandbox?: boolean
         }
         Update: {
           actual_end_at?: string | null
@@ -989,6 +1000,7 @@ export type Database = {
           zone_id?: string
           dispatch_id?: string | null
           optimization_skipped?: boolean
+          is_sandbox?: boolean
         }
         Relationships: []
       }
@@ -1009,6 +1021,8 @@ export type Database = {
           sequence: number
           status: Database["public"]["Enums"]["stop_status"]
           store_id: string
+          /** ADR-112: TRUE si la parada vive en una ruta del sandbox. */
+          is_sandbox: boolean
         }
         Insert: {
           actual_arrival_at?: string | null
@@ -1026,6 +1040,7 @@ export type Database = {
           sequence: number
           status?: Database["public"]["Enums"]["stop_status"]
           store_id: string
+          is_sandbox?: boolean
         }
         Update: {
           actual_arrival_at?: string | null
@@ -1043,6 +1058,7 @@ export type Database = {
           sequence?: number
           status?: Database["public"]["Enums"]["stop_status"]
           store_id?: string
+          is_sandbox?: boolean
         }
         Relationships: []
       }
@@ -1065,6 +1081,8 @@ export type Database = {
           receiving_window_start: string | null
           service_time_seconds: number
           zone_id: string
+          /** ADR-112: TRUE si la tienda es hipotética del modo planeación. */
+          is_sandbox: boolean
         }
         Insert: {
           address: string
@@ -1084,6 +1102,7 @@ export type Database = {
           receiving_window_start?: string | null
           service_time_seconds?: number
           zone_id: string
+          is_sandbox?: boolean
         }
         Update: {
           address?: string
@@ -1103,6 +1122,7 @@ export type Database = {
           receiving_window_start?: string | null
           service_time_seconds?: number
           zone_id?: string
+          is_sandbox?: boolean
         }
         Relationships: []
       }
@@ -1165,6 +1185,8 @@ export type Database = {
           status: Database["public"]["Enums"]["vehicle_status"]
           year: number | null
           zone_id: string
+          /** ADR-112: TRUE si la camioneta es hipotética del modo planeación. */
+          is_sandbox: boolean
         }
         Insert: {
           alias?: string | null
@@ -1185,6 +1207,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["vehicle_status"]
           year?: number | null
           zone_id: string
+          is_sandbox?: boolean
         }
         Update: {
           alias?: string | null
@@ -1205,6 +1228,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["vehicle_status"]
           year?: number | null
           zone_id?: string
+          is_sandbox?: boolean
         }
         Relationships: []
       }

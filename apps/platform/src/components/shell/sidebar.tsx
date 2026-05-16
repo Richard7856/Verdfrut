@@ -62,6 +62,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/settings/zones', label: 'Zonas', roles: ['admin'], group: 'SISTEMA' },
   { href: '/settings/users', label: 'Usuarios', roles: ['admin'], group: 'SISTEMA' },
   { href: '/settings/billing', label: '💳 Suscripción', roles: ['admin'], group: 'SISTEMA' },
+  { href: '/settings/workbench', label: '🧪 Modo planeación', roles: ['admin', 'dispatcher'], group: 'SISTEMA', badge: 'Beta' },
 ];
 
 const GROUP_ORDER: NavItem['group'][] = ['GENERAL', 'CLIENTES', 'OPERACIÓN', 'CATÁLOGO', 'SISTEMA'];

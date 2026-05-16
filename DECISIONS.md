@@ -6311,6 +6311,84 @@ Además: como producto necesitamos un KPI agregado para detectar **fricción del
 - apps/platform/src/app/(app)/settings/users/page.tsx + invite-user-button.tsx — warning UI.
 
 
+## [2026-05-16] ADR-112: Workbench WB-1 — Sandbox foundation (modo planeación)
+
+**Contexto:** El sistema operativo de TripDrive (tiros, rutas, paradas, catálogo de tiendas/camionetas/choferes) está optimizado para la **operación diaria** — todo lo que existe es lo que sale al chofer y se factura. Cuando el admin quiere experimentar — "¿qué pasa si meto una 4ta camioneta? ¿qué pasa si parto la zona Sur en 2 sub-zonas? ¿qué pasa si onboarding 3 tiendas nuevas?" — no tiene a dónde ir. Crear en producción contamina datos reales; usar Excel rompe el modelo de costos y validaciones del producto.
+
+Stream Workbench nace para cerrar este gap. WB-1 es la foundation que todas las siguientes fases (frecuencias, sugerencias, heatmaps, vista jerárquica) reusan. Sin WB-1 no hay forma limpia de aislar trabajo de planeación del operacional.
+
+**Decisión:**
+
+1. **Migración 052 — `is_sandbox boolean default false` en 6 tablas**: `dispatches`, `routes`, `stops` (operacional) + `stores`, `vehicles`, `drivers` (catálogo). Default `false` para que TODO el dato existente al momento de la migración sea operación real (correcto: nadie había hecho planeación previa). Índices parciales `WHERE is_sandbox = true` para que el filtro sea barato sin penalizar el path operativo (99% del uso). `zones` y `depots` quedan fuera de WB-1: son infraestructura; si emerge un caso para WB-3/WB-4 se agregan.
+
+2. **Cookie HTTP `tripdrive-mode=sandbox|<absent>`** persiste el modo por-sesión-del-admin (no global del customer). Dos admins del mismo cliente pueden estar uno en sandbox y otro en real al mismo tiempo viendo cada uno lo suyo. `lib/workbench-mode.ts` expone `getCurrentMode()` y `setMode()` — todas las queries y server actions del platform consultan esto.
+
+3. **Modelo asimétrico de filtrado**:
+   - **Operacional** (dispatches/routes/stops): **strict isolation**. Real mode → `is_sandbox = false`. Sandbox mode → `is_sandbox = true`. Las listas son universos paralelos sin overlap.
+   - **Catálogo** (stores/vehicles/drivers): **mezclado en sandbox**. Real mode → `is_sandbox = false`. Sandbox mode → SIN filtro (devuelve real + sandbox). Razón: el caso de uso del admin es "armar un escenario con mis tiendas/camionetas REALES + algunas hipotéticas adicionales". Forzar copia-on-entry rompe el flow.
+
+4. **Sandbox compartido por customer**: todos los admins/dispatchers del mismo cliente trabajan sobre el mismo espacio. Permite colaboración ("vea este escenario que armé") y reduce confusión (no hay "mi sandbox vs tu sandbox"). Aislado por `customer_id` igual que toda la BD via RLS.
+
+5. **Writes auto-taggeados con `is_sandbox = await isSandboxMode()`**: aplicado en `createDispatchAction` y `createVisualDispatchAction` (incluyendo todas sus rutas + stops hijos). Las server actions de catálogo (crear tienda/camioneta/chofer) heredarán este patrón cuando se priorice (WB-1b).
+
+6. **Defensa en superficies non-admin** (es CRÍTICO):
+   - `apps/driver/src/lib/queries/route.ts` + `apps/driver-native/src/lib/queries/route.ts`: hard `.eq('is_sandbox', false)`. El chofer NUNCA debe recibir una ruta hipotética. Defense-in-depth aunque RLS también lo cubriera.
+   - `apps/platform/src/lib/queries/dispatches.ts:getDispatchByPublicToken`: hard `.eq('is_sandbox', false)`. Los share links públicos jamás muestran sandbox al cliente externo.
+   - `apps/platform/src/lib/stripe/sync-seats.ts`: count de drivers ahora filtra `is_sandbox=false`. Los choferes hipotéticos NO cuentan para Stripe — facturar planeación sería absurdo.
+
+7. **UI**:
+   - Toggle en el topbar (server component async que lee la cookie) — emoji 🧪 cuando activo, ⚙️ cuando real. Solo visible para admin/dispatcher.
+   - Banner persistente arriba del shell cuando sandbox está activo: `🧪 Modo planeación activo. Lo que veas y crees acá NO afecta la operación real`. Refuerzo continuo del estado.
+   - Sidebar gana entrada `🧪 Modo planeación` con badge `Beta` para descubrimiento (grupo SISTEMA).
+   - Página `/settings/workbench` (admin/dispatcher): explicación del concepto + toggle grande + stats del contenido sandbox por tabla + botón `🗑 Limpiar todo el sandbox` con confirm doble.
+
+8. **Reset action**: borra todo `is_sandbox=true` del customer en orden FK-safe (stops → routes → dispatches → catálogo). Service-role client para evitar problemas de RLS al borrar cross-table. Sin restricción a admin: cualquier dispatcher puede limpiar (el sandbox es trabajo de equipo).
+
+**Alternativas consideradas:**
+- *Sandbox privado por usuario*: descartado. La planeación es trabajo colaborativo; obligar a duplicar trabajo en cada admin es fricción sin beneficio. Si en un futuro el caso emerge, se agrega un `sandbox_owner_id` opcional.
+- *Strict isolation también para catálogo*: descartado. Forzar al admin a recrear sus 200 tiendas reales en el sandbox antes de hacer el primer escenario mata el flow. El catálogo mezclado en sandbox da el camino de menor fricción.
+- *Tabla separada `sandbox_dispatches`* en lugar de flag: descartado. Duplicar esquema cuesta más mantenimiento (cada migración futura toca 2 tablas), y los queries necesitan dos caminos. El flag con índice parcial es 90% de los beneficios con 10% del trabajo.
+- *RLS policy que filtra `is_sandbox`*: descartado por ahora (deuda explícita). RLS automática sería más segura pero también más rígida — algunas server actions LEGITIMAMENTE necesitan ver ambos modos (reset, sync-seats). El filtro explícito en cada query da control pero requiere disciplina.
+- *Promote action (sandbox → real) en WB-1*: descartado por scope. Requiere validar refs catálogo, copiar stops con sequence preservado, manejar conflicts si el día ya tiene operación. WB-1b lo cubrirá. Mientras tanto, el admin puede mirar el sandbox y re-crear manualmente en real.
+- *Seed action (copy real → sandbox)*: descartado por scope. Útil cuando se quiere "clonar el día actual y modificar" pero overkill para WB-1. Misma razón: WB-1b o pedido cliente real.
+- *Toggle en URL param vs cookie*: descartado. URL param obliga a propagarlo en cada link de la app; cookie es persistente entre tabs y server actions sin esfuerzo.
+- *Migración con UPDATE backfill*: innecesario. Default false ya describe la realidad pre-migración.
+
+**Riesgos / Limitaciones:**
+- **Cada query nueva debe filtrar por modo explícitamente**: el patrón es `const sandbox = opts?.sandbox ?? await isSandboxMode(); q.eq('is_sandbox', sandbox)`. Si alguien olvida agregarlo en una query nueva, el resultado mezclará modos. Mitigación: convención de código + revisión de PR; eventualmente RLS automática (WB-1b o WB-2).
+- **El chat de orchestrator NO está integrado** todavía: el agente AI sigue viendo solo `is_sandbox=false` por accidente (sus queries internas tampoco lo filtran). Esto es correcto para WB-1 (el AI opera sobre real) pero significa que el admin no puede pedirle al AI "arma un escenario hipotético con N camionetas". Diferido a WB-1b.
+- **Visual builder en sandbox usa el mismo flow que real**: si el admin está en sandbox, todo lo que cree con el visual builder va a sandbox. Bien. Pero los `pickerColors` y las assignments funcionan idéntico — no hay diferenciación visual fuerte de "estás armando un sandbox". Mitigación: el banner persistente del topbar y el badge 🧪 en cada catálogo item sandbox cubren el indicador.
+- **Catálogo sandbox no se marca visualmente en listas** en WB-1 (e.g. el dropdown del visual builder muestra "Kangoo 4" sin badge para distinguir real vs hipotético). Mejora pendiente — fácil cuando se priorice.
+- **Reset destruye sin papelera**: no hay "deshacer". El confirm doble mitiga el riesgo accidental. Si emerge demanda, agregar un `soft_deleted_at` + papelera de 7 días.
+- **Stripe sync-seats: `user_profiles` no tiene `is_sandbox`**: si en WB-1b se permite "agregar admin hipotético", la cuenta de admin_seats se inflaría. Por ahora user_profiles no se sandboxea; admins hipotéticos no existen en WB-1.
+- **No probamos el flow end-to-end con dos admins simultáneos**: la garantía "sandbox compartido" se basa en BD compartida, lo cual SÍ funciona, pero el estado de UI (cookies por sesión) podría dar pequeñas inconsistencias si dos admins modifican el mismo escenario al mismo tiempo. Conflict resolution = "última escritura gana", igual que el resto del sistema.
+- **Migración aplicada al tenant VerdFrut (`hidlxgajcjbtlwyxerhy`)**: si entran otros tenants productivos, correr `scripts/migrate-all-tenants.sh` o aplicar manualmente via MCP.
+
+**Oportunidades de mejora:**
+- Badge 🧪 inline en cada item de catálogo sandbox (dropdowns, listas, mapas).
+- Promote action (clonar dispatch sandbox a real). Pedirá confirm + validación de catálogo refs.
+- Seed action (copiar todo real → sandbox para arrancar un escenario nuevo).
+- Marca visual del modo sandbox MUCHO más fuerte: fondo del shell con tinte amber sutil, breadcrumbs con prefijo "🧪", etc.
+- RLS policies automáticas en lugar de filtros explícitos en cada query.
+- Diff visual entre sandbox y real (highlights de "qué cambió").
+- Soft delete en lugar de hard delete para reset (papelera de 7 días).
+- Audit log de cambios al sandbox (quién, cuándo, qué).
+- Compartir un escenario sandbox via link interno (`/sandbox/escenarios/[id]`) para alinear al equipo.
+- WB-2 a WB-6 sobre esta foundation: frecuencias, sugerencias de zonas, recomendación de flotilla, heatmaps, vista jerárquica.
+
+**Refs:**
+- supabase/migrations/00000000000052_workbench_sandbox.sql — migración.
+- packages/supabase/src/database.ts — types extendidos (6 tablas).
+- apps/platform/src/lib/workbench-mode.ts — helper cookie-based.
+- apps/platform/src/lib/queries/{routes,dispatches,stores,vehicles,drivers}.ts — filtros por modo.
+- apps/platform/src/lib/stripe/sync-seats.ts — defensa is_sandbox=false en count de drivers.
+- apps/platform/src/app/(app)/settings/workbench/{page,actions,workbench-manager}.tsx — UI admin.
+- apps/platform/src/components/shell/{topbar,workbench-toggle,workbench-banner,sidebar}.tsx — chrome del modo.
+- apps/platform/src/app/(app)/dispatches/{actions,new/visual/actions}.ts — writes taggeados.
+- apps/driver/src/lib/queries/route.ts + apps/driver-native/src/lib/queries/route.ts — defensa chofer.
+- apps/platform/src/lib/queries/dispatches.ts:getDispatchByPublicToken — defensa share.
+
+
 
 
 

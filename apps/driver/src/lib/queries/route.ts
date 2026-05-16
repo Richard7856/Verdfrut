@@ -95,17 +95,21 @@ export async function getDriverRouteForDate(date: string): Promise<Route | null>
   // así que hacemos dos consultas en paralelo y combinamos:
   //   (a) IN_PROGRESS — cualquier fecha cercana
   //   (b) PUBLISHED — hoy o futura
+  // ADR-112: defensa explícita — el chofer NUNCA debe ver rutas sandbox,
+  // aunque RLS las dejara pasar accidentalmente. is_sandbox=false hard-filter.
   const [inProgressRes, publishedRes] = await Promise.all([
     supabase
       .from('routes')
       .select(ROUTE_COLS)
       .eq('status', 'IN_PROGRESS')
+      .eq('is_sandbox', false)
       .order('date', { ascending: true })
       .limit(1),
     supabase
       .from('routes')
       .select(ROUTE_COLS)
       .eq('status', 'PUBLISHED')
+      .eq('is_sandbox', false)
       .gte('date', date)
       .order('date', { ascending: true })
       .order('updated_at', { ascending: false })

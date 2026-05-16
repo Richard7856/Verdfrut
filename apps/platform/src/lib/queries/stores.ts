@@ -5,6 +5,7 @@ import 'server-only';
 import { createServerClient } from '@tripdrive/supabase/server';
 import type { TableUpdate } from '@tripdrive/supabase';
 import type { Store } from '@tripdrive/types';
+import { isSandboxMode } from '@/lib/workbench-mode';
 
 interface StoreRow {
   id: string;
@@ -53,11 +54,22 @@ function toStore(row: StoreRow): Store {
   };
 }
 
-export async function listStores(opts?: { zoneId?: string; activeOnly?: boolean }): Promise<Store[]> {
+export async function listStores(opts?: {
+  zoneId?: string;
+  activeOnly?: boolean;
+  /** ADR-112: en modo real filtramos sandbox=false; en sandbox mostramos
+   * TODO (real + sandbox) para que el admin pueda armar planes hipotéticos
+   * usando su inventario actual + adiciones nuevas. Override con sandbox. */
+  sandbox?: boolean;
+}): Promise<Store[]> {
   const supabase = await createServerClient();
   let q = supabase.from('stores').select(STORE_COLS).order('code');
   if (opts?.zoneId) q = q.eq('zone_id', opts.zoneId);
   if (opts?.activeOnly) q = q.eq('is_active', true);
+
+  // Filtro por modo Workbench (catálogo mezclado en sandbox).
+  const sandbox = opts?.sandbox ?? (await isSandboxMode());
+  if (!sandbox) q = q.eq('is_sandbox', false);
 
   const { data, error } = await q;
   if (error) throw new Error(`[stores.list] ${error.message}`);

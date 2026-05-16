@@ -19,6 +19,7 @@ import { logger } from '@tripdrive/observability';
 import { requireRole } from '@/lib/auth';
 import { createServerClient } from '@tripdrive/supabase/server';
 import { getStoresByIds } from '@/lib/queries/stores';
+import { isSandboxMode } from '@/lib/workbench-mode';
 
 export interface RoutePlanPayload {
   vehicleId: string;
@@ -105,6 +106,10 @@ export async function createVisualDispatchAction(input: CreateVisualDispatchInpu
     }
 
     const supabase = await createServerClient();
+    // ADR-112: el flag is_sandbox se propaga a TODA la jerarquía (dispatch +
+    // routes + stops) según el modo del caller. Si está en sandbox, todo lo
+    // que cree va al sandbox compartido del customer.
+    const sandbox = await isSandboxMode();
 
     // 1. Crear dispatch.
     const { data: dispatch, error: dispatchErr } = await supabase
@@ -116,6 +121,7 @@ export async function createVisualDispatchAction(input: CreateVisualDispatchInpu
         status: 'planning',
         notes: null,
         created_by: profile.id,
+        is_sandbox: sandbox,
       })
       .select('id')
       .single();
@@ -143,6 +149,7 @@ export async function createVisualDispatchAction(input: CreateVisualDispatchInpu
           driver_id: r.driverId,
           status: 'DRAFT',
           created_by: profile.id,
+          is_sandbox: sandbox,
         })
         .select('id')
         .single();
@@ -170,6 +177,7 @@ export async function createVisualDispatchAction(input: CreateVisualDispatchInpu
         store_id: sid,
         sequence: idx + 1,
         status: 'pending' as const,
+        is_sandbox: sandbox,
       }));
       const { error: stopsErr } = await supabase.from('stops').insert(stopsPayload as never);
       if (stopsErr) {

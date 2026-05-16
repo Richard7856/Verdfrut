@@ -4,6 +4,7 @@ import 'server-only';
 import { createServerClient } from '@tripdrive/supabase/server';
 import type { Dispatch, DispatchStatus, Route } from '@tripdrive/types';
 import { listRoutes } from './routes';
+import { isSandboxMode } from '@/lib/workbench-mode';
 
 interface DispatchRow {
   id: string;
@@ -41,11 +42,15 @@ function toDispatch(row: DispatchRow): Dispatch {
 export async function listDispatches(opts?: {
   date?: string;
   zoneId?: string;
+  /** ADR-112: override del modo Workbench. Default: cookie del request. */
+  sandbox?: boolean;
 }): Promise<Dispatch[]> {
   const supabase = await createServerClient();
+  const sandbox = opts?.sandbox ?? (await isSandboxMode());
   let q = supabase
     .from('dispatches')
     .select(DISPATCH_COLS)
+    .eq('is_sandbox', sandbox)
     .order('date', { ascending: false })
     .order('created_at', { ascending: false });
   if (opts?.date) q = q.eq('date', opts.date);
@@ -155,6 +160,9 @@ export async function getDispatchByPublicToken(token: string): Promise<Dispatch 
     .from('dispatches')
     .select(DISPATCH_COLS)
     .eq('public_share_token', token)
+    // ADR-112: sandbox NUNCA debe filtrarse via share token (es operación
+    // hipotética del admin, no visible al cliente externo).
+    .eq('is_sandbox', false)
     .gt('public_share_expires_at', nowIso)
     .not('status', 'in', '(completed,cancelled)')
     .maybeSingle();
