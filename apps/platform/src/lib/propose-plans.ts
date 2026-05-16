@@ -60,6 +60,14 @@ export interface ProposePlansOutput {
   /** Stops que el optimizer no pudo asignar en NINGUNA opción (raro, suele ser
    *  por ventanas horarias imposibles). El user debe revisar antes de aplicar. */
   alwaysUnassignedStoreIds: string[];
+  /**
+   * ADR-106 / OE-3.1: planes completos por alternative.id (stops + sequences
+   * + ETAs). Para persistir en cache `route_plan_proposals` y permitir apply
+   * instantáneo (~500ms vs 30-60s de re-correr VROOM). NO se devuelve al
+   * cliente — el endpoint propose-routes lo persiste server-side y solo
+   * regresa `proposal_id` para que apply lo use.
+   */
+  fullPlansByAltId: Record<string, OptimizationPlan>;
 }
 
 /**
@@ -115,12 +123,13 @@ export async function proposePlans(input: ProposePlansInput): Promise<ProposePla
     ),
   );
 
-  // 4. Convertir cada plan a RoutePlanOption (sin labels).
+  // 4. Convertir cada plan a RoutePlanOption (sin labels). También guardamos
+  //    el plan COMPLETO indexado por altId para el cache (OE-3.1).
   type RawOption = Omit<RoutePlanOption, 'labels'>;
   const rawOptions: RawOption[] = [];
   const failures: string[] = [];
-  // Stops unassigned por opción — para detectar "siempre unassigned".
   const unassignedByK: Array<{ k: number; ids: string[] }> = [];
+  const fullPlansByAltId: Record<string, OptimizationPlan> = {};
 
   for (const settled of results) {
     if (settled.status === 'rejected') {
@@ -128,8 +137,10 @@ export async function proposePlans(input: ProposePlansInput): Promise<ProposePla
       continue;
     }
     const { k, plan } = settled.value;
-    rawOptions.push(planToOption(k, plan, costsConfig));
+    const opt = planToOption(k, plan, costsConfig);
+    rawOptions.push(opt);
     unassignedByK.push({ k, ids: plan.unassignedStoreIds });
+    fullPlansByAltId[opt.id] = plan;
   }
 
   if (rawOptions.length === 0) {
@@ -162,6 +173,7 @@ export async function proposePlans(input: ProposePlansInput): Promise<ProposePla
     singleOptionMode: maxK === minK,
     totalEvaluated: rawOptions.length,
     alwaysUnassignedStoreIds: [...alwaysUnassigned],
+    fullPlansByAltId,
   };
 }
 

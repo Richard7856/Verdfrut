@@ -191,6 +191,31 @@ export default async function ProposePage({ params }: Props) {
     );
   }
 
+  // 5.5. Persistir cache de la propuesta (OE-3.1) para apply instantáneo.
+  //      30 min TTL. Si falla, no rompemos el flujo — el apply caerá al
+  //      path legacy con re-compute VROOM.
+  let proposalId: string | null = null;
+  try {
+    const { data: inserted } = await admin
+      .from('route_plan_proposals')
+      .insert({
+        customer_id: customerId,
+        dispatch_id: id,
+        payload: {
+          alternatives: plans.alternatives,
+          fullPlansByAltId: plans.fullPlansByAltId,
+          k_explored: plans.kExplored,
+          always_unassigned_store_ids: plans.alwaysUnassignedStoreIds,
+        } as never,
+        created_by: profile.id,
+      })
+      .select('id')
+      .single();
+    proposalId = (inserted?.id as string | undefined) ?? null;
+  } catch (err) {
+    console.warn('[propose page] cache insert failed:', err);
+  }
+
   // 6. Cargar nombres de vehículos y choferes para el breakdown por ruta.
   const vehiclesById = new Map(allVehicles.map((v) => [v.id, v]));
   const allDrivers = await listDrivers({ activeOnly: false });
@@ -202,6 +227,39 @@ export default async function ProposePage({ params }: Props) {
   }
 
   const feasibleAlternatives = plans.alternatives.filter((a) => a.feasible);
+
+  // Para el mini-mapa por card necesitamos coords de los stops. Los buscamos
+  // en el catálogo de tiendas — la fullPlansByAltId tiene store_ids en el
+  // orden de visita pero no las coordenadas. Index store_id → {lat, lng}.
+  const allStoreIdsInPlans = new Set<string>();
+  for (const plan of Object.values(plans.fullPlansByAltId)) {
+    for (const r of plan.routes) {
+      for (const s of r.stops) allStoreIdsInPlans.add(s.storeId);
+    }
+  }
+  const { data: storeCoordsRows } = await admin
+    .from('stores')
+    .select('id, lat, lng')
+    .in('id', Array.from(allStoreIdsInPlans));
+  const storeCoordsById = new Map<string, { lat: number; lng: number }>();
+  for (const row of storeCoordsRows ?? []) {
+    storeCoordsById.set(row.id as string, {
+      lat: row.lat as number,
+      lng: row.lng as number,
+    });
+  }
+
+  // Helper: extraer coords por ruta dentro de una alternativa.
+  function altRouteCoords(altId: string): Array<Array<[number, number]>> {
+    const plan = plans!.fullPlansByAltId[altId];
+    if (!plan) return [];
+    return plan.routes.map((r: { stops: Array<{ storeId: string }> }) =>
+      r.stops
+        .map((s: { storeId: string }) => storeCoordsById.get(s.storeId))
+        .filter((c): c is { lat: number; lng: number } => Boolean(c))
+        .map((c: { lat: number; lng: number }) => [c.lng, c.lat] as [number, number]),
+    );
+  }
 
   return (
     <>
@@ -244,8 +302,10 @@ export default async function ProposePage({ params }: Props) {
             <ProposalCard
               key={alt.id}
               dispatchId={id}
+              proposalId={proposalId}
               alternative={alt}
               labelsMeta={LABEL_META}
+              routeCoords={altRouteCoords(alt.id)}
               vehiclesById={Object.fromEntries(
                 alt.routes.map((r) => {
                   const v = vehiclesById.get(r.vehicleId);

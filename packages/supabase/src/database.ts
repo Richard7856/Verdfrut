@@ -301,6 +301,36 @@ export type Database = {
         }
         Relationships: []
       }
+      route_plan_proposals: {
+        Row: {
+          id: string
+          customer_id: string
+          dispatch_id: string | null
+          payload: Json
+          expires_at: string
+          generated_at: string
+          created_by: string | null
+        }
+        Insert: {
+          id?: string
+          customer_id: string
+          dispatch_id?: string | null
+          payload: Json
+          expires_at?: string
+          generated_at?: string
+          created_by?: string | null
+        }
+        Update: {
+          id?: string
+          customer_id?: string
+          dispatch_id?: string | null
+          payload?: Json
+          expires_at?: string
+          generated_at?: string
+          created_by?: string | null
+        }
+        Relationships: []
+      }
       depots: {
         Row: {
           address: string

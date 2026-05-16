@@ -21,7 +21,18 @@ export const maxDuration = 90; // VROOM puede tardar 30-60s con N vehículos.
 
 interface ApplyPlanBody {
   dispatch_id: string;
-  vehicle_ids: string[];
+  /**
+   * Fast path (OE-3.1): proposal_id + alternative_id. Lee el plan completo
+   * del cache `route_plan_proposals`, salta VROOM, va directo al RPC.
+   * Latencia ~500ms vs 30-60s del path legacy.
+   */
+  proposal_id?: string;
+  alternative_id?: string;
+  /**
+   * Legacy path: vehicle_ids + driver_ids. Re-corre VROOM. Se mantiene como
+   * fallback si el cache expiró (TTL 30min) o si el caller no usa proposal.
+   */
+  vehicle_ids?: string[];
   driver_ids?: Array<string | null>;
   /** Etiqueta para audit (cheapest/balanced/fastest). */
   applied_label?: string;
@@ -51,20 +62,34 @@ export async function POST(req: Request) {
   if (!UUID_RE.test(body.caller_user_id)) {
     return Response.json({ error: 'caller_user_id requerido' }, { status: 400 });
   }
-  if (!Array.isArray(body.vehicle_ids) || body.vehicle_ids.length === 0) {
-    return Response.json({ error: 'vehicle_ids vacío' }, { status: 400 });
-  }
-  for (const vid of body.vehicle_ids) {
-    if (!UUID_RE.test(vid)) {
-      return Response.json({ error: `vehicle_id inválido: ${vid}` }, { status: 400 });
+
+  // Fast path (OE-3.1) o legacy path? Si proposal_id+alternative_id están
+  // presentes, intentamos el fast path. Si no, requiere vehicle_ids legacy.
+  const isFastPath = Boolean(body.proposal_id && body.alternative_id);
+
+  if (!isFastPath) {
+    if (!Array.isArray(body.vehicle_ids) || body.vehicle_ids.length === 0) {
+      return Response.json(
+        { error: 'vehicle_ids vacío (o pasa proposal_id + alternative_id para fast path)' },
+        { status: 400 },
+      );
     }
-  }
-  const driverIds = body.driver_ids ?? body.vehicle_ids.map(() => null);
-  if (driverIds.length !== body.vehicle_ids.length) {
-    return Response.json(
-      { error: 'driver_ids debe alinear 1-a-1 con vehicle_ids' },
-      { status: 400 },
-    );
+    for (const vid of body.vehicle_ids) {
+      if (!UUID_RE.test(vid)) {
+        return Response.json({ error: `vehicle_id inválido: ${vid}` }, { status: 400 });
+      }
+    }
+    const driverIdsCount = body.driver_ids?.length ?? body.vehicle_ids.length;
+    if (driverIdsCount !== body.vehicle_ids.length) {
+      return Response.json(
+        { error: 'driver_ids debe alinear 1-a-1 con vehicle_ids' },
+        { status: 400 },
+      );
+    }
+  } else {
+    if (!UUID_RE.test(body.proposal_id!)) {
+      return Response.json({ error: 'proposal_id inválido' }, { status: 400 });
+    }
   }
 
   const admin = createServiceRoleClient();
@@ -96,21 +121,7 @@ export async function POST(req: Request) {
     return Response.json({ error: 'dispatch no pertenece al caller' }, { status: 403 });
   }
 
-  // 4. Validar que los vehículos pertenezcan al customer.
-  const { data: vehicleRows, error: vErr } = await admin
-    .from('vehicles')
-    .select('id')
-    .eq('customer_id', callerCustomerId)
-    .in('id', body.vehicle_ids);
-  if (vErr) return Response.json({ error: vErr.message }, { status: 500 });
-  if (!vehicleRows || vehicleRows.length !== body.vehicle_ids.length) {
-    return Response.json(
-      { error: 'algún vehicle_id no existe o no pertenece al caller' },
-      { status: 400 },
-    );
-  }
-
-  // 5. Validar estado del dispatch (pre-publicación).
+  // 4. Validar estado del dispatch (pre-publicación).
   const routes = await listRoutesByDispatch(body.dispatch_id);
   const liveRoutes = routes.filter((r) => r.status !== 'CANCELLED');
   const POST_PUBLISH = new Set(['PUBLISHED', 'IN_PROGRESS', 'INTERRUPTED', 'COMPLETED']);
@@ -124,48 +135,119 @@ export async function POST(req: Request) {
     );
   }
 
-  // 6. Recolectar storeIds de las rutas vivas.
-  const allStoreIds: string[] = [];
-  const seen = new Set<string>();
-  for (const r of liveRoutes) {
-    const stops = await listStopsForRoute(r.id);
-    for (const s of stops) {
-      if (!seen.has(s.storeId)) {
-        seen.add(s.storeId);
-        allStoreIds.push(s.storeId);
+  // 5. Obtener el plan a aplicar. Dos paths:
+  //    - Fast path (OE-3.1): lee del cache route_plan_proposals. ~50ms.
+  //    - Legacy path: corre VROOM con vehicle_ids del body. ~30-60s.
+  type Plan = {
+    routes: Array<{
+      vehicleId: string;
+      driverId: string | null;
+      depotOverrideId: string | null;
+      name: string;
+      totalDistanceMeters: number;
+      totalDurationSeconds: number;
+      estimatedStartAt: string;
+      estimatedEndAt: string;
+      stops: Array<{
+        storeId: string;
+        sequence: number;
+        plannedArrivalAt: string;
+        plannedDepartureAt: string;
+        load: number[];
+      }>;
+    }>;
+    unassignedStoreIds: string[];
+    totalDistanceMeters: number;
+    totalDurationSeconds: number;
+  };
+  let plan: Plan;
+
+  if (isFastPath) {
+    const { data: proposal, error: pErr } = await admin
+      .from('route_plan_proposals')
+      .select('id, customer_id, dispatch_id, payload, expires_at')
+      .eq('id', body.proposal_id!)
+      .maybeSingle();
+    if (pErr || !proposal) {
+      return Response.json(
+        { error: 'proposal no encontrada (puede haber expirado)' },
+        { status: 404 },
+      );
+    }
+    if (proposal.customer_id !== callerCustomerId) {
+      return Response.json({ error: 'proposal no pertenece al caller' }, { status: 403 });
+    }
+    if (new Date(proposal.expires_at as string).getTime() < Date.now()) {
+      return Response.json(
+        { error: 'proposal expirada (TTL 30min) — vuelve a generar propuestas' },
+        { status: 410 },
+      );
+    }
+    const payload = proposal.payload as {
+      fullPlansByAltId?: Record<string, Plan | null>;
+    } | null;
+    const cachedPlan = payload?.fullPlansByAltId?.[body.alternative_id!];
+    if (!cachedPlan) {
+      return Response.json(
+        { error: `alternative_id "${body.alternative_id}" no existe en esta propuesta` },
+        { status: 400 },
+      );
+    }
+    plan = cachedPlan;
+  } else {
+    // Legacy path — re-compute VROOM con vehículos explícitos.
+    const driverIds = body.driver_ids ?? body.vehicle_ids!.map(() => null);
+    const { data: vehicleRows } = await admin
+      .from('vehicles')
+      .select('id')
+      .eq('customer_id', callerCustomerId)
+      .in('id', body.vehicle_ids!);
+    if (!vehicleRows || vehicleRows.length !== body.vehicle_ids!.length) {
+      return Response.json(
+        { error: 'algún vehicle_id no existe o no pertenece al caller' },
+        { status: 400 },
+      );
+    }
+
+    const allStoreIds: string[] = [];
+    const seen = new Set<string>();
+    for (const r of liveRoutes) {
+      const stops = await listStopsForRoute(r.id);
+      for (const s of stops) {
+        if (!seen.has(s.storeId)) {
+          seen.add(s.storeId);
+          allStoreIds.push(s.storeId);
+        }
       }
     }
-  }
-  if (allStoreIds.length === 0) {
-    return Response.json({ error: 'el tiro no tiene paradas' }, { status: 400 });
-  }
+    if (allStoreIds.length === 0) {
+      return Response.json({ error: 'el tiro no tiene paradas' }, { status: 400 });
+    }
 
-  // 7. Computar plan con los vehículos elegidos (corre VROOM con la flota
-  //    explícita de la alternativa).
-  let plan;
-  try {
-    plan = await computeOptimizationPlan({
-      date: dispatch.date as string,
-      vehicleIds: body.vehicle_ids,
-      driverIds,
-      storeIds: allStoreIds,
-      routeNamePrefix: dispatch.name as string,
-    });
-  } catch (err) {
-    logger.error('apply_plan.optimizer_failed', {
-      dispatch_id: body.dispatch_id,
-      err: err instanceof Error ? err.message : String(err),
-    });
-    return Response.json(
-      { error: `optimizer falló: ${err instanceof Error ? err.message : 'desconocido'}` },
-      { status: 502 },
-    );
-  }
-  if (plan.routes.length === 0) {
-    return Response.json(
-      { error: 'el optimizer no asignó ninguna parada — revisar capacidad' },
-      { status: 422 },
-    );
+    try {
+      plan = await computeOptimizationPlan({
+        date: dispatch.date as string,
+        vehicleIds: body.vehicle_ids!,
+        driverIds,
+        storeIds: allStoreIds,
+        routeNamePrefix: dispatch.name as string,
+      });
+    } catch (err) {
+      logger.error('apply_plan.optimizer_failed', {
+        dispatch_id: body.dispatch_id,
+        err: err instanceof Error ? err.message : String(err),
+      });
+      return Response.json(
+        { error: `optimizer falló: ${err instanceof Error ? err.message : 'desconocido'}` },
+        { status: 502 },
+      );
+    }
+    if (plan.routes.length === 0) {
+      return Response.json(
+        { error: 'el optimizer no asignó ninguna parada — revisar capacidad' },
+        { status: 422 },
+      );
+    }
   }
 
   // 8. RPC atómica para swap del tiro.
@@ -209,6 +291,7 @@ export async function POST(req: Request) {
   logger.info('apply_plan.applied', {
     dispatch_id: body.dispatch_id,
     applied_label: body.applied_label,
+    path: isFastPath ? 'fast_cache' : 'legacy_vroom',
     new_route_count: (newRouteIds as unknown as string[])?.length ?? 0,
     triggered_by: body.caller_user_id,
   });

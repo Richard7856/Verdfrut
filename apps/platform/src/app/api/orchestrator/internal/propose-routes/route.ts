@@ -209,8 +209,38 @@ export async function POST(req: Request) {
     );
   }
 
+  // 5. Persistir cache de la propuesta para apply instantáneo (OE-3.1).
+  //    Guardamos las alternatives + fullPlansByAltId — apply busca por
+  //    proposal_id + alternative_id y obtiene routes/stops ya computados.
+  //    TTL 30 min (default de la columna expires_at en la migración 049).
+  let proposalId: string | null = null;
+  try {
+    const { data: inserted } = await admin
+      .from('route_plan_proposals')
+      .insert({
+        customer_id: customerId,
+        dispatch_id: dispatchInfo?.id ?? null,
+        payload: {
+          alternatives: output.alternatives,
+          fullPlansByAltId: output.fullPlansByAltId,
+          k_explored: output.kExplored,
+          always_unassigned_store_ids: output.alwaysUnassignedStoreIds,
+        } as never,
+        created_by: body.caller_user_id,
+      })
+      .select('id')
+      .single();
+    proposalId = (inserted?.id as string | undefined) ?? null;
+  } catch (err) {
+    // No-fatal: si no se pudo guardar el cache, apply se cae al re-compute
+    // path (más lento pero correcto). Solo loggeamos para debug.
+    console.warn('[propose-routes] cache insert failed:', err);
+  }
+
   return Response.json({
     ok: true,
+    proposal_id: proposalId,
+    proposal_expires_in_minutes: 30,
     dispatch: dispatchInfo,
     inputs: {
       store_count: storeIds.length,

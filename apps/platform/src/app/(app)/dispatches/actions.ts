@@ -1161,18 +1161,76 @@ export interface ApplyRoutePlanResult extends RestructureDispatchResult {
 
 export async function applyRoutePlanAction(input: {
   dispatchId: string;
-  /** Lista de assignments del alternativo elegido. */
-  vehicleAssignments: Array<{ vehicleId: string; driverId: string | null }>;
+  /**
+   * OE-3.1 fast path: si están presentes, usa el plan completo cacheado en
+   * `route_plan_proposals` y va directo al RPC sin re-correr VROOM (~500ms).
+   * Si no, cae al path legacy con `vehicleAssignments` (~30-60s).
+   */
+  proposalId?: string;
+  alternativeId?: string;
+  /** Legacy path: lista de assignments del alternativo elegido. */
+  vehicleAssignments?: Array<{ vehicleId: string; driverId: string | null }>;
   /** Label informativo para audit (cheapest / balanced / fastest). */
   appliedLabel?: string;
 }): Promise<ApplyRoutePlanResult> {
   const profile = await requireRole('admin', 'dispatcher');
   try {
     const id = requireUuid('dispatchId', input.dispatchId);
+
+    // Decidir path. Si hay proposalId+alternativeId, fast path vía endpoint
+    // interno (que sabe leer del cache). Si no, legacy.
+    if (input.proposalId && input.alternativeId) {
+      requireUuid('proposalId', input.proposalId);
+      const token = process.env.INTERNAL_AGENT_TOKEN;
+      if (!token) {
+        throw new ValidationError(
+          'INTERNAL_AGENT_TOKEN',
+          'INTERNAL_AGENT_TOKEN no configurada en el server — falta env var.',
+        );
+      }
+      const baseUrl = process.env.PLATFORM_INTERNAL_URL ?? 'http://localhost:3000';
+      const res = await fetch(`${baseUrl}/api/orchestrator/internal/apply-plan`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-internal-agent-token': token,
+        },
+        body: JSON.stringify({
+          dispatch_id: id,
+          proposal_id: input.proposalId,
+          alternative_id: input.alternativeId,
+          applied_label: input.appliedLabel,
+          caller_user_id: profile.id,
+        }),
+        signal: AbortSignal.timeout(90_000),
+      });
+      const json = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !json.ok) {
+        return { ok: false, error: json.error ?? `HTTP ${res.status}` };
+      }
+      revalidatePath('/dispatches');
+      revalidatePath(`/dispatches/${id}`);
+      revalidatePath(`/dispatches/${id}/propose`);
+      revalidatePath('/routes');
+      logger.info('dispatches.apply_route_plan.fast_path', {
+        dispatch_id: id,
+        proposal_id: input.proposalId,
+        alternative_id: input.alternativeId,
+        applied_label: input.appliedLabel,
+        triggered_by: profile.id,
+      });
+      return {
+        ok: true,
+        routeIds: [],
+        appliedLabel: input.appliedLabel,
+      };
+    }
+
+    // Legacy path: corre VROOM con assignments explícitos.
     if (!Array.isArray(input.vehicleAssignments) || input.vehicleAssignments.length === 0) {
       throw new ValidationError(
         'vehicleAssignments',
-        'Necesitas al menos 1 vehículo en la alternativa elegida.',
+        'Necesitas al menos 1 vehículo en la alternativa elegida (o pasa proposalId+alternativeId para fast path).',
       );
     }
     for (const a of input.vehicleAssignments) {
@@ -1191,7 +1249,7 @@ export async function applyRoutePlanAction(input: {
     revalidatePath(`/dispatches/${id}/propose`);
     revalidatePath('/routes');
 
-    logger.info('dispatches.apply_route_plan', {
+    logger.info('dispatches.apply_route_plan.legacy', {
       dispatch_id: id,
       applied_label: input.appliedLabel,
       vehicle_count: input.vehicleAssignments.length,

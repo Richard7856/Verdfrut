@@ -65,7 +65,7 @@ alternativas óptimas es **el value prop completo del producto**.
 | **OE-1** | Capas 1+2 — clustering bisección + asignación greedy | ✅ 2026-05-15 (ADR-097) |
 | **OE-2** | Capa 4 — propuesta N alternativas + costo MXN + endpoint `internal/propose-routes` + migración 045 `customers.optimizer_costs` | ✅ 2026-05-15 (ADR-100) |
 | **OE-3** | Tools `propose_route_plan` + `apply_route_plan` + UI `/dispatches/[id]/propose` con 3 cards (cheapest/balanced/fastest) + breakdown costo MXN + apply buttons | ✅ 2026-05-15 (ADR-105) |
-| **OE-3.1** | Map preview por opción en las cards de propose. Cache del plan completo en la response (stops + sequences + ETAs) para apply instantáneo sin re-correr VROOM. | ⏳ pendiente (~3h) |
+| **OE-3.1** | Cache de propuestas (`route_plan_proposals`) + apply instantáneo (~500ms vs 30-60s) + mini-mapa SVG por card | ✅ 2026-05-15 (ADR-106) |
 | **OE-4** | Refinamientos: constraints (ventanas horarias, capacity multi-dim), cache matriz Google Routes, A/B testing default option | ⏳ pendiente |
 
 **Métrica de éxito**: km totales por tiro CDMX 21 stops ≤ 280 (vs 421 hoy

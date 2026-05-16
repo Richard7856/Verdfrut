@@ -5833,7 +5833,85 @@ Pricing de la landing 2026-05-15:
 - apps/landing/index.html — 3 CTAs `💳 Empezar [Tier]` cableados a `/empezar?plan=<tier>`.
 - DEPLOY_CHECKLIST.md — tabla de 9 env vars con los price IDs reales.
 
+---
 
+## [2026-05-15] ADR-106: Sprint OE-3.1 — cache de propuestas + apply instantáneo + mini-mapa por card
+
+**Contexto:** OE-3 entregó la UI conversacional + página `/dispatches/[id]/propose` con 3 cards (cheapest/balanced/fastest). El feedback en demo: aunque las cards son útiles, **aplicar tarda 30-60s** porque el endpoint re-corría VROOM con los vehículos de la alternativa elegida — el plan completo (stops + sequences + ETAs) había sido descartado tras el ranking. Adicionalmente el dispatcher comparaba 3 cards solo con números, sin sentir visualmente cómo se distribuyen los stops por cluster.
+
+OE-3.1 cierra ambos gaps: persiste el plan rico en BD por 30min para que apply sea instantáneo (~500ms vs 30-60s) y agrega un mini-mapa SVG por card que visualiza la distribución espacial de los clusters.
+
+**Decisión:**
+
+1. **Tabla `route_plan_proposals` (migración 049)**:
+   - `id UUID PK`, `customer_id`, `dispatch_id?`, `payload JSONB`, `expires_at` (30min TTL default), `generated_at`, `created_by`
+   - El `payload` guarda `alternatives` + `fullPlansByAltId: Record<altId, OptimizationPlan>` — los planes completos con stops + sequences + ETAs ya calculados por VROOM
+   - RLS por `customer_id`; función SECURITY DEFINER `tripdrive_route_plan_proposals_cleanup()` para cron periódico
+   - Tabla aplicada al tenant VerdFrut via MCP
+
+2. **`ProposePlansOutput.fullPlansByAltId` (nuevo campo)**: el resultado de `proposePlans` ahora incluye los planes completos indexados por altId además del summary `alternatives`. Antes el summary se devolvía y el plan completo se descartaba. Cambio backward-compat (campo agregado, no roto).
+
+3. **Persistencia del cache** en 2 caminos:
+   - Endpoint `/api/orchestrator/internal/propose-routes` persiste tras `proposePlans()` y devuelve `proposal_id` + `proposal_expires_in_minutes: 30` al caller (la AI tool `propose_route_plan` lo recibe automáticamente)
+   - Página `/dispatches/[id]/propose` server-side persiste post-`proposePlans()` también — el cache se llena por ambos vectores sin coordinación
+
+4. **Apply fast path en `/api/orchestrator/internal/apply-plan`**:
+   - Acepta `proposal_id + alternative_id` además del path legacy `vehicle_ids + driver_ids`
+   - Si fast path: lookup en `route_plan_proposals`, validar `expires_at`, validar `customer_id`, extraer `fullPlansByAltId[alternative_id]`, pasar directo al RPC `tripdrive_restructure_dispatch`. **Skip VROOM** completo.
+   - Si legacy: comportamiento previo (re-compute VROOM con vehículos del body)
+   - Audit log distingue `path: 'fast_cache' | 'legacy_vroom'` para medir adopción
+
+5. **Server action `applyRoutePlanAction`** ahora acepta `proposalId?` + `alternativeId?`. Si presentes, hace fetch al endpoint interno con esos params (fast path). Si no, llama `restructureDispatchInternal` (legacy).
+
+6. **Mini-mapa SVG ligero** (`MiniMap` component):
+   - Render SVG puro — cero JS pesado, cero llamadas a Mapbox
+   - Polyline conectando stops en orden de visita + dots coloreados por ruta
+   - Colores derivados via `pickRouteColor(vehicle.alias)` — consistencia visual con el mapa grande del tiro
+   - Bounding box auto-calculado con padding 0.005°, proyección equirectangular (suficiente para escalas urbanas <50km)
+   - Trade-off intencional: NO muestra calles ni geometría real de las rutas, solo la "forma" de cada cluster. Para comparar 3 alternativas lado-a-lado es lo que importa.
+
+7. **`ProposalCard` recibe `proposalId` + `routeCoords`**:
+   - El page extrae coords de los stops desde `fullPlansByAltId[altId]` + `stores.{lat,lng}` (1 query batch)
+   - Si proposalId presente: el confirm dice "Tiempo de aplicación: instantáneo (plan cacheado)"
+   - Si null (cache falló al persistir): cae al path legacy con vehicleAssignments
+
+**Alternativas consideradas:**
+- *Mapbox static images API para mini-mapas*: descartado. Buena calidad visual pero requiere `MAPBOX_DIRECTIONS_TOKEN` con permisos, agrega latencia de red por card (3 imágenes), y los URLs largos con muchos markers pueden topar con el cap de 8192 chars de Mapbox. SVG inline es suficiente para "forma" y cero dependencia externa.
+- *Cache en Redis/edge KV*: descartado. Postgres es source-of-truth, RLS ya filtra por customer, TTL via `expires_at` columna. KV agregaría infra sin valor (volumen esperado: <100 propuestas/día/customer).
+- *TTL 5min vs 30min*: 30min porque el dispatcher típicamente compara las 3 cards, va a tomar un café, vuelve. 5min causaría re-compute innecesario; 30min balancea uso real con riesgo de drift (precios MXN, capacidad vehicles) — si el customer espera más de 30min, recomputar es honesto.
+- *Reemplazar legacy path*: descartado. El fast path requiere haber corrido propose ANTES de apply. La AI tool puede usar apply sin propose previa (ej. "aplica con flota X"), en cuyo caso necesita legacy. Mantener ambos como discriminated union es backward compat sin duplicar lógica.
+- *Persistir alternative en una tabla normalizada* (`route_plan_alternatives` por filas): descartado. La alternativa es transient (30min), no consultable individualmente, JSONB es perfecto para query patterns "dame el cache completo de este proposal_id".
+- *Map preview con polyline routing real* (consultar Mapbox Directions por par de stops): descartado. Costo Google/Mapbox ×N pares de stops por card × 3 cards = $0.30+ USD por propuesta. Aceptable para producto premium pero no para una mini-preview de comparación.
+
+**Riesgos / Limitaciones:**
+- **Drift entre cache y BD**: si el dispatcher cambia el catálogo (desactiva un vehículo, agrega tiendas al tiro) entre propose y apply, el plan cacheado puede aplicar config obsoleta. Mitigación: TTL 30min + el apply valida que dispatch.status sea pre-publicación + el RPC es atómico (si falla, rollback). Drift real es raro; el dispatcher típicamente decide en <5min.
+- **Storage growth sin cleanup**: cada propuesta ocupa ~50KB. 100/día × 30 días = 150MB/mes. Sin el cron de cleanup la tabla crecería. Mitigación pendiente: scheduling de `tripdrive_route_plan_proposals_cleanup()` cada 1h via Vercel Cron (similar a otros crons que hicimos por que el user rechazó n8n).
+- **Mini-mapa no muestra geometría real**: solo líneas rectas entre stops. Un cluster que parece compacto en SVG puede tener rutas con calles que cruzan caóticamente. Para comparar opciones es OK; para verificar viabilidad real, el dispatcher entra al detalle del tiro tras aplicar.
+- **Page propose no muestra `proposal_id` en URL**: si el dispatcher hace refresh, vuelve a correr proposePlans + persiste otro cache. Drift acumulativo bajo (3 inserts × 30min vs cleanup periódico). Optimización futura: persist `proposal_id` en URL hash o cookie para idempotencia per-session.
+- **Legacy path nunca sale**: el código mantiene ambos paths. Si el cache falla constantemente (BD down), el legacy salva la operación. Costo de mantenimiento: 2 paths que probar; aceptado para safety.
+- **Sin tests automatizados**: testear requiere mockear VROOM + Stripe + BD. La validación fue manual con el flow real. KNOWN_ISSUES marca esto para añadir tests con `nock` + fixtures cuando se priorice testing.
+- **Tipos OptimizationPlan en propose page**: el `altRouteCoords` helper tuvo que anotar manualmente porque TypeScript pierde la inferencia a través del JSON serialization. Funciona pero es ruido en el código — refactor pendiente para reusar el tipo exportado.
+
+**Oportunidades de mejora:**
+- Vercel Cron schedule de `tripdrive_route_plan_proposals_cleanup` cada hora.
+- Mostrar `proposal_expires_at` en la UI: countdown discreto "Esta propuesta vence en 24m" — invita a decidir.
+- Mini-mapa interactivo (Mapbox embed) al hacer hover sobre el SVG. SVG queda como preview rápido.
+- Persist `proposal_id` en URL hash de `/propose` para que refresh no genere duplicados.
+- Tool `apply_route_plan` del orchestrator gana `proposal_id?` arg para usar fast path desde el chat también.
+- Métrica de adopción: `% de applies con path='fast_cache'` — KPI de la inversión de OE-3.1.
+- Cache de planes con `expires_at` extendible — el dispatcher puede "pinear" una propuesta favorita por más tiempo.
+
+**Refs:**
+- ADR-100 (OE-2 — cómputo de alternativas) — base que esta sprint optimiza.
+- ADR-105 (OE-3 — UI inicial) — esta sprint cierra.
+- supabase/migrations/00000000000049_route_plan_proposals_cache.sql — tabla de cache + cleanup function.
+- apps/platform/src/lib/propose-plans.ts — `fullPlansByAltId` en ProposePlansOutput.
+- apps/platform/src/app/api/orchestrator/internal/propose-routes/route.ts — persiste cache + devuelve `proposal_id`.
+- apps/platform/src/app/api/orchestrator/internal/apply-plan/route.ts — fast path con `proposal_id + alternative_id`.
+- apps/platform/src/app/(app)/dispatches/actions.ts — `applyRoutePlanAction` proxy hacia endpoint interno cuando hay proposalId.
+- apps/platform/src/app/(app)/dispatches/[id]/propose/page.tsx — persiste cache server-side + extrae route coords.
+- apps/platform/src/app/(app)/dispatches/[id]/propose/proposal-card.tsx — render mini-mapa + apply con fast path.
+- apps/platform/src/app/(app)/dispatches/[id]/propose/mini-map.tsx — SVG ligero (~120 líneas, cero dep).
 
 
 

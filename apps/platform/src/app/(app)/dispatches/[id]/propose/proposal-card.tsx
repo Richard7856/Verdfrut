@@ -14,7 +14,9 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { Badge, Button, Card, toast } from '@tripdrive/ui';
 import { applyRoutePlanAction } from '../../actions';
+import { pickRouteColor } from '@/lib/route-colors';
 import type { RoutePlanOption } from '@tripdrive/router';
+import { MiniMap } from './mini-map';
 
 interface LabelMeta {
   emoji: string;
@@ -24,16 +26,36 @@ interface LabelMeta {
 
 interface Props {
   dispatchId: string;
+  /**
+   * OE-3.1: proposal_id de la cache. Si está presente, apply usa fast path
+   * (~500ms). Si null (cache falló al persistir), apply cae a re-compute
+   * VROOM legacy (30-60s).
+   */
+  proposalId: string | null;
   alternative: RoutePlanOption;
   labelsMeta: Record<'cheapest' | 'balanced' | 'fastest', LabelMeta>;
+  /**
+   * Coordenadas de los stops por ruta de esta alternativa. Cada ruta es un
+   * array de [lng, lat] en orden de visita. Usado por el mini-mapa SVG.
+   */
+  routeCoords: Array<Array<[number, number]>>;
   vehiclesById: Record<string, { alias: string | null; plate: string }>;
   driverNameById: Record<string, string>;
 }
 
-export function ProposalCard({ dispatchId, alternative, labelsMeta, vehiclesById, driverNameById }: Props) {
+export function ProposalCard({
+  dispatchId,
+  proposalId,
+  alternative,
+  labelsMeta,
+  routeCoords,
+  vehiclesById,
+  driverNameById,
+}: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [_, setError] = useState<string | null>(null);
+  void _;
 
   const formatMxn = (v: number) =>
     `$${v.toLocaleString('es-MX', { maximumFractionDigits: 0 })}`;
@@ -44,11 +66,15 @@ export function ProposalCard({ dispatchId, alternative, labelsMeta, vehiclesById
   const primaryMeta = labelsMeta[primaryLabel];
 
   function handleApply() {
+    const fastPath = Boolean(proposalId);
+    const tiempoMsg = fastPath
+      ? 'instantáneo (plan cacheado del cálculo anterior)'
+      : '30-60s — VROOM recalcula las secuencias';
     const confirmation = confirm(
       `¿Aplicar esta alternativa? El tiro se reestructurará con ${alternative.vehicleCount} vehículo(s), ` +
         `${alternative.metrics.totalKm} km total, costo estimado ${formatMxn(alternative.cost.total_mxn)} MXN.\n\n` +
-        `Esto tarda 30-60s porque VROOM recalcula las secuencias. Las rutas actuales del tiro se reemplazan ` +
-        `atómicamente (si algo falla, el tiro queda intacto).`,
+        `Tiempo de aplicación: ${tiempoMsg}.\n\n` +
+        `Las rutas actuales del tiro se reemplazan atómicamente (si algo falla, el tiro queda intacto).`,
     );
     if (!confirmation) return;
 
@@ -56,10 +82,15 @@ export function ProposalCard({ dispatchId, alternative, labelsMeta, vehiclesById
     startTransition(async () => {
       const res = await applyRoutePlanAction({
         dispatchId,
-        vehicleAssignments: alternative.routes.map((r) => ({
-          vehicleId: r.vehicleId,
-          driverId: r.driverId,
-        })),
+        // OE-3.1: si hay proposalId, fast path. Si no, legacy con vehicleAssignments.
+        proposalId: proposalId ?? undefined,
+        alternativeId: proposalId ? alternative.id : undefined,
+        vehicleAssignments: proposalId
+          ? undefined
+          : alternative.routes.map((r) => ({
+              vehicleId: r.vehicleId,
+              driverId: r.driverId,
+            })),
         appliedLabel: alternative.labels.join('+') || 'unlabeled',
       });
       if (res.ok) {
@@ -86,6 +117,16 @@ export function ProposalCard({ dispatchId, alternative, labelsMeta, vehiclesById
 
   return (
     <Card className={`${borderClass} relative flex flex-col gap-3 border-2 p-4`}>
+      {/* Mini-mapa: visualiza spatial distribution de los stops por ruta.
+          Colores derivados del alias del vehículo (Roja → #dc2626, etc) —
+          consistencia visual con el mapa grande del tiro. */}
+      <MiniMap
+        routeCoords={routeCoords}
+        routeColors={alternative.routes.map((r, i) =>
+          pickRouteColor(vehiclesById[r.vehicleId]?.alias ?? null, i),
+        )}
+      />
+
       {/* Header: emoji + label + badges secundarios */}
       <div>
         <div className="flex items-baseline justify-between gap-2">
