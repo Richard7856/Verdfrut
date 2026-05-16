@@ -87,6 +87,75 @@ interface DraftRoute {
 
 const UNASSIGNED_COLOR = '#71717a'; // zinc-500 — pin gris para sin asignar.
 
+// ─── Persistencia local de borrador ────────────────────────────────
+// El visual builder antes perdía todo al refresh / cerrar pestaña. Persistimos
+// name/date/routes en localStorage por zona (cada zona tiene su propio draft;
+// trabajar en CDMX no pisa el borrador de Toluca). Limpiamos tras crear el
+// tiro exitosamente. Sets se serializan a array para JSON-compat.
+
+const DRAFT_VERSION = 1;
+const DRAFT_KEY_PREFIX = 'tripdrive:visual-draft';
+
+interface PersistedDraft {
+  version: number;
+  savedAt: string;
+  name: string;
+  date: string;
+  routes: Array<{
+    tempId: string;
+    vehicleId: string;
+    driverId: string | null;
+    storeIds: string[];
+  }>;
+}
+
+function draftKey(zoneId: string): string {
+  return `${DRAFT_KEY_PREFIX}:${zoneId}`;
+}
+
+function loadDraft(zoneId: string): PersistedDraft | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(draftKey(zoneId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as PersistedDraft;
+    if (parsed.version !== DRAFT_VERSION) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function saveDraft(zoneId: string, name: string, date: string, routes: DraftRoute[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const payload: PersistedDraft = {
+      version: DRAFT_VERSION,
+      savedAt: new Date().toISOString(),
+      name,
+      date,
+      routes: routes.map((r) => ({
+        tempId: r.tempId,
+        vehicleId: r.vehicleId,
+        driverId: r.driverId,
+        storeIds: [...r.storeIds],
+      })),
+    };
+    window.localStorage.setItem(draftKey(zoneId), JSON.stringify(payload));
+  } catch {
+    // QuotaExceeded o similar — el draft no es load-bearing, ignoramos silencioso.
+  }
+}
+
+function clearDraft(zoneId: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(draftKey(zoneId));
+  } catch {
+    // ignore
+  }
+}
+
 // ─── Componente principal ──────────────────────────────────────────
 
 export function VisualDispatchBuilder({
@@ -108,6 +177,9 @@ export function VisualDispatchBuilder({
 
   // Rutas en progreso (en memoria).
   const [routes, setRoutes] = useState<DraftRoute[]>([]);
+
+  // Borrador restaurado de localStorage (banner UI). null = no había draft.
+  const [restoredDraft, setRestoredDraft] = useState<{ savedAt: string } | null>(null);
 
   // Selección actual de stops (común con map interaction).
   const [selectedStoreIds, setSelectedStoreIds] = useState<Set<string>>(new Set());
@@ -136,6 +208,48 @@ export function VisualDispatchBuilder({
     x2: number;
     y2: number;
   } | null>(null);
+
+  // ─── Persistencia de borrador (localStorage) ─────────────────────
+  // Restore una sola vez al montar. Filtramos vehicleIds y storeIds que ya
+  // no existen para evitar dejar el state inconsistente si el catálogo
+  // cambió entre sesiones.
+
+  useEffect(() => {
+    const draft = loadDraft(zone.id);
+    if (!draft) return;
+    const validVehicleIds = new Set(vehicles.map((v) => v.id));
+    const validStoreIds = new Set(stores.map((s) => s.id));
+    const restored: DraftRoute[] = draft.routes
+      .filter((r) => validVehicleIds.has(r.vehicleId))
+      .map((r) => ({
+        tempId: r.tempId,
+        vehicleId: r.vehicleId,
+        driverId: r.driverId,
+        storeIds: new Set(r.storeIds.filter((id) => validStoreIds.has(id))),
+      }));
+    // Solo restauramos si hay algo útil — si todas las rutas perdieron datos,
+    // mejor empezar limpio.
+    if (restored.length === 0 && draft.name === `${zone.name} ${defaultDate}`) {
+      clearDraft(zone.id);
+      return;
+    }
+    if (draft.name) setName(draft.name);
+    if (draft.date) setDate(draft.date);
+    if (restored.length > 0) setRoutes(restored);
+    setRestoredDraft({ savedAt: draft.savedAt });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Save: cada vez que cambia algo del form principal. localStorage.setItem
+  // es síncrono pero <1ms — no necesita debounce para drafts de este tamaño.
+  // Skip cuando aún no hay nada (state inicial vacío sin restored).
+  useEffect(() => {
+    if (routes.length === 0 && name === `${zone.name} ${defaultDate}` && date === defaultDate) {
+      // Nada útil que guardar.
+      return;
+    }
+    saveDraft(zone.id, name, date, routes);
+  }, [zone.id, zone.name, name, date, routes, defaultDate]);
 
   // ─── Derivados ────────────────────────────────────────────────────
 
@@ -525,6 +639,8 @@ export function VisualDispatchBuilder({
         setError(res.error ?? 'Error al crear el tiro.');
         return;
       }
+      // Limpiar el borrador local — el tiro ya está en BD.
+      clearDraft(zone.id);
       // Redirigir al detalle del tiro recién creado.
       if (res.dispatchId) {
         router.push(`/dispatches/${res.dispatchId}`);
@@ -551,6 +667,45 @@ export function VisualDispatchBuilder({
 
   return (
     <div className="space-y-4">
+      {/* Banner de borrador restaurado. Se descarta al hacer click en "Empezar
+          de cero" — limpia state + localStorage + recarga la pantalla. */}
+      {restoredDraft && (
+        <div
+          className="flex items-center justify-between gap-3 rounded-[var(--radius-md)] border px-3 py-2 text-xs"
+          style={{
+            background: 'color-mix(in oklch, var(--vf-info, #0284c7) 12%, transparent)',
+            borderColor: 'color-mix(in oklch, var(--vf-info, #0284c7) 35%, transparent)',
+            color: 'var(--vf-info, #0284c7)',
+          }}
+          role="status"
+        >
+          <span>
+            📝 Borrador restaurado de{' '}
+            <span className="font-mono">
+              {new Date(restoredDraft.savedAt).toLocaleString('es-MX', {
+                dateStyle: 'short',
+                timeStyle: 'short',
+              })}
+            </span>
+            . Continúa donde lo dejaste o empieza de cero.
+          </span>
+          <button
+            type="button"
+            onClick={() => {
+              if (!window.confirm('¿Descartar el borrador y empezar de cero?')) return;
+              clearDraft(zone.id);
+              setRoutes([]);
+              setName(`${zone.name} ${defaultDate}`);
+              setDate(defaultDate);
+              setRestoredDraft(null);
+            }}
+            className="rounded border border-current px-2 py-0.5 font-medium hover:bg-current/10"
+          >
+            Empezar de cero
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-end justify-between gap-3">
         <PageHeader
           title="Armar tiro visualmente"
