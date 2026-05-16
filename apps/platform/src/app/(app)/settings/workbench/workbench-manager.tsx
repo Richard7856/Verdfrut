@@ -139,7 +139,7 @@ export function WorkbenchManager({
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
           Herramientas de análisis
         </p>
-        <ul className="space-y-2 text-sm">
+        <ul className="space-y-3 text-sm">
           <li>
             <a
               href="/settings/workbench/zones"
@@ -153,6 +153,19 @@ export function WorkbenchManager({
               coherentes con el algoritmo del optimizer.
             </p>
           </li>
+          <li>
+            <a
+              href="/settings/workbench/fleet"
+              className="font-medium underline-offset-2 hover:underline"
+              style={{ color: 'var(--vf-green-600, #15803d)' }}
+            >
+              🚚 Recomendación de flotilla
+            </a>
+            <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+              Estima cuántas camionetas necesitas mínimo para sostener tu volumen
+              actual (kg/sem + paradas/sem) y compara con lo que tienes hoy.
+            </p>
+          </li>
         </ul>
       </Card>
 
@@ -162,7 +175,6 @@ export function WorkbenchManager({
         </p>
         <ul className="space-y-1 text-xs text-[var(--color-text-muted)]">
           <li>• Aplicar sugerencia de partición de zona como sandbox (WB-3b).</li>
-          <li>• Recomendación de flotilla por volumen (WB-4).</li>
           <li>• Heatmaps en mapa por frecuencia/kg (WB-5).</li>
           <li>• Vista jerárquica Día→Zona→Frecuencia→Camioneta→Ruta→Parada (WB-6).</li>
         </ul>

@@ -6620,6 +6620,87 @@ WB-3 cierra el ciclo de "el sistema sabe lo suficiente para sugerir cambios estr
 - apps/platform/src/app/(app)/settings/workbench/workbench-manager.tsx — link de descubrimiento.
 
 
+## [2026-05-16] ADR-116: Workbench WB-4 — Recomendación de flotilla
+
+**Contexto:** El admin del cliente toma decisiones de compra/contratación de camionetas en base a intuición o cálculos manuales en Excel. Sin un análisis sistemático, los errores son comunes y caros: o se queda corto y la operación satura (clientes pierden visitas, los choferes hacen horas extras, costo overhead crece), o se sobre-invierte en flota subutilizada.
+
+WB-4 cierra ese gap dándole al admin una **estimación de capacidad bruta** basada en los datos reales que el sistema ya tiene (kg/sem y visitas/sem de los últimos 30 días, capacidad de cada vehículo). El output es prescriptivo: "te faltan 2 camionetas en zona Sur" o "tienes holgura de 1 en Centro, considera redistribuir".
+
+**Decisión:**
+
+1. **Heurística `recommendFleet(inputs)`** en `lib/queries/fleet-recommendations.ts`:
+   - **Por cada zona activa con tiendas**:
+     - `totalKgPerWeek` = Σ `freq.kgPerVisit × freq.visitsPerWeek` (WB-2 stats).
+     - `totalVisitsPerWeek` = Σ `freq.visitsPerWeek`.
+     - `representativeCapacityKg` = mediana de `capacity[0]` de los vehículos activos de la zona (fallback `1000kg`).
+     - `vehiclesNeededByKg` = ceil(totalKgPerWeek / (capacity × workingDays))
+     - `vehiclesNeededByStops` = ceil(totalVisitsPerWeek / (maxStops × workingDays))
+     - `vehiclesNeeded` = max(byKg, byStops, 1). El **techo dominante** define la necesidad real.
+     - `delta` = vehiclesNeeded - currentVehicleCount (+ = falta, − = sobra).
+     - `utilizationPct` = vehiclesNeeded / currentVehicleCount × 100. Bandas: <85% verde, 85-100% amber, >100% rojo.
+     - `bottleneck`: 'kg' | 'stops' | 'balanced' — útil para que el admin entienda si la limitación es capacidad de peso (vehículo más grande) o densidad de paradas (más rapidez / más vehículos pequeños).
+   - **Totales globales**: suma de zonas, presentadas en card arriba con headline grande "Te faltan N" / "Tienes holgura de N" / "Capacidad justa".
+   - Zonas sin operación (0 tiendas activas) se omiten del análisis.
+
+2. **Inputs configurables vía `?days=5&stops=14`** (server-rendered, bookmarkable):
+   - `workingDaysPerWeek`: 1-7 (default 5).
+   - `maxStopsPerDay`: 1-100 (default 14 — alineado con `cost.ts` del optimizer).
+   - Permite al admin probar sensibilidad sin escribir código: "¿qué pasa si paso a 6 días/sem?".
+
+3. **Página `/settings/workbench/fleet`**:
+   - Form con 2 inputs + botón Recalcular.
+   - Card global con resumen + headline coloreado.
+   - Tabla por zona: columnas `Tiendas | kg/sem | Visitas/sem | Hoy | Mín | Δ | Uso | Restricción`. Ordenada por kg/sem desc — las zonas críticas primero.
+   - Sección "Cómo leer este reporte" para que el admin entienda Δ y bottleneck sin docs externos.
+   - Read-only en MVP: no crea vehículos sandbox automáticamente. Output → decisión humana de compra/contratación.
+
+4. **Defaults conservadores**:
+   - 1 viaje/día por vehículo. La realidad puede tener multi-trip; aceptamos subestimar capacidad para que la recomendación tienda a "compra más" antes que "estás bien" — error en favor de la operación.
+   - Mediana en lugar de promedio para capacidad representativa: robusta a outliers (una camioneta grande no infla la media).
+
+5. **Discoverable desde `/settings/workbench`**: el manager principal ahora lista las 2 herramientas (Zonas + Flotilla) con descripciones que orientan al admin a la decisión que va a tomar.
+
+**Alternativas consideradas:**
+- *Considerar costo MXN como factor*: descartado para MVP. La decisión "comprar vs no" no es solo capacidad — pero la heurística de capacidad es paso 1. Costo MXN puede llegar como WB-4b ("renta vs compra a 6 meses").
+- *Multi-trip por vehículo*: descartado por scope. Una Kangoo puede hacer 2 viajes/día si la zona es chica. Modelar bien requiere conocer matriz de distancias por zona. Hoy asumimos 1 viaje/día (conservador).
+- *Considerar jornada legal (≤9h)*: descartado para MVP. La heurística por paradas + capacidad ya da techo razonable. Si el admin quiere ese detalle, modela en /reports manualmente.
+- *Recomendación por TIPO de vehículo* (Kangoo vs Sprinter): descartado por simplicidad. El cliente típico VerdFrut tiene flota homogénea. Si emerge demanda con flotas mixtas, hacer un grouping por `capacity[0]` quantile y mostrar recomendación por tipo.
+- *K-fold cross-validation contra histórico*: técnicamente correcto pero overkill — el admin no necesita 95% IC, necesita "más o menos cuánto".
+- *Aplicar las recomendaciones automáticamente como sandbox vehicles*: tentador pero requiere decidir placa/modelo/depot del vehículo nuevo, scope grande. WB-1b ya permite crear vehículos sandbox manualmente; la recomendación los guía.
+- *Mostrar gráfica de tendencia* (kg/sem últimos 3 meses): nice-to-have, pendiente para WB-5 con heatmaps.
+- *Sensitivity tornado chart*: descartado por sobre-ingeniería para MVP. El admin puede recalcular con valores distintos y comparar.
+
+**Riesgos / Limitaciones:**
+- **Estimación, no oráculo**: la heurística asume distribución uniforme de carga durante la semana y operación 1-trip/día. La realidad puede tener picos (fin de semana) o multi-trip; la recomendación puede sobreestimar o subestimar 20-30%.
+- **`representativeCapacityKg` con flota mixta**: si la zona tiene 1 Sprinter (1500kg) + 4 Kangoo (800kg), la mediana es ~800kg — subestima la capacidad real total. Para WB-4 MVP aceptable; en WB-4b agregar agg por tipo.
+- **No considera tiendas sin historia (kgPerVisit=0)**: tiendas nuevas que aún no se han visitado no aportan kg al cálculo. Cuando se incorporen al optimizer, la demanda real será mayor que la estimada. Mitigación: el admin recalcula cada mes con datos frescos.
+- **`bottleneck='balanced'` cuando byKg=byStops**: visualmente confuso (¿significa OK o algo más?). Aceptable porque es info adicional, no decisión.
+- **No considera ventanas horarias**: una tienda con ventana de recepción muy estrecha (ej. solo entre 7-9 AM) puede consumir más jornada del optimizer aunque su kg sea bajo. La recomendación lo ignora.
+- **No considera depot location**: zonas con depot lejano efectivamente tienen menos km productivos por viaje. WB-4 asume operación greenfield.
+- **Δ puede ser engañoso si la operación no escala lineal**: agregar 1 camioneta no siempre da 100% más capacidad (puede saturar dispatcher, depot, etc.). El admin debe interpretar Δ como guía, no instrucción.
+- **No probado con cliente con flota mixta**: validamos con VerdFrut (homogénea). 5-tipo de vehículo no se midió.
+
+**Oportunidades de mejora:**
+- WB-4b: recomendación por tipo de vehículo, con sensibilidad de costo MXN renta vs compra.
+- Modelado de multi-trip: detectar zonas donde 1 vehículo puede hacer 2 viajes y ajustar capacidad efectiva.
+- Considerar ventanas horarias: si el 30% de tiendas tienen ventana estrecha, ajustar el cálculo de paradas/día efectivas.
+- Histórico de la recomendación: "hace 1 mes pedías 5, hoy 7 — tu volumen creció 40%".
+- Alerta automática cuando la utilización supera 100% por 7+ días.
+- Sugerir vehículo específico ("Kangoo 1.6 cap 950kg") con price MXN estimado.
+- Integración con flow de compra: "Cotizar 2 Kangoo" → form que abre proveedor.
+- Comparativa contra benchmarks del sector: "Tu utilización es X%, sector típico es Y%".
+- Stress test: "Si todas las tiendas hipotéticas del sandbox se vuelven reales, necesitarás N camionetas".
+- Vista mapa con utilización por zona (preview de WB-5 heatmap).
+
+**Refs:**
+- ADR-114 — store frequencies (fuente de kg/sem + visitas/sem).
+- ADR-115 — zone suggestions (pieza hermana del análisis estructural).
+- packages/router/src/cost.ts:37 — `max_stops_per_vehicle: 14` (default que reusamos).
+- apps/platform/src/lib/queries/fleet-recommendations.ts — heurística + agregación.
+- apps/platform/src/app/(app)/settings/workbench/fleet/page.tsx — UI.
+- apps/platform/src/app/(app)/settings/workbench/workbench-manager.tsx — link descubrimiento.
+
+
 
 
 
