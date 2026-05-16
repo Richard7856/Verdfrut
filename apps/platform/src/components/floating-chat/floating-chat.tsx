@@ -19,6 +19,17 @@ import { Markdown } from './markdown';
 import { usePathname } from 'next/navigation';
 
 type Role = 'user' | 'assistant' | 'tool';
+type AgentRole = 'orchestrator' | 'router' | 'geo';
+
+// Badge visual del rol activo del agente (Stream R / ADR-109).
+// El usuario ve qué "modo" responde para entender por qué cambia el tono
+// y la profundidad de las propuestas (orchestrator generalista vs router
+// especialista en costos/jornada). Default orchestrator → sin badge ruidoso.
+const ROLE_BADGE: Record<AgentRole, { label: string; emoji: string; bg: string; fg: string }> = {
+  orchestrator: { label: 'orchestrator', emoji: '🤖', bg: 'bg-zinc-800', fg: 'text-zinc-300' },
+  router: { label: 'modo routing', emoji: '🚚', bg: 'bg-amber-900/50', fg: 'text-amber-200' },
+  geo: { label: 'modo geo', emoji: '🌎', bg: 'bg-sky-900/50', fg: 'text-sky-200' },
+};
 
 interface ChatTurn {
   id: string;
@@ -54,6 +65,7 @@ function FloatingChatInner({ ctx }: { ctx: PageContext }) {
   const [streaming, setStreaming] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
+  const [activeRole, setActiveRole] = useState<AgentRole>('orchestrator');
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-scroll al fondo cuando se agregan turns.
@@ -68,6 +80,7 @@ function FloatingChatInner({ ctx }: { ctx: PageContext }) {
     setTurns([]);
     setSessionId(null);
     setPending(null);
+    setActiveRole('orchestrator');
   }, [ctx.path]);
 
   const send = useCallback(
@@ -169,8 +182,26 @@ function FloatingChatInner({ ctx }: { ctx: PageContext }) {
                 args: evt.args as Record<string, unknown>,
                 summary: String(evt.summary),
               });
+            } else if (evt.type === 'active_role') {
+              const r = String(evt.role);
+              if (r === 'orchestrator' || r === 'router' || r === 'geo') {
+                setActiveRole(r);
+              }
+            } else if (evt.type === 'role_changed') {
+              const to = String(evt.to);
+              if (to === 'orchestrator' || to === 'router' || to === 'geo') {
+                setActiveRole(to);
+                // Marcador inline para que el user vea la transición en el log.
+                setTurns((prev) => [
+                  ...prev,
+                  {
+                    id: crypto.randomUUID(),
+                    role: 'assistant',
+                    text: `_${ROLE_BADGE[to].emoji} ${ROLE_BADGE[to].label} activado_`,
+                  },
+                ]);
+              }
             }
-            // message_end, loop_done, role events — ignorados en floating Phase 1
           }
         }
       } catch (err) {
@@ -204,12 +235,21 @@ function FloatingChatInner({ ctx }: { ctx: PageContext }) {
       <button
         onClick={() => setOpen(true)}
         className="fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-600 text-white shadow-lg shadow-emerald-900/40 hover:bg-emerald-700"
-        title={`Asistente AI · ${ctx.screenLabel}`}
+        title={`Asistente AI · ${ctx.screenLabel}${activeRole !== 'orchestrator' ? ` · ${ROLE_BADGE[activeRole].label}` : ''}`}
         aria-label="Abrir asistente AI"
       >
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
         </svg>
+        {activeRole !== 'orchestrator' && (
+          // Pildora con emoji para señalar handoff activo aún con el drawer cerrado.
+          <span
+            className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-zinc-900 text-xs ring-2 ring-zinc-950"
+            aria-hidden
+          >
+            {ROLE_BADGE[activeRole].emoji}
+          </span>
+        )}
       </button>
     );
   }
@@ -218,8 +258,19 @@ function FloatingChatInner({ ctx }: { ctx: PageContext }) {
     <div className="fixed bottom-6 right-6 z-50 flex h-[600px] w-[420px] flex-col rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
-        <div>
-          <div className="text-sm font-semibold text-zinc-100">Asistente AI</div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <div className="text-sm font-semibold text-zinc-100">Asistente AI</div>
+            {activeRole !== 'orchestrator' && (
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${ROLE_BADGE[activeRole].bg} ${ROLE_BADGE[activeRole].fg}`}
+                title={`Agente activo: ${activeRole}`}
+              >
+                <span>{ROLE_BADGE[activeRole].emoji}</span>
+                <span>{ROLE_BADGE[activeRole].label}</span>
+              </span>
+            )}
+          </div>
           <div className="text-xs text-zinc-500">📍 {ctx.screenLabel}</div>
         </div>
         <button

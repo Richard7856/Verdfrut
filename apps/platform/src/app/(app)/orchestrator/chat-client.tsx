@@ -8,6 +8,15 @@ import { useEffect, useRef, useState } from 'react';
 import { Card, Button, Textarea, Badge } from '@tripdrive/ui';
 
 type Role = 'user' | 'assistant' | 'tool';
+type AgentRole = 'orchestrator' | 'router' | 'geo';
+
+// Badge visual del rol activo del agente (Stream R / ADR-109).
+// Replica el patrón del floating-chat para mantener identidad consistente.
+const ROLE_BADGE: Record<AgentRole, { label: string; emoji: string; bg: string; fg: string }> = {
+  orchestrator: { label: 'orchestrator', emoji: '🤖', bg: 'transparent', fg: 'var(--color-text-muted)' },
+  router: { label: 'modo routing', emoji: '🚚', bg: 'color-mix(in oklch, var(--vf-amber-500, #f59e0b) 25%, transparent)', fg: 'var(--vf-amber-200, #fde68a)' },
+  geo: { label: 'modo geo', emoji: '🌎', bg: 'color-mix(in oklch, var(--vf-sky-500, #0ea5e9) 25%, transparent)', fg: 'var(--vf-sky-200, #bae6fd)' },
+};
 
 interface ChatTurn {
   id: string;
@@ -89,6 +98,7 @@ export function OrchestratorChat() {
     cacheWrite: number;
     cacheRead: number;
   }>({ in: 0, out: 0, cacheWrite: 0, cacheRead: 0 });
+  const [activeRole, setActiveRole] = useState<AgentRole>('orchestrator');
   const [pendingAttachments, setPendingAttachments] = useState<UploadedAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -121,6 +131,8 @@ export function OrchestratorChat() {
     setTurns([]);
     setPendingConfirmation(null);
     setUsage({ in: 0, out: 0, cacheWrite: 0, cacheRead: 0 });
+    // Resetear el badge: el primer SSE event `active_role` del próximo turno lo restituye.
+    setActiveRole('orchestrator');
     try {
       const res = await fetch(`/api/orchestrator/sessions/${id}`);
       if (!res.ok) return;
@@ -175,6 +187,7 @@ export function OrchestratorChat() {
     setPendingConfirmation(null);
     setUsage({ in: 0, out: 0, cacheWrite: 0, cacheRead: 0 });
     setPendingAttachments([]);
+    setActiveRole('orchestrator');
   }
 
   useEffect(() => {
@@ -379,6 +392,25 @@ export function OrchestratorChat() {
               cacheWrite: prev.cacheWrite + (u.cache_creation_input_tokens ?? 0),
               cacheRead: prev.cacheRead + (u.cache_read_input_tokens ?? 0),
             }));
+          } else if (evt.type === 'active_role') {
+            const r = String(evt.role);
+            if (r === 'orchestrator' || r === 'router' || r === 'geo') {
+              setActiveRole(r);
+            }
+          } else if (evt.type === 'role_changed') {
+            const to = String(evt.to);
+            if (to === 'orchestrator' || to === 'router' || to === 'geo') {
+              setActiveRole(to);
+              // Marcador inline para que el log muestre la transición del agente.
+              setTurns((prev) => [
+                ...prev,
+                {
+                  id: crypto.randomUUID(),
+                  role: 'assistant',
+                  text: `_${ROLE_BADGE[to].emoji} ${ROLE_BADGE[to].label} activado_`,
+                },
+              ]);
+            }
           } else if (evt.type === 'error') {
             setTurns((prev) => [
               ...prev,
@@ -487,6 +519,20 @@ export function OrchestratorChat() {
           <p className="text-sm font-medium" style={{ color: 'var(--color-text)' }}>
             Suelta el archivo (xlsx, csv) para adjuntarlo
           </p>
+        </div>
+      )}
+
+      {activeRole !== 'orchestrator' && (
+        <div
+          className="flex items-center gap-2 self-start rounded-full px-3 py-1 text-xs font-medium"
+          style={{
+            background: ROLE_BADGE[activeRole].bg,
+            color: ROLE_BADGE[activeRole].fg,
+          }}
+          title={`Agente activo: ${activeRole}. Cambiará automáticamente cuando el agente llame exit_router_mode.`}
+        >
+          <span>{ROLE_BADGE[activeRole].emoji}</span>
+          <span>{ROLE_BADGE[activeRole].label}</span>
         </div>
       )}
 

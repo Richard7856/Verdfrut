@@ -21,15 +21,16 @@ function fakeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
 }
 
 describe('R3 — wiring de roles', () => {
-  // NOTA pre-demo 2026-05-15: el handoff conversacional al router agent
-  // (enter_router_mode / exit_router_mode) se DESACTIVÓ temporalmente
-  // porque confundía al modelo en multi-turn complejo y no hay UI badge
-  // todavía. Los tests aquí validan ese estado intermedio. Cuando OE-3
-  // re-active el handoff con UI, restaurar los asserts originales (ver
-  // git history).
+  // R4 / ADR-109 (2026-05-15 noche): handoff conversacional RE-ACTIVADO con
+  // UI badge en el chat. El orchestrator vuelve a ofrecer enter_router_mode.
+  // Pareja: el router conserva exit_router_mode para devolver el control.
 
-  test('orchestrator NO tiene enter_router_mode (desactivado pre-demo)', () => {
-    assert.ok(!TOOLS_BY_ROLE.orchestrator.includes('enter_router_mode'));
+  test('orchestrator tiene enter_router_mode (handoff re-activado en ADR-109)', () => {
+    assert.ok(TOOLS_BY_ROLE.orchestrator.includes('enter_router_mode'));
+  });
+
+  test('router tiene exit_router_mode (par simétrico)', () => {
+    assert.ok(TOOLS_BY_ROLE.router.includes('exit_router_mode'));
   });
 
   test('router NO incluye delegate_to_geo (eso es del orchestrator)', () => {
@@ -83,15 +84,16 @@ describe('R3 — tools de handoff', () => {
 });
 
 describe('R3 — invariantes globales', () => {
-  test('todas las tools del registry están mapeadas (excepto enter_router_mode temporal)', () => {
+  test('todas las tools del registry están mapeadas (excepto optimize_dispatch deprecado)', () => {
     const allRoleNames = new Set([
       ...TOOLS_BY_ROLE.orchestrator,
       ...TOOLS_BY_ROLE.geo,
       ...TOOLS_BY_ROLE.router,
     ]);
-    // enter_router_mode existe en el registry pero está intencionalmente
-    // huérfano (pre-demo 2026-05-15). Cualquier OTRA tool huérfana es bug.
-    const ALLOWED_ORPHANS = new Set(['enter_router_mode']);
+    // R4 / ADR-109: optimize_dispatch sigue en el registry para callers UI
+    // legacy pero NO está mapeado a ningún rol (el LLM no debe verlo). El
+    // value prop completo lo cubre propose_route_plan + apply_route_plan.
+    const ALLOWED_ORPHANS = new Set(['optimize_dispatch']);
     for (const tool of TOOLS) {
       if (ALLOWED_ORPHANS.has(tool.name)) continue;
       assert.ok(
@@ -119,14 +121,13 @@ describe('R3 — invariantes globales', () => {
     );
   });
 
-  test('cuando R3 se re-active: enter_router_mode y exit_router_mode definen un par simétrico', () => {
-    // Test informativo — verifica que ambas tools existen en el registry
-    // para cuando se re-active R3. Hoy enter_router_mode no está en
-    // orchestrator (handoff desactivado pre-demo).
+  test('enter_router_mode y exit_router_mode forman un par simétrico activo', () => {
+    // ADR-109: handoff re-activado. Enter vive en orchestrator, exit en router.
     const enter = TOOLS.find((t) => t.name === 'enter_router_mode');
     const exit = TOOLS.find((t) => t.name === 'exit_router_mode');
     assert.ok(enter, 'enter_router_mode debe existir en el registry');
     assert.ok(exit, 'exit_router_mode debe existir en el registry');
+    assert.ok(TOOLS_BY_ROLE.orchestrator.includes('enter_router_mode'));
     assert.ok(TOOLS_BY_ROLE.router.includes('exit_router_mode'));
   });
 });

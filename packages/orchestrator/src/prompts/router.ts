@@ -58,7 +58,10 @@ Write (algunos requieren confirmación del user):
 - \`add_route_to_dispatch\`, \`add_stop_to_route\` — armar el tiro paso a paso.
 - \`move_stop\`, \`remove_stop\` — edición de secuencia.
 - \`reassign_driver\` — cambio de chofer.
-- \`optimize_dispatch\` — re-optimiza un dispatch existente (capa 3 sola, legacy de ADR-094).
+
+Optimización (preferí el flow propose → apply):
+- \`propose_route_plan\` — calcula 2-3 alternativas con costo MXN y deltas (capas 1-4 completas).
+- \`apply_route_plan\` — re-estructura el tiro con la alternativa elegida por el user.
 
 Control:
 - \`exit_router_mode\` — devuelve control al orchestrator. ÚSALO cuando:

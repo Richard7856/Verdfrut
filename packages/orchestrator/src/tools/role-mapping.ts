@@ -63,19 +63,17 @@ export const TOOLS_BY_ROLE: Record<AgentRole, readonly string[]> = {
     // xlsx (ingestion entry-point — el orchestrator lo llama para extraer
     // direcciones del adjunto antes de delegar a geo)
     'parse_xlsx_attachment',
-    // optimize: legacy (re-rutea un tiro existente) + propose (3 alternativas con costo MXN).
-    // ADR-100 / OE-2: propose_route_plan vive en orchestrator desde 2026-05-15 noche
-    // (decisión pre-demo: sin handoff a router agent, un solo modelo conversa con user).
-    'optimize_dispatch',
+    // OE-2 / OE-3: propose 3 alternativas con costo MXN + apply atómico de la elegida.
+    // ADR-100 / 105 / 106. NOTA R4 (ADR-109): `optimize_dispatch` DEPRECADO — el
+    // value prop completo lo cubre propose_route_plan + apply_route_plan.
     'propose_route_plan',
-    // OE-3: aplicar una alternativa de propose_route_plan (re-estructura
-    // atómica del tiro con los vehículos elegidos por el user).
     'apply_route_plan',
     // delegación a sub-agentes batch (R2 / ADR-099)
     'delegate_to_geo',
-    // NOTA: enter_router_mode REMOVIDO temporalmente (pre-demo 2026-05-15).
-    // La handoff conversacional confundía al modelo en multi-turn complejo.
-    // Re-habilitar cuando OE-3 traiga UI badge + flow validado.
+    // R3 handoff conversacional (ADR-101 + ADR-109): el orchestrator puede entregarle
+    // la conversación al router agent para flows multi-turn de armado/optimización.
+    // Re-activado 2026-05-15 con UI badge en el chat (visibilidad del modo activo).
+    'enter_router_mode',
   ],
 
   // GEO (R2 activo): tool batch worker read-only. Recibe input estructurado
@@ -104,8 +102,9 @@ export const TOOLS_BY_ROLE: Record<AgentRole, readonly string[]> = {
     'move_stop',
     'remove_stop',
     'reassign_driver',
-    // Optimización: legacy + propuesta de alternativas (R4 deprecará optimize_dispatch).
-    'optimize_dispatch',
+    // Optimización: propuesta de alternativas + apply (ADR-100 / 105).
+    // R4 (ADR-109): `optimize_dispatch` DEPRECADO — removido del router; quedó
+    // huérfano del registry pero el handler sigue existiendo para callers UI legacy.
     'propose_route_plan',
     'apply_route_plan',
     // Control: devolver el turno al orchestrator.

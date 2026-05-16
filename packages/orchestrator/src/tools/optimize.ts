@@ -60,10 +60,16 @@ interface OptimizeResult {
   duration_delta_pct: number;
 }
 
+/**
+ * @deprecated R4 / ADR-109 (2026-05-15): usar `propose_route_plan` + `apply_route_plan`
+ * en su lugar. El nuevo flow muestra 3 alternativas con costo MXN y permite al user
+ * elegir; este legacy solo re-corre capa 3 (VROOM) sin opciones. El handler sigue vivo
+ * para callers UI antiguos pero está fuera de TOOLS_BY_ROLE (no accesible al LLM).
+ */
 const optimize_dispatch: ToolDefinition<OptimizeDispatchArgs, OptimizeResult> = {
   name: 'optimize_dispatch',
   description:
-    'Optimiza un tiro completo con VROOM + Google Routes: re-asigna tiendas entre camionetas + calcula secuencia óptima + ETAs con tráfico real. Si pasas vehicle_ids/driver_ids, los usa; si no, conserva los actuales. apply=false (default) calcula plan SIN escribir; apply=true ejecuta la reestructuración atómica. La operación es destructiva (cancela rutas viejas y crea nuevas).',
+    '[DEPRECADO — usar propose_route_plan + apply_route_plan] Optimiza un tiro completo con VROOM + Google Routes: re-asigna tiendas entre camionetas + calcula secuencia óptima + ETAs con tráfico real. Si pasas vehicle_ids/driver_ids, los usa; si no, conserva los actuales. apply=false (default) calcula plan SIN escribir; apply=true ejecuta la reestructuración atómica. La operación es destructiva (cancela rutas viejas y crea nuevas).',
   is_write: true,
   requires_confirmation: true,
   input_schema: {
