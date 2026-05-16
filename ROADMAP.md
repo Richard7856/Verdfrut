@@ -66,7 +66,9 @@ alternativas óptimas es **el value prop completo del producto**.
 | **OE-2** | Capa 4 — propuesta N alternativas + costo MXN + endpoint `internal/propose-routes` + migración 045 `customers.optimizer_costs` | ✅ 2026-05-15 (ADR-100) |
 | **OE-3** | Tools `propose_route_plan` + `apply_route_plan` + UI `/dispatches/[id]/propose` con 3 cards (cheapest/balanced/fastest) + breakdown costo MXN + apply buttons | ✅ 2026-05-15 (ADR-105) |
 | **OE-3.1** | Cache de propuestas (`route_plan_proposals`) + apply instantáneo (~500ms vs 30-60s) + mini-mapa SVG por card | ✅ 2026-05-15 (ADR-106) |
-| **OE-4** | Refinamientos: constraints (ventanas horarias, capacity multi-dim), cache matriz Google Routes, A/B testing default option | ⏳ pendiente |
+| **OE-4a** | Cache pair-by-pair de matriz routing (`routing_matrix_pairs`). Reduce costo Mapbox ~70% + latencia 2-3x. Telemetría de hit/miss. | ✅ 2026-05-15 (ADR-107) |
+| **OE-4b** | Ventanas horarias por tienda (delivery_hours_open/close). Diferida — no pedida por cliente actual. | ⏳ on-demand |
+| **OE-4c** | Capacity multi-dimensional explícita (volume + peso + cajas tratados independientes). Trigger: 2do cliente con flota heterogénea. | ⏳ post 2do cliente |
 
 **Métrica de éxito**: km totales por tiro CDMX 21 stops ≤ 280 (vs 421 hoy
 con asignación alfabética). Adopción ≥80% de tiros vía agente AI propose.

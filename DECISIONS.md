@@ -5913,6 +5913,83 @@ OE-3.1 cierra ambos gaps: persiste el plan rico en BD por 30min para que apply s
 - apps/platform/src/app/(app)/dispatches/[id]/propose/proposal-card.tsx — render mini-mapa + apply con fast path.
 - apps/platform/src/app/(app)/dispatches/[id]/propose/mini-map.tsx — SVG ligero (~120 líneas, cero dep).
 
+---
+
+## [2026-05-15] ADR-107: Sprint OE-4a — cache pair-by-pair de matriz Mapbox
+
+**Contexto:** El flow de `proposePlans` con K=[2,3,4] y N=8-10 clusters cada uno dispara 30-50 matrix calls a Mapbox Directions × $0.002-0.005 USD = $0.15-0.25 USD por propuesta. A 10 propuestas/día/customer = $2.50/día = ~$75/mes/customer. Acumulado a 5+ clientes es real money.
+
+El usage pattern tiene MUCHA redundancia:
+- Mismo tiro se repropone varias veces el mismo día
+- Mismas tiendas de mañana sirven al armar tiros de tarde
+- Apply re-corre matrix sobre subsets que ya teníamos
+- syncSeats interno + ETA recalcs reusan los mismos pares
+
+Sin cache, cada llamada paga el costo total aunque 95% de los pares ya fueron calculados minutos antes.
+
+**Decisión:** Cache pair-by-pair persistido en BD con TTL 7 días.
+
+1. **Tabla `routing_matrix_pairs`** (migración 050):
+   - `id UUID PK`
+   - `customer_id` (scope) + `origin_lat/lng NUMERIC(10,7)` + `dest_lat/lng NUMERIC(10,7)` + `provider TEXT` ('mapbox' | 'google' | 'haversine') + `profile TEXT` ('driving-traffic' default)
+   - `duration_seconds INTEGER`, `distance_meters INTEGER`
+   - `expires_at TIMESTAMPTZ DEFAULT NOW() + 7d`
+   - `hit_count`, `last_hit_at` para telemetría
+   - UNIQUE constraint en `(customer_id, origin, dest, provider, profile)` → permite UPSERT
+   - RLS por customer_id (idéntico patrón que el resto del schema)
+   - Function `tripdrive_routing_matrix_cache_cleanup()` SECURITY DEFINER para cron diario
+
+2. **Wrapper `getCachedMatrix`** (`apps/platform/src/lib/routing-cache.ts`):
+   - Input: `{coords, customerId, provider, profile}` + función fallback `fetchFresh(coords)`
+   - Genera N²-N pairs (skip i==j), round coords a 7 decimales (precisión ~1cm)
+   - Bulk SELECT por customer + bbox filter para reducir el set candidato. Filter client-side para los pares exactos
+   - Si 100% hit → assemble matrix solo del cache, ZERO calls a Mapbox
+   - Si miss parcial/total → call Mapbox completo (no se puede pedir solo pairs faltantes — la API trabaja con lista de coords), UPSERT TODOS los pairs para hits futuros
+   - Telemetría: log structured `{hits, misses, cost_saved_usd}` por invocación
+
+3. **Integración transparente en `buildOptimizerMatrix`** (`lib/optimizer.ts`):
+   - `OptimizeContext` gana campo opcional `customerId?: string`
+   - Si `ctx.customerId` presente Y token Mapbox configurado → usa `getCachedMatrix(coords, customerId, 'mapbox', 'driving-traffic')`
+   - Si falta cualquiera → fallback al `getMapboxMatrix(coords)` legacy (siempre fresh)
+   - Resolución de `customerId` en `computeOptimizationPlan`: 1 query a `vehicles[0].customer_id` (los vehículos del plan pertenecen al mismo customer por construcción). Si la query falla, se sigue sin cache (no se rompe el flow)
+
+4. **Precisión coords**: Mapbox devuelve exactamente las coords que mandas (sin drift). Round a 7 decimales antes de query+UPSERT evita falsos misses por float jitter (~1e-15 entre runs de JS).
+
+5. **TTL 7 días**: el modelo `driving-traffic` de Mapbox NO es realtime — es estadístico. Cachear 7d es seguro. Para post-publish con tráfico real (Google Routes en optimizer service), seguimos llamando fresh sin cache.
+
+**Alternativas consideradas:**
+- *Cache de matriz completa por hash de coords list*: simpler pero hit rate bajo porque cualquier cambio en el set de coords (1 tienda más, 1 menos, orden distinto) invalida todo. Pair-by-pair tiene hit rate 5×+ en patrones reales.
+- *Cachear partial subset de pairs en query a Mapbox*: descartado porque Mapbox no acepta "matriz de estos pairs específicos" — solo "matriz N×N de estas N coords". Para usar partial cache habría que armar requests por chunks, complejo.
+- *Cache en Redis/edge KV*: descartado. Volumen esperado <10K pairs/customer/día = <1MB en BD. Postgres es suficiente, RLS ya cubre seguridad, sin agregar infra.
+- *Partial index con `WHERE expires_at > NOW()`*: descartado porque Postgres rechaza partial indexes con funciones volátiles (NOW). Index plano + filter en query es marginalmente más lento pero correcto.
+- *Cache de Google Routes en el optimizer service (Railway)*: scope siguiente (OE-4a.2). Requiere modificar el servicio FastAPI que vive en Railway, no en este repo. Ahorra el costo de re-optimize-live con tráfico real ($0.55/llamada vs Mapbox $0.05/llamada — Google es más caro). Lo dejamos para cuando veamos uso real del live reopt.
+- *TTL más corto (1-2 días)*: descartado porque infraestructura vial cambia raro. 7d es el sweet spot entre frescura y reuso.
+
+**Riesgos / Limitaciones:**
+- **Bbox filter overshooting**: la query bulk usa bbox de TODAS las coords como filtro. Si tienes 50 coords muy dispersas, el bbox cubre área grande y trae más rows de los necesarios. Filter client-side los reduce al set exacto, pero la query trae más data. Para N<30 coords es OK; arriba habría que paginar el lookup.
+- **Sin partial cache miss**: si falta 1 par, llamamos Mapbox completo. Ineficiente cuando solo 1 stop cambió en un dispatch de 25 stops (24×24 pairs ya estaban cacheados pero recompute 25×25). Mitigación posible: si miss rate <10%, podríamos pedir solo "las nuevas filas/columnas" a Mapbox via chunking — overkill para ahora.
+- **Customer scope obligatorio**: cache se aísla por customer_id. Si 2 clientes operan en CDMX, NO comparten cache aunque las coords son las mismas. Decisión intencional por seguridad/aislamiento (un cliente podría inferir patrones del otro via timing).
+- **Mapbox response truncation**: si Mapbox devuelve `null` en algún par (sin ruta posible), guardamos el sentinel 999999 en BD. Caches "falsos" inflarían el almacenamiento pero no afectan correctness — VROOM trata 999999 como arco impracticable.
+- **No invalidation on store/vehicle move**: si el catálogo de tiendas o vehículos cambia las coords (ej. corrección manual de geocoding), el cache vieja queda válida hasta `expires_at`. Mitigación pendiente: trigger en `stores` UPDATE que invalida pairs donde lat/lng cambió. Por ahora, TTL natural cubre el caso en 7d.
+- **Sin tests automatizados**: para testear se requiere mockear Mapbox + clock + Supabase. Validación manual con un dispatch reusable. ROADMAP.md menciona test infrastructure como ítem pendiente.
+- **Telemetría sin agregación visual**: los logs van a Vercel functions logs. KPI dashboard "% hits/misses/cost_saved_acumulado" pendiente.
+
+**Oportunidades de mejora:**
+- Vercel Cron `tripdrive_routing_matrix_cache_cleanup` 1×/día (mismo patrón que `route_plan_proposals_cleanup`).
+- KPI dashboard `% cache hit rate per día` + `costo ahorrado acumulado MXN`.
+- Cache de Google Routes en el optimizer service Railway (OE-4a.2): cuando veamos uso de reopt-live alto.
+- Invalidación reactiva en triggers de `stores.lat/lng UPDATE`.
+- Sharing cache cross-customer si misma coord exacta + opt-in (sería privacy violation default). Útil cuando 2 clientes operan misma ruta CDMX-Centro.
+- Pre-warm del cache: cuando se importa el catálogo de tiendas via XLSX, lanzar un job que pre-calcule la matriz completa en background.
+- Chunking de Mapbox API para usar partial fetch cuando hit rate parcial > 80%.
+
+**Refs:**
+- ADR-100 (OE-2 — donde se identificó el costo Mapbox como riesgo).
+- supabase/migrations/00000000000050_routing_matrix_cache.sql — tabla + cleanup function.
+- apps/platform/src/lib/routing-cache.ts — `getCachedMatrix` wrapper con telemetría.
+- apps/platform/src/lib/optimizer.ts — `OptimizeContext.customerId` + integración en `buildOptimizerMatrix`.
+- apps/platform/src/lib/optimizer-pipeline.ts — resolución de customer_id desde vehicles[0].
+
 
 
 

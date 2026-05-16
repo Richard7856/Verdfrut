@@ -301,6 +301,57 @@ export type Database = {
         }
         Relationships: []
       }
+      routing_matrix_pairs: {
+        Row: {
+          id: string
+          customer_id: string
+          origin_lat: number
+          origin_lng: number
+          dest_lat: number
+          dest_lng: number
+          duration_seconds: number
+          distance_meters: number
+          provider: string
+          profile: string
+          expires_at: string
+          created_at: string
+          last_hit_at: string | null
+          hit_count: number
+        }
+        Insert: {
+          id?: string
+          customer_id: string
+          origin_lat: number
+          origin_lng: number
+          dest_lat: number
+          dest_lng: number
+          duration_seconds: number
+          distance_meters: number
+          provider: string
+          profile?: string
+          expires_at?: string
+          created_at?: string
+          last_hit_at?: string | null
+          hit_count?: number
+        }
+        Update: {
+          id?: string
+          customer_id?: string
+          origin_lat?: number
+          origin_lng?: number
+          dest_lat?: number
+          dest_lng?: number
+          duration_seconds?: number
+          distance_meters?: number
+          provider?: string
+          profile?: string
+          expires_at?: string
+          created_at?: string
+          last_hit_at?: string | null
+          hit_count?: number
+        }
+        Relationships: []
+      }
       route_plan_proposals: {
         Row: {
           id: string

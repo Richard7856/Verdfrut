@@ -45,6 +45,15 @@ interface OptimizeContext {
    * la misma camioneta sale de distintos CEDIS según el tiro.
    */
   vehicleDepotOverridesById?: Map<string, { lat: number; lng: number }>;
+  /**
+   * ADR-107 / OE-4a: customer scoping para el cache de matriz Mapbox.
+   * Si está presente, buildOptimizerMatrix consulta `routing_matrix_pairs`
+   * antes de pegarle a Mapbox. Si falta, mantiene comportamiento legacy
+   * (siempre fresh fetch). Lo pasan los callers que saben quién dispara
+   * el flow — typicamente `computeOptimizationPlan` con el customer del
+   * dispatch.
+   */
+  customerId?: string;
 }
 
 /**
@@ -367,6 +376,21 @@ async function buildOptimizerMatrix(
   }
 
   try {
+    // OE-4a: si tenemos customer_id en contexto, intentamos cache primero.
+    // Sin customer_id, comportamiento legacy (siempre fresh).
+    if (ctx.customerId) {
+      const { getCachedMatrix } = await import('./routing-cache');
+      const { matrix } = await getCachedMatrix(
+        {
+          coords,
+          customerId: ctx.customerId,
+          provider: 'mapbox',
+          profile: 'driving-traffic',
+        },
+        (freshCoords) => getMapboxMatrix(freshCoords),
+      );
+      return matrix;
+    }
     return await getMapboxMatrix(coords);
   } catch (err) {
     // Esto SÍ va a Sentry: el token está set pero la llamada falló. Cualquier

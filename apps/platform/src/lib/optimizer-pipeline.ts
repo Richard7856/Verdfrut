@@ -141,7 +141,25 @@ export async function computeOptimizationPlan(
     }
   }
 
-  // 6. Optimizer call.
+  // 6. Resolver customer_id para el cache de matriz (OE-4a). Los vehículos
+  // de un mismo plan siempre pertenecen al mismo customer (validado upstream
+  // por RLS y zone consistency). Si la query falla, dejamos undefined → el
+  // optimizer corre sin cache (legacy path).
+  let customerId: string | undefined;
+  try {
+    const { createServiceRoleClient } = await import('@tripdrive/supabase/server');
+    const admin = createServiceRoleClient();
+    const { data: vehicleRow } = await admin
+      .from('vehicles')
+      .select('customer_id')
+      .eq('id', vehicles[0]!.id)
+      .maybeSingle();
+    customerId = (vehicleRow?.customer_id as string | undefined) ?? undefined;
+  } catch {
+    /* no-op: cache opcional, fallback a fresh fetch */
+  }
+
+  // 7. Optimizer call.
   const optResponse = await callOptimizer(vehicles, stores, {
     shiftStartUnix,
     shiftEndUnix,
@@ -149,9 +167,10 @@ export async function computeOptimizationPlan(
     timezone: TENANT_TIMEZONE,
     depotsById,
     vehicleDepotOverridesById,
+    customerId,
   });
 
-  // 7. Mapear respuesta a plan estructurado.
+  // 8. Mapear respuesta a plan estructurado.
   const computedRoutes: ComputedRoute[] = [];
   let totalDistance = 0;
   let totalDuration = 0;
