@@ -157,9 +157,15 @@ export default async function DiaDetailPage({ params, searchParams }: Props) {
           <div className="flex flex-wrap items-center gap-2">
             <OptimizeDayButton
               fecha={fecha}
-              optimizableCount={
-                allRoutes.filter((r) => r.status === 'DRAFT' || r.status === 'OPTIMIZED').length
-              }
+              optimizableRoutes={allRoutes
+                .filter((r) => r.status === 'DRAFT' || r.status === 'OPTIMIZED')
+                .map((r) => {
+                  const vehicle = vehiclesById.get(r.vehicleId);
+                  return {
+                    name: vehicle?.alias ?? vehicle?.plate ?? r.name,
+                    stopCount: stopCounts.get(r.id)?.total ?? 0,
+                  };
+                })}
             />
             <Link
               href={`/dispatches/new/visual?date=${fecha}`}

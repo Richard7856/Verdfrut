@@ -14,24 +14,40 @@ import { optimizeDayAction } from '../../dispatches/actions';
 
 interface Props {
   fecha: string;
-  /** Cuántas rutas en estado DRAFT/OPTIMIZED hay hoy — si 0, deshabilita. */
-  optimizableCount: number;
+  /** Nombres legibles de las rutas DRAFT/OPTIMIZED del día (para mostrar
+   *  en el confirm). Vacío = no hay nada que optimizar, no renderiza. */
+  optimizableRoutes: Array<{ name: string; stopCount: number }>;
 }
 
-export function OptimizeDayButton({ fecha, optimizableCount }: Props) {
+export function OptimizeDayButton({ fecha, optimizableRoutes }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [confirmed, setConfirmed] = useState(false);
 
-  if (optimizableCount === 0) {
+  if (optimizableRoutes.length === 0) {
     return null;
   }
+  const optimizableCount = optimizableRoutes.length;
 
   function run() {
     if (!confirmed) {
+      const routeList = optimizableRoutes
+        .slice(0, 6)
+        .map((r) => `  • ${r.name} (${r.stopCount} paradas)`)
+        .join('\n');
+      const overflow =
+        optimizableRoutes.length > 6
+          ? `\n  · y ${optimizableRoutes.length - 6} más…`
+          : '';
       const ok = confirm(
-        `Re-optimizar ${optimizableCount} ruta(s) del día. Cada ruta reordena sus paradas con VROOM, sin mover paradas entre camionetas.\n\n` +
-          `Tarda ~3s por ruta. Las rutas en curso (publicadas) NO se tocan.`,
+        `Reordenar las paradas DENTRO de estas rutas:\n\n` +
+          routeList +
+          overflow +
+          `\n\n` +
+          `El algoritmo (VROOM) calcula el orden más corto para cada camioneta. ` +
+          `NO mueve paradas entre camionetas (para eso usa el lasso del mapa). ` +
+          `Rutas ya publicadas / en curso se ignoran.\n\n` +
+          `Tarda ~3 segundos por ruta.`,
       );
       if (!ok) return;
       setConfirmed(true);
@@ -65,7 +81,7 @@ export function OptimizeDayButton({ fecha, optimizableCount }: Props) {
       onClick={run}
       isLoading={pending}
       disabled={pending}
-      title={`Reordena paradas dentro de cada una de las ${optimizableCount} rutas (DRAFT/OPTIMIZED) del día. No mueve paradas entre camionetas.`}
+      title={`Reordena las paradas DENTRO de cada una de las ${optimizableCount} rutas optimizables del día. NO mueve paradas entre camionetas (usa el lasso del mapa para eso). Rutas publicadas se ignoran.`}
     >
       ⚡ Optimizar día ({optimizableCount})
     </Button>
