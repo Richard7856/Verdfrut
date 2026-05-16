@@ -17,7 +17,17 @@ import { bulkMoveStopsAction } from '@/app/(app)/dispatches/actions';
 interface Props {
   routes: MultiRouteEntry[];
   mapboxToken: string;
-  dispatchId: string;
+  /**
+   * Scope del bulk-select. Define qué path revalidar tras un move.
+   *  - `dispatch`: vista detalle del tiro (/dispatches/[id]). Cada ruta en
+   *    `routes` pertenece al mismo dispatch — caso simple legacy.
+   *  - `day`: vista por día (/dia/[fecha]). Las rutas pueden venir de
+   *    DIFERENTES dispatches. La action computa los dispatches afectados
+   *    dinámicamente y los revalida todos + /dia/[fecha].
+   */
+  scope:
+    | { type: 'dispatch'; dispatchId: string }
+    | { type: 'day'; fecha: string };
 }
 
 interface PostMoveBanner {
@@ -31,7 +41,7 @@ interface PostMoveBanner {
   targetRouteName: string;
 }
 
-export function BulkSelectableMultiRouteMap({ routes, mapboxToken, dispatchId }: Props) {
+export function BulkSelectableMultiRouteMap({ routes, mapboxToken, scope }: Props) {
   const router = useRouter();
   const [banner, setBanner] = useState<PostMoveBanner | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -61,7 +71,11 @@ export function BulkSelectableMultiRouteMap({ routes, mapboxToken, dispatchId }:
           `Moviendo ${stopIds.length} ${stopIds.length === 1 ? 'parada' : 'paradas'} a ${targetRoute.routeName}…`,
         );
         try {
-          const res = await bulkMoveStopsAction(stopIds, action.targetRouteId, dispatchId);
+          const ctx =
+            scope.type === 'dispatch'
+              ? { dispatchId: scope.dispatchId }
+              : { fecha: scope.fecha };
+          const res = await bulkMoveStopsAction(stopIds, action.targetRouteId, ctx);
           if (!res.ok) {
             setErrorMsg(res.error ?? 'Error al mover paradas.');
             return;
@@ -103,7 +117,7 @@ export function BulkSelectableMultiRouteMap({ routes, mapboxToken, dispatchId }:
         return;
       }
     },
-    [routes, dispatchId, router],
+    [routes, scope, router],
   );
 
   return (

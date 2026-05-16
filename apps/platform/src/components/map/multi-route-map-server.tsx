@@ -20,15 +20,20 @@ interface Props {
   routes: Route[];
   mapboxToken: string;
   /**
-   * Si está definido, el mapa habilita el "Modo Selección" con toolbar
-   * flotante para acciones bulk (mover stops entre rutas). Necesita
-   * `dispatchId` para que las server actions sepan qué cache invalidar.
-   * Si no se pasa, el mapa renderiza en modo solo-lectura tradicional.
+   * Si está definido, el mapa habilita "Modo Selección" con toolbar flotante
+   * para acciones bulk (mover stops entre rutas). El scope decide qué path
+   * revalidar tras un move y cómo manejar cross-dispatch:
+   *   - `dispatch` (legacy /dispatches/[id]): todas las rutas del mismo tiro
+   *   - `day` (UX-Fase 2 /dia/[fecha]): rutas pueden venir de distintos
+   *     dispatches, los moves cruzan, action revalida todos los afectados
+   * Si no se pasa scope, el mapa renderiza solo-lectura.
    */
-  dispatchId?: string;
+  scope?:
+    | { type: 'dispatch'; dispatchId: string }
+    | { type: 'day'; fecha: string };
 }
 
-export async function MultiRouteMapServer({ routes, mapboxToken, dispatchId }: Props) {
+export async function MultiRouteMapServer({ routes, mapboxToken, scope }: Props) {
   if (routes.length === 0) return null;
 
   // H4.1 / ADR-054: una sola query batch para todas las stops vía
@@ -104,14 +109,14 @@ export async function MultiRouteMapServer({ routes, mapboxToken, dispatchId }: P
     };
   });
 
-  // Phase 2 (2026-05-15): si el caller pasa dispatchId, renderizamos el
-  // wrapper de selección bulk. Sin dispatchId, mapa solo-lectura.
-  if (dispatchId) {
+  // Si el caller pasa scope, habilitamos el wrapper de selección bulk.
+  // Sin scope, mapa solo-lectura (uso default desde /live, embeddings, etc).
+  if (scope) {
     return (
       <BulkSelectableMultiRouteMap
         routes={entries}
         mapboxToken={mapboxToken}
-        dispatchId={dispatchId}
+        scope={scope}
       />
     );
   }

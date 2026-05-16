@@ -179,7 +179,7 @@ export default async function DispatchDetailPage({ params }: Props) {
           <MultiRouteMapServer
             routes={routesWithStops}
             mapboxToken={mapboxToken}
-            dispatchId={dispatch.id}
+            scope={{ type: 'dispatch', dispatchId: dispatch.id }}
           />
         </div>
       )}

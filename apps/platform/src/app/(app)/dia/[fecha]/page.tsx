@@ -20,6 +20,7 @@ import { MultiRouteMapServer } from '@/components/map/multi-route-map-server';
 import { formatKilometers } from '@tripdrive/utils';
 import type { Route, RouteStatus } from '@tripdrive/types';
 import { DayFilters, type StatusBucket } from './day-filters';
+import { OptimizeDayButton } from './optimize-day-button';
 
 export const dynamic = 'force-dynamic';
 
@@ -151,15 +152,23 @@ export default async function DiaDetailPage({ params, searchParams }: Props) {
     <>
       <PageHeader
         title={`Día ${fecha}`}
-        description="Todas las rutas del día en un solo mapa. Filtra por zona o estado. Click en una ruta del listado para editar la camioneta."
+        description="Todas las rutas del día en un solo mapa. Selecciona paradas con Shift+drag o Cmd+A para moverlas entre camionetas, incluso entre planes distintos."
         action={
-          <Link
-            href={`/dispatches/new/visual?date=${fecha}`}
-            className="rounded-md border border-emerald-700 bg-emerald-950/30 px-3 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-950/50"
-            title="Armar un plan del día desde el mapa: selecciona tiendas y asígnalas a camionetas visualmente"
-          >
-            🗺️ Armar día visual
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <OptimizeDayButton
+              fecha={fecha}
+              optimizableCount={
+                allRoutes.filter((r) => r.status === 'DRAFT' || r.status === 'OPTIMIZED').length
+              }
+            />
+            <Link
+              href={`/dispatches/new/visual?date=${fecha}`}
+              className="rounded-md border border-emerald-700 bg-emerald-950/30 px-3 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-950/50"
+              title="Armar un plan del día desde el mapa: selecciona tiendas y asígnalas a camionetas visualmente"
+            >
+              🗺️ Armar día visual
+            </Link>
+          </div>
         }
       />
 
@@ -189,7 +198,16 @@ export default async function DiaDetailPage({ params, searchParams }: Props) {
 
       {mapRoutes.length > 0 ? (
         <div className="mb-4">
-          <MultiRouteMapServer routes={mapRoutes} mapboxToken={mapboxToken} />
+          {/* UX-Fase 2: bulk selection cross-dispatch. El user selecciona
+              paradas con Shift+drag / Cmd+A / clicks y las mueve entre
+              CUALQUIER ruta del día (incluso si pertenecen a planes
+              distintos). La action revalida todos los dispatches afectados
+              + /dia/[fecha] automáticamente. */}
+          <MultiRouteMapServer
+            routes={mapRoutes}
+            mapboxToken={mapboxToken}
+            scope={{ type: 'day', fecha }}
+          />
         </div>
       ) : (
         <Card className="mb-4 border-dashed border-[var(--color-border)] bg-[var(--vf-surface-2)] p-8 text-center">

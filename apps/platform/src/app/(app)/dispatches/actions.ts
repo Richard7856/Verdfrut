@@ -829,7 +829,18 @@ export interface BulkMoveStopsResult {
 export async function bulkMoveStopsAction(
   stopIds: string[],
   targetRouteId: string,
-  dispatchId: string,
+  /**
+   * Contexto opcional para revalidation. Si se pasa `dispatchId`, revalida
+   * /dispatches/[dispatchId] (uso legacy desde el detalle de un tiro). Si se
+   * pasa `fecha`, revalida /dia/[fecha] (uso nuevo desde la vista por día,
+   * UX-Fase 2). Si ninguno, revalida solo /routes + paths inferidos.
+   *
+   * Cross-dispatch: las paradas pueden venir de rutas de DIFERENTES dispatches.
+   * `moveStopToAnotherRoute` no valida ownership de dispatch (solo status de
+   * ruta), así que el move es transparente entre tiros. Computamos los
+   * dispatchIds afectados dinámicamente y los revalidamos todos.
+   */
+  context?: { dispatchId?: string; fecha?: string },
 ): Promise<ActionResult & { result?: BulkMoveStopsResult }> {
   try {
     await requireRole('admin', 'dispatcher');
@@ -840,16 +851,19 @@ export async function bulkMoveStopsAction(
       return { ok: false, error: 'Máximo 200 stops por operación bulk.' };
     }
     requireUuid('targetRouteId', targetRouteId);
-    requireUuid('dispatchId', dispatchId);
+    if (context?.dispatchId) requireUuid('dispatchId', context.dispatchId);
+    if (context?.fecha && !/^\d{4}-\d{2}-\d{2}$/.test(context.fecha)) {
+      return { ok: false, error: 'fecha debe ser YYYY-MM-DD' };
+    }
 
     let moved = 0;
     const failed: BulkMoveStopsResult['failed'] = [];
-    const affected = new Set<string>([targetRouteId]);
+    const affectedRoutes = new Set<string>([targetRouteId]);
 
     for (const stopId of stopIds) {
       try {
         requireUuid('stopId', stopId);
-        // Capturar la ruta origen antes del move para audit.
+        // Capturar la ruta origen antes del move para audit + tracking.
         const supabase = await createServerClient();
         const { data: stopRow } = await supabase
           .from('stops')
@@ -860,7 +874,7 @@ export async function bulkMoveStopsAction(
 
         await moveStopToAnotherRoute(stopId, targetRouteId);
         moved++;
-        if (sourceRouteId) affected.add(sourceRouteId);
+        if (sourceRouteId) affectedRoutes.add(sourceRouteId);
       } catch (err) {
         failed.push({
           stopId,
@@ -869,15 +883,37 @@ export async function bulkMoveStopsAction(
       }
     }
 
-    revalidatePath(`/dispatches/${dispatchId}`);
+    // Computar dispatches afectados desde las rutas afectadas — para
+    // revalidar /dispatches/[id] de cada uno (cross-dispatch moves).
+    const affectedDispatches = new Set<string>();
+    if (affectedRoutes.size > 0) {
+      const supabase = await createServerClient();
+      const { data: routeRows } = await supabase
+        .from('routes')
+        .select('id, dispatch_id')
+        .in('id', Array.from(affectedRoutes));
+      for (const r of routeRows ?? []) {
+        if (r.dispatch_id) affectedDispatches.add(r.dispatch_id as string);
+      }
+    }
+
+    // Revalidación: el path explícito del caller + cada dispatch afectado +
+    // /routes (donde aparecen rutas individuales).
+    if (context?.dispatchId) revalidatePath(`/dispatches/${context.dispatchId}`);
+    if (context?.fecha) revalidatePath(`/dia/${context.fecha}`);
+    for (const dId of affectedDispatches) {
+      revalidatePath(`/dispatches/${dId}`);
+    }
     revalidatePath('/routes');
 
     logger.info('dispatches.bulk_move_stops', {
-      dispatch_id: dispatchId,
+      dispatch_id_ctx: context?.dispatchId ?? null,
+      fecha_ctx: context?.fecha ?? null,
       target_route_id: targetRouteId,
       requested: stopIds.length,
       moved,
       failed: failed.length,
+      affected_dispatches: Array.from(affectedDispatches),
     });
 
     return {
@@ -885,7 +921,7 @@ export async function bulkMoveStopsAction(
       result: {
         moved,
         failed,
-        affectedRouteIds: [...affected],
+        affectedRouteIds: [...affectedRoutes],
       },
     };
   } catch (err) {
@@ -1004,6 +1040,91 @@ export async function optimizeDispatchAction(
       routesOptimized: optimized,
       routesFailed: failed.length > 0 ? failed : undefined,
       unassignedStoreIds: unassignedAll.length > 0 ? unassignedAll : undefined,
+      error:
+        optimized === 0 && failed.length > 0
+          ? `Ninguna ruta se pudo optimizar (${failed.length} fallaron).`
+          : undefined,
+    };
+  } catch (err) {
+    if (err instanceof ValidationError) return { ok: false, error: err.message };
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Error desconocido',
+    };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// UX-Fase 2: Optimizar todo el día (loop within-truck across all dispatches)
+// ─────────────────────────────────────────────────────────────────────
+//
+// Re-optimiza CADA ruta DRAFT/OPTIMIZED del día (sin mover paradas entre
+// camionetas — eso requiere cross-plan rebalance que es UX-Fase 3). Es la
+// versión bulk de "Re-optimizar" del card de ruta, aplicada a todas las
+// rutas del día con un click.
+
+export interface OptimizeDayResult extends ActionResult {
+  fecha?: string;
+  routesOptimized?: number;
+  routesFailed?: Array<{ routeId: string; reason: string }>;
+}
+
+export async function optimizeDayAction(fecha: string): Promise<OptimizeDayResult> {
+  await requireRole('admin', 'dispatcher');
+  try {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+      throw new ValidationError('fecha', 'fecha debe ser YYYY-MM-DD');
+    }
+
+    const supabase = await createServerClient();
+    const { data: dayRoutes, error: rErr } = await supabase
+      .from('routes')
+      .select('id, status')
+      .eq('date', fecha)
+      .in('status', ['DRAFT', 'OPTIMIZED']);
+    if (rErr) throw new Error(rErr.message);
+    if (!dayRoutes || dayRoutes.length === 0) {
+      return {
+        ok: true,
+        fecha,
+        routesOptimized: 0,
+        routesFailed: [],
+        error: 'No hay rutas optimizables (DRAFT/OPTIMIZED) en este día.',
+      };
+    }
+
+    // Loop secuencial — paralelo causaría thrashing en el optimizer (VROOM
+    // self-hosted con queue limitada). En 10 rutas tardará ~30s; aceptable
+    // como UX (toast pending + reload).
+    let optimized = 0;
+    const failed: Array<{ routeId: string; reason: string }> = [];
+    for (const r of dayRoutes) {
+      const res = await reoptimizeRouteAction(r.id as string);
+      if (res.ok) {
+        optimized++;
+      } else {
+        failed.push({
+          routeId: r.id as string,
+          reason: res.error ?? 'Error desconocido',
+        });
+      }
+    }
+
+    revalidatePath(`/dia/${fecha}`);
+    revalidatePath('/routes');
+
+    logger.info('dispatches.optimize_day', {
+      fecha,
+      total: dayRoutes.length,
+      optimized,
+      failed: failed.length,
+    });
+
+    return {
+      ok: optimized > 0 || failed.length === 0,
+      fecha,
+      routesOptimized: optimized,
+      routesFailed: failed.length > 0 ? failed : undefined,
       error:
         optimized === 0 && failed.length > 0
           ? `Ninguna ruta se pudo optimizar (${failed.length} fallaron).`
