@@ -27,6 +27,10 @@ interface Props {
    *   - `day` (UX-Fase 2 /dia/[fecha]): rutas pueden venir de distintos
    *     dispatches, los moves cruzan, action revalida todos los afectados
    * Si no se pasa scope, el mapa renderiza solo-lectura.
+   *
+   * ADR-121 Fase 1: el caller decide pasar `scope` solo si el plan tiene la
+   * feature `dragEditMap`. Esto degrada graciosamente a mapa read-only en
+   * Starter, sin esconder el mapa completo.
    */
   scope?:
     | { type: 'dispatch'; dispatchId: string }

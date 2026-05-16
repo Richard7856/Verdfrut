@@ -9,12 +9,14 @@ import 'server-only';
 import { createServerClient } from '@tripdrive/supabase/server';
 import {
   FeatureNotAvailableError,
+  getEffectiveFeatures,
   hasFeature,
   hasRoomFor,
   PLAN_LABELS,
   type CustomerStatus,
   type CustomerTier,
   type FeatureKey,
+  type PlanFeatures,
 } from '@tripdrive/plans';
 
 interface CustomerGateRow {
@@ -87,6 +89,29 @@ export async function requireRoomForStores(toAdd: number): Promise<void> {
   if (!hasRoomFor(customer, 'maxStoresPerAccount', current, toAdd)) {
     throw new StoreLimitReachedError(customer.tier, current, toAdd);
   }
+}
+
+/**
+ * Devuelve el set efectivo de features del customer del caller — pensado
+ * para Server Components que renderizan UI condicional (esconder botones,
+ * mostrar lock badges, etc.). No tira si el customer no tiene la feature;
+ * el caller decide qué hacer con el flag.
+ *
+ * Fase 1 de gating (ADR-121): el gate duro vive en server actions/API
+ * routes; este helper sirve para emparejar el UI con esa decisión y
+ * evitar que el user vea botones que van a fallar al click.
+ */
+export async function getCallerFeatures(): Promise<{
+  features: PlanFeatures;
+  tier: CustomerTier;
+  status: CustomerStatus;
+}> {
+  const customer = await readCallerCustomer();
+  return {
+    features: getEffectiveFeatures(customer),
+    tier: customer.tier,
+    status: customer.status,
+  };
 }
 
 export class StoreLimitReachedError extends Error {

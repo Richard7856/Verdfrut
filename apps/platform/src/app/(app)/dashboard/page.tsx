@@ -12,6 +12,7 @@
 import { PageHeader } from '@tripdrive/ui';
 import { todayInZone } from '@tripdrive/utils';
 import { requireRole } from '@/lib/auth';
+import { getCallerFeatures } from '@/lib/plans-gate';
 import { listZones } from '@/lib/queries/zones';
 import {
   getDashboardOverview,
@@ -59,6 +60,9 @@ export default async function DashboardPage({ searchParams }: Props) {
   const profile = await requireRole('admin', 'dispatcher');
   const params = await searchParams;
   const timezone = process.env.NEXT_PUBLIC_TENANT_TIMEZONE ?? DEFAULT_TZ;
+  // ADR-121 Fase 1: el banner de push solo aparece si el plan lo incluye.
+  // El API /api/push/subscribe también gatea (defense-in-depth).
+  const { features: planFeatures } = await getCallerFeatures();
 
   const range = defaultRange(timezone);
   const from = params.from || range.from;
@@ -91,8 +95,9 @@ export default async function DashboardPage({ searchParams }: Props) {
       />
 
       {/* Banner discreto para activar push notifications del SO. Se auto-oculta
-          tras suscribir o si el browser rechazó. */}
-      <PushOptIn />
+          tras suscribir o si el browser rechazó. ADR-121: solo si el plan lo
+          incluye — escondido completo para Starter/sin push. */}
+      {planFeatures.pushNotifications && <PushOptIn />}
 
       <DashboardFilters
         zones={zones.map((z) => ({ id: z.id, name: z.name }))}

@@ -16,10 +16,37 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePageContext, shouldHideFloatingChat, type PageContext } from './use-page-context';
 import { Markdown } from './markdown';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 
 type Role = 'user' | 'assistant' | 'tool';
 type AgentRole = 'orchestrator' | 'router' | 'geo';
+
+// Stream AI Fase B (2026-05-16): tools que mutan estado en DB. Cuando el
+// agente ejecuta una de éstas con ok:true durante un turn, hacemos
+// router.refresh() al cerrar el stream para que el server component que
+// muestra la entidad recién creada/modificada se rerenderee sin que el
+// user tenga que F5. Mantener sincronizado con WRITE_TOOLS de
+// packages/orchestrator/src/tools/writes.ts + tools de catalog-edits,
+// places y xlsx que mutan.
+const WRITE_TOOLS: ReadonlySet<string> = new Set([
+  'create_dispatch',
+  'add_route_to_dispatch',
+  'add_stop_to_route',
+  'move_stop',
+  'remove_stop',
+  'publish_dispatch',
+  'cancel_dispatch',
+  'reassign_driver',
+  'bulk_create_stores',
+  'create_store',
+  'update_store',
+  'archive_store',
+  'update_driver',
+  'update_vehicle',
+  'create_zone',
+  'update_zone',
+  'apply_route_plan',
+]);
 
 // Badge visual del rol activo del agente (Stream R / ADR-109).
 // El usuario ve qué "modo" responde para entender por qué cambia el tono
@@ -59,6 +86,7 @@ export function FloatingChat() {
 }
 
 function FloatingChatInner({ ctx }: { ctx: PageContext }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState('');
@@ -67,6 +95,8 @@ function FloatingChatInner({ ctx }: { ctx: PageContext }) {
   const [pending, setPending] = useState<PendingConfirmation | null>(null);
   const [activeRole, setActiveRole] = useState<AgentRole>('orchestrator');
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Si en este stream una WRITE_TOOL tuvo ok:true → refresh tras cerrar SSE.
+  const shouldRefreshRef = useRef(false);
 
   // Auto-scroll al fondo cuando se agregan turns.
   useEffect(() => {
@@ -92,6 +122,10 @@ function FloatingChatInner({ ctx }: { ctx: PageContext }) {
       setInput('');
       setStreaming(true);
       setPending(null);
+      shouldRefreshRef.current = false;
+      // Mapeamos tool_use_id → tool_name durante el stream para poder decidir
+      // si el resultado pertenece a una WRITE_TOOL sin re-leer el turn state.
+      const toolNamesByUseId = new Map<string, string>();
 
       try {
         const res = await fetch('/api/orchestrator/chat', {
@@ -153,23 +187,30 @@ function FloatingChatInner({ ctx }: { ctx: PageContext }) {
               });
             } else if (evt.type === 'tool_use_start') {
               const toolId = `tool-${String(evt.tool_use_id)}`;
+              const toolName = String(evt.tool_name);
+              toolNamesByUseId.set(String(evt.tool_use_id), toolName);
               setTurns((prev) => [
                 ...prev,
                 {
                   id: toolId,
                   role: 'tool',
-                  toolName: String(evt.tool_name),
+                  toolName,
                   toolPending: true,
                 },
               ]);
             } else if (evt.type === 'tool_use_result') {
               const toolId = `tool-${String(evt.tool_use_id)}`;
+              const result = evt.result as ChatTurn['toolResult'];
+              const toolName = toolNamesByUseId.get(String(evt.tool_use_id));
+              if (result?.ok && toolName && WRITE_TOOLS.has(toolName)) {
+                shouldRefreshRef.current = true;
+              }
               setTurns((prev) =>
                 prev.map((t) =>
                   t.id === toolId
                     ? {
                         ...t,
-                        toolResult: evt.result as ChatTurn['toolResult'],
+                        toolResult: result,
                         toolPending: false,
                       }
                     : t,
@@ -215,9 +256,15 @@ function FloatingChatInner({ ctx }: { ctx: PageContext }) {
         ]);
       } finally {
         setStreaming(false);
+        if (shouldRefreshRef.current) {
+          // Re-fetch RSC payload del path actual para que la entidad recién
+          // creada/modificada por el agente aparezca sin F5 manual.
+          shouldRefreshRef.current = false;
+          router.refresh();
+        }
       }
     },
-    [sessionId, ctx.path, ctx.entities],
+    [sessionId, ctx.path, ctx.entities, router],
   );
 
   const handleConfirm = useCallback(

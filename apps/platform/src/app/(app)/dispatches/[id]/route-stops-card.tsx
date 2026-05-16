@@ -75,6 +75,10 @@ interface Props {
   availableStoresToAdd?: Array<{ id: string; code: string; name: string }>;
   /** H3.5: alguna ruta del tiro tiene version > 1 (cambios manuales). Pasado al RemoveVehicleButton. */
   dispatchHasManualReorders?: boolean;
+  /** ADR-121 Fase 1: feature flag `liveReOpt` del customer. Si false, escondemos
+   *  el botón "🚦 Re-optimizar con tráfico actual" (post-publish). El server
+   *  action también gatea (defense-in-depth). */
+  canReoptLive?: boolean;
 }
 
 const EDITABLE_STATUSES = new Set<RouteStatus>(['DRAFT', 'OPTIMIZED', 'APPROVED']);
@@ -107,6 +111,7 @@ export function RouteStopsCard({
   availableDepots = [],
   availableStoresToAdd = [],
   dispatchHasManualReorders = false,
+  canReoptLive = true,
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -457,8 +462,8 @@ export function RouteStopsCard({
       {/* Stream C O1 — Re-optimizar con tráfico actual. Solo en post-publish
           porque pre-publish ya usa el reoptimize regular más barato (Mapbox).
           Aquí necesitamos Google Routes con tráfico real porque hay un chofer
-          que ya está en ruta. */}
-      {isPostPublish && stops.some((s) => s.status === 'pending') && (
+          que ya está en ruta. ADR-121: gateado por feature `liveReOpt`. */}
+      {canReoptLive && isPostPublish && stops.some((s) => s.status === 'pending') && (
         <div className="mt-2 flex items-center justify-between gap-2 rounded border border-[var(--color-border)] bg-[var(--vf-surface-2)] px-2 py-1.5 text-xs">
           <span style={{ color: 'var(--vf-text-mute)' }}>
             ¿Atraso por tráfico o cambio?

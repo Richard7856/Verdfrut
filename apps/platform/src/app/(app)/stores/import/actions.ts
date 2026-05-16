@@ -14,6 +14,7 @@ import ExcelJS from 'exceljs';
 import { revalidatePath } from 'next/cache';
 import { logger } from '@tripdrive/observability';
 import { requireRole } from '@/lib/auth';
+import { requireCustomerFeature } from '@/lib/plans-gate';
 import { createServerClient } from '@tripdrive/supabase/server';
 import { isSandboxMode } from '@/lib/workbench-mode';
 
@@ -120,6 +121,10 @@ export async function parseAndGeocodeXlsx(formData: FormData): Promise<
   Result<ParseAndGeocodeResult>
 > {
   await requireRole('admin', 'dispatcher');
+  // Gate por plan (ADR-121 Fase 1): el flow de importar XLSX vive en Pro+.
+  // Lo bloqueamos en el parse (paso 1 de 3) para evitar gastar Google
+  // Geocoding API antes de checar.
+  await requireCustomerFeature('xlsxImport');
 
   return wrap(async () => {
     const file = formData.get('file');

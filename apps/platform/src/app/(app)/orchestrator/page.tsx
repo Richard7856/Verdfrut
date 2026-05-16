@@ -3,6 +3,7 @@
 // visualizados como cards expandibles. Lista de sesiones laterales en 2.6.
 
 import { requireAdminOrDispatcher } from '@/lib/auth';
+import { getCallerFeatures } from '@/lib/plans-gate';
 import { PageHeader } from '@tripdrive/ui';
 import { OrchestratorChat } from './chat-client';
 
@@ -12,13 +13,18 @@ export const dynamic = 'force-dynamic';
 export default async function OrchestratorPage() {
   await requireAdminOrDispatcher();
 
+  // ADR-121 Fase 1: pasamos `canUploadXlsx` al chat para esconder el botón
+  // 📎 cuando el plan no incluye xlsxImport. El API route /api/orchestrator/
+  // upload también gatea (defense-in-depth).
+  const { features } = await getCallerFeatures();
+
   return (
     <>
       <PageHeader
         title="Orquestador AI"
         description="Conversa con Claude para crear, mover y publicar tiros. Las acciones destructivas (publicar, cancelar) piden confirmación explícita."
       />
-      <OrchestratorChat />
+      <OrchestratorChat canUploadXlsx={features.xlsxImport} />
     </>
   );
 }

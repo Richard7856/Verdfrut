@@ -10,6 +10,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Badge, Card, PageHeader } from '@tripdrive/ui';
 import { requireRole } from '@/lib/auth';
+import { getCallerFeatures } from '@/lib/plans-gate';
 import { listRoutes } from '@/lib/queries/routes';
 import { listZones } from '@/lib/queries/zones';
 import { listVehicles } from '@/lib/queries/vehicles';
@@ -73,6 +74,9 @@ export default async function DiaDetailPage({ params, searchParams }: Props) {
   const { zone: zoneParam, status: statusParam } = await searchParams;
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) notFound();
+
+  // ADR-121 Fase 1: flags de features que afectan UI de esta página.
+  const { features: planFeatures } = await getCallerFeatures();
 
   // Parse status buckets desde URL. Si nada, defaultea a "plan" + "live" — el
   // dispatcher casi siempre quiere ver lo que está pasando o por pasar; las
@@ -254,7 +258,9 @@ export default async function DiaDetailPage({ params, searchParams }: Props) {
           <MultiRouteMapServer
             routes={mapRoutes}
             mapboxToken={mapboxToken}
-            scope={{ type: 'day', fecha }}
+            // ADR-121 Fase 1: scope solo si el plan permite drag/lasso bulk.
+            // Sin scope, el mapa se renderiza read-only (sin "Modo Selección").
+            scope={planFeatures.dragEditMap ? { type: 'day', fecha } : undefined}
           />
         </div>
       ) : (

@@ -5,11 +5,38 @@
 // upload de adjuntos (xlsx/csv/imagen) — 2.8.
 
 import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { Card, Button, Textarea, Badge } from '@tripdrive/ui';
 import { Markdown } from '@/components/floating-chat/markdown';
 
 type Role = 'user' | 'assistant' | 'tool';
 type AgentRole = 'orchestrator' | 'router' | 'geo';
+
+// Stream AI Fase B (2026-05-16): tools que mutan estado en DB. Cuando un
+// turn ejecuta una de éstas con ok:true → router.refresh() al cerrar el
+// stream para que las pantallas que el user pueda abrir en otra pestaña
+// queden frescas y el sidebar de sesiones se actualice. Mantener
+// sincronizado con la lista de packages/orchestrator/src/tools/writes.ts
+// + tools mutantes de catalog-edits, places y xlsx.
+const WRITE_TOOLS: ReadonlySet<string> = new Set([
+  'create_dispatch',
+  'add_route_to_dispatch',
+  'add_stop_to_route',
+  'move_stop',
+  'remove_stop',
+  'publish_dispatch',
+  'cancel_dispatch',
+  'reassign_driver',
+  'bulk_create_stores',
+  'create_store',
+  'update_store',
+  'archive_store',
+  'update_driver',
+  'update_vehicle',
+  'create_zone',
+  'update_zone',
+  'apply_route_plan',
+]);
 
 // Badge visual del rol activo del agente (Stream R / ADR-109).
 // Replica el patrón del floating-chat para mantener identidad consistente.
@@ -86,7 +113,16 @@ interface SessionListItem {
   updated_at: string;
 }
 
-export function OrchestratorChat() {
+interface OrchestratorChatProps {
+  /** ADR-121 Fase 1: feature flag `xlsxImport` del customer. Si false,
+   *  escondemos el botón 📎 y el drop-zone. El API route también gatea. */
+  canUploadXlsx?: boolean;
+}
+
+export function OrchestratorChat({ canUploadXlsx = true }: OrchestratorChatProps = {}) {
+  const router = useRouter();
+  // Si en este stream una WRITE_TOOL tuvo ok:true → refresh tras cerrar SSE.
+  const shouldRefreshRef = useRef(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState('');
@@ -260,6 +296,10 @@ export function OrchestratorChat() {
     setPendingAttachments([]);
     setStreaming(true);
     setPendingConfirmation(null);
+    shouldRefreshRef.current = false;
+    // Mapeamos tool_use_id → tool_name durante el stream para detectar
+    // WRITE_TOOLS en el evento tool_use_result sin re-leer turn state.
+    const toolNamesByUseId = new Map<string, string>();
 
     try {
       const res = await fetch('/api/orchestrator/chat', {
@@ -349,24 +389,31 @@ export function OrchestratorChat() {
             });
           } else if (evt.type === 'tool_use_start') {
             const toolId = `tool-${String(evt.tool_use_id)}`;
+            const toolName = String(evt.tool_name);
+            toolNamesByUseId.set(String(evt.tool_use_id), toolName);
             setTurns((prev) => [
               ...prev,
               {
                 id: toolId,
                 role: 'tool',
-                toolName: String(evt.tool_name),
+                toolName,
                 toolArgs: evt.args as Record<string, unknown>,
                 toolPending: true,
               },
             ]);
           } else if (evt.type === 'tool_use_result') {
             const toolId = `tool-${String(evt.tool_use_id)}`;
+            const result = evt.result as ChatTurn['toolResult'];
+            const toolName = toolNamesByUseId.get(String(evt.tool_use_id));
+            if (result?.ok && toolName && WRITE_TOOLS.has(toolName)) {
+              shouldRefreshRef.current = true;
+            }
             setTurns((prev) =>
               prev.map((t) =>
                 t.id === toolId
                   ? {
                       ...t,
-                      toolResult: evt.result as ChatTurn['toolResult'],
+                      toolResult: result,
                       toolPending: false,
                     }
                   : t,
@@ -436,6 +483,12 @@ export function OrchestratorChat() {
     } finally {
       setStreaming(false);
       void refreshSessions();
+      if (shouldRefreshRef.current) {
+        // Re-fetch RSC payload de la ruta actual para que la entidad recién
+        // creada/modificada por el agente aparezca sin F5 manual.
+        shouldRefreshRef.current = false;
+        router.refresh();
+      }
     }
   }
 
@@ -502,14 +555,16 @@ export function OrchestratorChat() {
     <div
       ref={dropRef}
       onDragOver={(e) => {
+        // ADR-121 Fase 1: si el plan no incluye xlsxImport, no aceptamos drag.
+        if (!canUploadXlsx) return;
         e.preventDefault();
         setIsDragging(true);
       }}
       onDragLeave={() => setIsDragging(false)}
-      onDrop={handleDrop}
+      onDrop={canUploadXlsx ? handleDrop : undefined}
       className="relative flex flex-1 min-w-0 flex-col gap-3"
     >
-      {isDragging && (
+      {isDragging && canUploadXlsx && (
         <div
           className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-[var(--radius-md)] border-2 border-dashed"
           style={{
@@ -543,8 +598,14 @@ export function OrchestratorChat() {
             <p className="text-sm text-[var(--color-text-muted)]">
               Empieza con algo como: <em>“Muéstrame los tiros de hoy”</em>,{' '}
               <em>“Busca la tienda TOL-1422”</em>,{' '}
-              <em>“Geocodifica Av Constituyentes 1234 Toluca”</em>,
-              o arrastra un XLSX y pídele <em>“Crea las tiendas de este sheet”</em>.
+              <em>“Geocodifica Av Constituyentes 1234 Toluca”</em>
+              {canUploadXlsx && (
+                <>
+                  , o arrastra un XLSX y pídele{' '}
+                  <em>“Crea las tiendas de este sheet”</em>
+                </>
+              )}
+              .
             </p>
           </Card>
         )}
@@ -601,25 +662,29 @@ export function OrchestratorChat() {
       )}
 
       <div className="flex gap-2">
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept=".xlsx,.csv,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
-          className="hidden"
-          onChange={(e) => {
-            if (e.target.files) void uploadFiles(e.target.files);
-            e.target.value = '';
-          }}
-        />
-        <Button
-          variant="outline"
-          onClick={() => fileInputRef.current?.click()}
-          disabled={streaming || uploading}
-          title="Adjuntar XLSX o CSV"
-        >
-          {uploading ? '⏳' : '📎'}
-        </Button>
+        {canUploadXlsx && (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".xlsx,.csv,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files) void uploadFiles(e.target.files);
+                e.target.value = '';
+              }}
+            />
+            <Button
+              variant="outline"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={streaming || uploading}
+              title="Adjuntar XLSX o CSV"
+            >
+              {uploading ? '⏳' : '📎'}
+            </Button>
+          </>
+        )}
         <Textarea
           rows={2}
           value={input}
@@ -630,7 +695,11 @@ export function OrchestratorChat() {
               void send();
             }
           }}
-          placeholder="Pregunta, pide una acción, o arrastra un sheet (Enter para enviar)"
+          placeholder={
+            canUploadXlsx
+              ? 'Pregunta, pide una acción, o arrastra un sheet (Enter para enviar)'
+              : 'Pregunta o pide una acción (Enter para enviar)'
+          }
           disabled={streaming || pendingConfirmation !== null}
         />
         <Button

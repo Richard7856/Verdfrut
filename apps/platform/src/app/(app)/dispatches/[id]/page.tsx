@@ -5,6 +5,7 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { Badge, Card, PageHeader, Button } from '@tripdrive/ui';
 import { requireRole } from '@/lib/auth';
+import { getCallerFeatures } from '@/lib/plans-gate';
 import { getDispatch, listRoutesByDispatch } from '@/lib/queries/dispatches';
 import { listRoutes, countStopsForRoutes } from '@/lib/queries/routes';
 import { listStopsForRoutes } from '@/lib/queries/stops';
@@ -48,6 +49,11 @@ export default async function DispatchDetailPage({ params }: Props) {
   const { id } = await params;
   const dispatch = await getDispatch(id);
   if (!dispatch) notFound();
+
+  // ADR-121 Fase 1: flags de features que afectan UI de esta página. Las
+  // server actions también gatean por seguridad — esto solo controla qué
+  // botones ve el user para no prometer lo que no tiene.
+  const { features: planFeatures } = await getCallerFeatures();
 
   const [routes, zones, vehicles, stores, zoneDrivers, zoneUsers, allDepots] = await Promise.all([
     listRoutesByDispatch(id),
@@ -189,7 +195,10 @@ export default async function DispatchDetailPage({ params }: Props) {
           <MultiRouteMapServer
             routes={routesWithStops}
             mapboxToken={mapboxToken}
-            scope={{ type: 'dispatch', dispatchId: dispatch.id }}
+            // ADR-121 Fase 1: scope solo cuando el plan permite drag/lasso bulk.
+            // Sin scope, el mapa cae a read-only — el user sigue viendo todo
+            // pero no puede seleccionar paradas para mover en bulk.
+            scope={planFeatures.dragEditMap ? { type: 'dispatch', dispatchId: dispatch.id } : undefined}
           />
         </div>
       )}
@@ -294,6 +303,7 @@ export default async function DispatchDetailPage({ params }: Props) {
                     availableDepots={availableDepotOptions}
                     availableStoresToAdd={availableStoresForRoute}
                     dispatchHasManualReorders={hasManualReorders}
+                    canReoptLive={planFeatures.liveReOpt}
                   />
                 </li>
               );

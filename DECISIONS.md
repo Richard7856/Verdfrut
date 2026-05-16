@@ -6859,6 +6859,64 @@ Adicional: introduce la **"Frecuencia"** como concepto operativo visible, antici
 - apps/platform/src/app/(app)/settings/workbench/workbench-manager.tsx — discovery final.
 
 
+## [2026-05-16] ADR-121: Gating real por tier — Fase 1 (cerrar contrato Pro)
+**Contexto:** El registry `@tripdrive/plans` declara 9 feature flags por tier (ai, xlsxImport, dragEditMap, pushNotifications, liveReOpt, customDomain, customBranding, maxAccounts, maxStoresPerAccount) pero solo 2 tenían gate activo en código: `ai` (booleano binario en `/api/orchestrator/chat`) y `maxStoresPerAccount` (vía `requireRoomForStores`). El resto era contrato comercial sin enforcement — un Starter podía importar XLSX, hacer bulk move, usar live re-opt, etc. Riesgo: cobrar Pro/Enterprise sin entregarlo en código.
+
+**Decisión:** Activar gates server-side + UI conditional para 4 features que ya tienen call sites claros, sin tocar `customDomain`/`customBranding` (deuda Enterprise sin implementación) ni `maxAccounts` (Stream A pendiente).
+
+- Nuevo helper `getCallerFeatures()` en [plans-gate.ts](apps/platform/src/lib/plans-gate.ts) — devuelve el set efectivo + tier + status para que server components rendereen UI condicional sin que el caller tenga que mockear customer rows.
+- Nuevo componente [feature-lock.tsx](apps/platform/src/components/feature-lock.tsx) con `FeatureLockedCard` (página completa bloqueada → upgrade card) y `FeatureLockedBadge` (badge `🔒 Pro` inline). Copy + tier mínimo centralizado por feature.
+- **xlsxImport** (gate Pro+): API route [/api/orchestrator/upload](apps/platform/src/app/api/orchestrator/upload/route.ts) responde 403; server action `parseAndGeocodeXlsx` lanza `FeatureNotAvailableError`; página `/stores/import` redirige a `FeatureLockedCard`; orchestrator full-screen chat esconde botón 📎 + drop zone + sugerencia "arrastra un XLSX" del empty state.
+- **liveReOpt** (gate todos hoy, defensivo): server action `reoptimizeLiveAction` gateada; botón "🚦 Re-optimizar con tráfico actual" en `RouteStopsCard` recibe nuevo prop `canReoptLive` y se esconde si false.
+- **dragEditMap** (gate Pro+): server action `bulkMoveStopsAction` gateada; `MultiRouteMapServer` recibe `scope` sólo si `planFeatures.dragEditMap` — sin scope el mapa degrada a read-only (sigue visible, sin lasso/bulk select).
+- **pushNotifications** (gate todos hoy, defensivo): POST en `/api/push/subscribe` responde 403; DELETE (unsubscribe) NO se gatea para que un user con plan downgrade pueda salir; `<PushOptIn>` banner condicional en `/dashboard`.
+
+**Patrón:** server gate (defense-in-depth obligatorio) + UI conditional (UX clean — no prometer botones que van a fallar). El error tipado `FeatureNotAvailableError` lleva `feature` + `tier` para que el caller decida cómo mostrar el mensaje. API routes lo mapean a 403 con `{error, feature, tier}` en JSON; server actions vía `runAction` lo bubble como `{ok:false, error}`.
+
+**Alternativas consideradas:**
+1. **Middleware único en el edge** que lea el customer y bloquee por path: rompe Server Components porque `requireRole`/`requireAdminOrDispatcher` ya hacen el read del profile — duplicar la lectura en middleware sería caro y el path no siempre identifica la feature (ej. `/orchestrator/chat` puede ser AI puro o XLSX según el body).
+2. **Decorator/HOC sobre server actions** (`@gated('xlsxImport')`): TS no soporta decorators sobre funciones server-action de forma nativa con Next 16. Llamar `await requireCustomerFeature(...)` al inicio del action es 1 línea y queda más legible.
+3. **Gating sólo en UI** (esconder botones, no validar server): un POST directo desde curl o un cliente comprometido salta el gate → contrato no se cumple. Defense-in-depth es no-negotiable.
+4. **Gate al usar la feature, no al opt-in** (push send vs push subscribe): para push elegimos gatear el subscribe — más simple, mantiene subs viejas funcionando si la feature reaparece por override, y el send lee de DB filtrado por user.
+
+**Riesgos/Limitaciones:**
+- Los gates leen `customers` vía RLS-aware client (`createServerClient`). Si la RLS del row de customers tiene un bug, el gate falla con error en lugar de bloquear silenciosamente — preferible vs falso negativo.
+- 2 features (`pushNotifications`, `liveReOpt`) están en `true` para los 3 tiers hoy → los gates son no-op pero defensivos para cuando flipemos el registry (ej. mover `liveReOpt` a Pro+ por costo Google Routes).
+- `bulkMoveStopsAction` gateada significa que un Starter NO puede mover múltiples paradas a la vez. Move individual (`moveStopToAnotherRouteAction`) sigue disponible — preservamos value en plan bajo.
+- UI `FeatureLockedCard` solo cubre `/stores/import` con full-page lock. Otros entry points usan controles condicionales (esconder/mostrar). Si el user llega a una URL gateada vía link directo (ej. desde memoria del browser), ve el card. OK para Fase 1.
+- `feature-lock.tsx` tiene `FEATURE_MIN_TIER` y `FEATURE_COPY` hardcoded — deuda menor: si agregamos una feature al registry hay que sumarla aquí también o cae al copy genérico.
+
+**Improvement opportunities:**
+- Audit de seats (`maxAccounts`/`maxDrivers`): hoy se cobra por seat vía Stripe sin tope duro. Fase 1b puede agregar enforcement pre-write (`requireRoomForUsers`) y banner de overage warning.
+- Telemetría: contar 403s por feature × tier para entender intent de upgrade. Sentry tag `feature_gate_denied`.
+- `FeatureLockedCard` con CTA real a Stripe Customer Portal (hoy linkea a `/settings/billing`).
+- Mover `FEATURE_MIN_TIER` al package `@tripdrive/plans` y derivarlo de `PLAN_FEATURES` automáticamente — eliminar la deuda menor.
+- Hook `useFeatures()` client-side que reciba el set por context para componentes client puros que necesiten mostrar/esconder controles sin prop drilling.
+
+## [2026-05-16] ADR-120: Stream AI Fase B — auto-refresh tras write tools
+**Contexto:** Cerrada Fase A (commit c2f1721) la respuesta del agente trae links a las entidades recién creadas (e.g. `[Tiro VF-...](/dispatches/<id>)`), pero al hacer click el user todavía veía la pantalla previa sin la entidad nueva — había que F5. La causa: el agente muta vía REST/RPC server-side, pero el Next App Router cachea el RSC payload del path actual y no se invalida automáticamente cuando otra fuente (chat) toca DB.
+
+**Decisión:** Cuando el chat detecta que en un turn una WRITE_TOOL terminó con `ok: true`, dispara `router.refresh()` al cerrar el stream SSE.
+- Set `WRITE_TOOLS` definido en cada chat client (17 tools que mutan DB: writes.ts + catalog-edits + places + xlsx + optimize.apply_route_plan).
+- Detección durante el stream: en `tool_use_start` se guarda `tool_use_id → tool_name` en un Map local; en `tool_use_result` se chequea `result.ok && WRITE_TOOLS.has(toolName)` → set `shouldRefreshRef.current = true`.
+- En `finally` del stream, si la ref está marcada → `router.refresh()` (re-fetch del RSC payload del path actual SIN scroll reset, SIN remount de client state).
+- Aplicado en floating-chat.tsx + chat-client.tsx (orchestrator full screen).
+
+**Alternativas consideradas:**
+1. **Revalidación server-side con `revalidatePath`** en cada write tool: requería que las tools (server-side, fuera del request lifecycle de la pantalla) supieran qué path está mirando el user — acoplamiento feo, y de todos modos `revalidatePath` solo marca caché stale, no fuerza re-fetch en cliente activo.
+2. **Server-Sent Event explícito `entity_changed`** que el front escucha y mapea a refresh: más limpio a largo plazo pero requiere convención de eventos + listeners por pantalla. Overkill para V1.
+3. **`router.refresh()` indiscriminado tras cualquier turn**: gasta RSC payload aún en turns puramente de lectura. Costoso si el user hace muchos turns conversacionales.
+
+**Riesgos/Limitaciones:**
+- Si el agente ejecuta una WRITE_TOOL con `ok: true` PERO la pantalla actual no muestra la entidad afectada, hacemos un refresh innecesario (cheap, ~50ms server roundtrip, sin parpadeo). Aceptable.
+- La lista de WRITE_TOOLS debe mantenerse sincronizada con el registry server-side. Si se agrega una mutación nueva sin actualizar la lista, no refresca. Mitigación: comentario explícito apunta a writes.ts; lista corta y fácil de auditar.
+- `router.refresh()` re-ejecuta el server component pero no cierra el drawer del chat ni resetea su state. Validado.
+
+**Improvement opportunities:**
+- Generar `WRITE_TOOLS` desde un export shared en `@tripdrive/orchestrator` (mover registry de writes.ts + flagear `mutates: true` por tool y derivar el Set). Hoy es 17 strings duplicados, costo bajo.
+- Considerar `revalidatePath` desde la API route SSE cuando se detecta una write para invalidar caché Edge además del cliente actual — útil si el user tiene otra pestaña abierta.
+- Telemetría: contar refreshes para detectar streams "vacíos" (write fallida pero refresh disparado).
+
 ## [2026-05-16] ADR-119: UX-Fase 3 (Opción A) — relax routes.dispatch_id NOT NULL + ruta huérfana desde /dia
 
 **Contexto:** ADR-040 (2026-04) impuso `routes.dispatch_id NOT NULL` bajo el principio "toda ruta vive dentro de un tiro". Eso tenía sentido cuando el dispatcher entraba por `/dispatches` y armaba tiros como contenedores antes de las rutas. Pero `/dia` emergió como entry-point primario (ADR-088, hide /dispatches del sidebar, vista unificada del día) y ahí el dispatcher piensa en términos de "rutas del día" — el tiro es un detalle de implementación que estorba.

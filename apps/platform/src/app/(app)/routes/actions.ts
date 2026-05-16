@@ -37,6 +37,7 @@ import { listDepots } from '@/lib/queries/depots';
 import { getLastBreadcrumbsByRouteIds } from '@/lib/queries/breadcrumbs';
 import { callOptimizer, callReoptimizeLive, getUnassignedStoreIds } from '@/lib/optimizer';
 import { notifyDriverOfPublishedRoute, notifyDriverOfRouteChange } from '@/lib/push';
+import { requireCustomerFeature } from '@/lib/plans-gate';
 import { requireUuid, runAction, ValidationError, type ActionResult } from '@/lib/validation';
 
 const TENANT_TIMEZONE = process.env.NEXT_PUBLIC_TENANT_TIMEZONE ?? 'America/Mexico_City';
@@ -1017,6 +1018,11 @@ export async function reoptimizeLiveAction(
   routeId: string,
 ): Promise<ReoptimizeLiveResult> {
   const profile = await requireRole('admin', 'dispatcher');
+  // ADR-121 Fase 1: re-opt en vivo con Google Routes (tráfico real) tiene
+  // costo significativo (~$0.55 USD por re-opt de 10 stops). Lo gateamos
+  // a planes que lo incluyen (hoy todos, pero deja el framework listo si
+  // movemos liveReOpt a tier superior en el futuro).
+  await requireCustomerFeature('liveReOpt');
   try {
     const id = requireUuid('routeId', routeId);
 

@@ -7,6 +7,7 @@ import { revalidatePath } from 'next/cache';
 import { createServerClient, createServiceRoleClient } from '@tripdrive/supabase/server';
 import { logger } from '@tripdrive/observability';
 import { requireRole } from '@/lib/auth';
+import { requireCustomerFeature } from '@/lib/plans-gate';
 import { moveStopToAnotherRoute, deleteStopsForRoute } from '@/lib/queries/stops';
 import { cancelRoute } from '@/lib/queries/routes';
 import { listRoutesByDispatch } from '@/lib/queries/dispatches';
@@ -848,6 +849,10 @@ export async function bulkMoveStopsAction(
 ): Promise<ActionResult & { result?: BulkMoveStopsResult }> {
   try {
     await requireRole('admin', 'dispatcher');
+    // ADR-121 Fase 1: bulk move via Shift+drag/lasso es la feature
+    // "dragEditMap". Move individual (moveStopToAnotherRouteAction) sigue
+    // disponible para todos los planes — esto solo restringe el flow masivo.
+    await requireCustomerFeature('dragEditMap');
     if (!Array.isArray(stopIds) || stopIds.length === 0) {
       return { ok: false, error: 'No se recibieron stops para mover.' };
     }

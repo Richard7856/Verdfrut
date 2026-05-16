@@ -7,6 +7,8 @@
 
 import 'server-only';
 import { createServerClient } from '@tripdrive/supabase/server';
+import { requireCustomerFeature } from '@/lib/plans-gate';
+import { FeatureNotAvailableError } from '@tripdrive/plans';
 import type { UserRole } from '@tripdrive/types';
 
 interface RequestBody {
@@ -19,6 +21,18 @@ export async function POST(req: Request) {
   const { data: userData } = await supabase.auth.getUser();
   if (!userData.user) {
     return Response.json({ error: 'Sesión expirada' }, { status: 401 });
+  }
+
+  // ADR-121 Fase 1: gate por plan. Si el customer no incluye push, rechazamos
+  // suscripciones nuevas. DELETE (unsubscribe) NO se gatea — siempre permitido
+  // para que el user pueda salir aunque su plan ya no lo incluya.
+  try {
+    await requireCustomerFeature('pushNotifications');
+  } catch (err) {
+    if (err instanceof FeatureNotAvailableError) {
+      return Response.json({ error: err.message, feature: err.feature, tier: err.tier }, { status: 403 });
+    }
+    throw err;
   }
 
   let body: RequestBody;

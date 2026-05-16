@@ -6,6 +6,8 @@
 
 import 'server-only';
 import { requireAdminOrDispatcher } from '@/lib/auth';
+import { requireCustomerFeature } from '@/lib/plans-gate';
+import { FeatureNotAvailableError } from '@tripdrive/plans';
 import { createServerClient, createServiceRoleClient } from '@tripdrive/supabase/server';
 import ExcelJS from 'exceljs';
 
@@ -16,6 +18,18 @@ const MAX_BINARY_BYTES = 5 * 1024 * 1024;
 
 export async function POST(req: Request) {
   const profile = await requireAdminOrDispatcher();
+
+  // Gate por plan (ADR-121 Fase 1): xlsx/csv upload via chat requiere Pro o
+  // Enterprise. Starter no lo tiene en su feature set. El error tipado se
+  // mapea a 403 con copy claro ("habla con ventas").
+  try {
+    await requireCustomerFeature('xlsxImport');
+  } catch (err) {
+    if (err instanceof FeatureNotAvailableError) {
+      return Response.json({ error: err.message, feature: err.feature, tier: err.tier }, { status: 403 });
+    }
+    throw err;
+  }
 
   const form = await req.formData().catch(() => null);
   if (!form) return Response.json({ error: 'multipart/form-data requerido' }, { status: 400 });
