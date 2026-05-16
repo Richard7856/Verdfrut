@@ -136,13 +136,35 @@ export function WorkbenchManager({
       </Card>
 
       <Card>
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+          Herramientas de análisis
+        </p>
+        <ul className="space-y-2 text-sm">
+          <li>
+            <a
+              href="/settings/workbench/zones"
+              className="font-medium underline-offset-2 hover:underline"
+              style={{ color: 'var(--vf-green-600, #15803d)' }}
+            >
+              🗺 Sugerir partición de zona
+            </a>
+            <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+              Analiza una zona y propone cómo partirla en N sub-zonas geográficamente
+              coherentes con el algoritmo del optimizer.
+            </p>
+          </li>
+        </ul>
+      </Card>
+
+      <Card>
         <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
           Próximamente
         </p>
         <ul className="space-y-1 text-xs text-[var(--color-text-muted)]">
-          <li>• Promover un escenario sandbox a operación real (clonar a real).</li>
-          <li>• Seed inicial: copiar todo el catálogo real al sandbox para arrancar.</li>
-          <li>• Frecuencias por tienda, recomendación de flotilla, heatmaps (WB-2 a WB-5).</li>
+          <li>• Aplicar sugerencia de partición de zona como sandbox (WB-3b).</li>
+          <li>• Recomendación de flotilla por volumen (WB-4).</li>
+          <li>• Heatmaps en mapa por frecuencia/kg (WB-5).</li>
+          <li>• Vista jerárquica Día→Zona→Frecuencia→Camioneta→Ruta→Parada (WB-6).</li>
         </ul>
       </Card>
     </div>

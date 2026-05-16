@@ -6544,6 +6544,82 @@ Adicional: detectar tiendas **stale** (activas pero sin visita reciente) es alar
 - apps/platform/src/app/(app)/settings/stores/page.tsx — UI: columnas + banner stale + filtro ?stale=1.
 
 
+## [2026-05-16] ADR-115: Workbench WB-3 — Sugerencia de partición de zona
+
+**Contexto:** Cuando una zona crece (más tiendas, más volumen), conviene dividirla en sub-zonas para asignar dispatchers o flotillas separadas. Hoy esa decisión la toma el admin a ojo o con Excel + mapa físico — proceso largo y sin garantía de balance. El producto debería proponer la partición usando el MISMO algoritmo que ya usa el optimizer en producción, dándole al admin un análisis confiable side-by-side con métricas.
+
+WB-3 cierra el ciclo de "el sistema sabe lo suficiente para sugerir cambios estructurales" — pieza clave para que el cliente perciba TripDrive como **plataforma de operación**, no solo "app de optimización de rutas".
+
+**Decisión:**
+
+1. **Helper `proposeZoneSplit(zoneId, k)`** en `lib/queries/zone-suggestions.ts`:
+   - Reusa `clusterStops` de `@tripdrive/router` (bisección recursiva por mediana, determinística, ADR-096). MISMO algoritmo que el optimizer en producción — el preview refleja lo que el sistema haría en operación real, no un toy clustering aparte.
+   - Filtra `is_active=true` Y `is_sandbox=false` — solo tiendas reales operativas entran al análisis.
+   - Enriquece cada cluster con stats WB-2: `totalVisitsPerWeek`, `totalKgPerWeek` agregados por cluster. El admin ve balance no solo de conteo sino de **carga real**.
+   - Calcula 2 imbalance scores (coeficiente de variación normalizado a [0,1]):
+     - `imbalanceScore`: variación entre conteos de tiendas por cluster.
+     - `imbalanceScoreKg`: variación entre kg/sem totales por cluster.
+   - Bandas interpretables: ≤0.15 "Balanceado" (verde), 0.15-0.35 "Aceptable" (amber), >0.35 "Desbalanceado" (rojo).
+   - K válido: 2-8. Defaults conservadores (admin elige 2-5 en UI).
+
+2. **Página `/settings/workbench/zones`** (admin/dispatcher):
+   - Form server-rendered con `?zone=<id>&k=<2-5>`. Bookmarkable, sin JS para el filtro.
+   - Resumen arriba: "{totalStores} tiendas → {N} sub-zonas" + 2 BalanceBadge.
+   - Mapa Mapbox: pin chico por tienda con color del cluster + centroide grande etiquetado con índice. Popups con `code/name/kg/sem`.
+   - Tabla 3 columnas (md+): por cluster muestra storeCount, visitas/sem, kg/sem totales, centroide geográfico, lista expandible de tiendas con `kgPerWeek` individual.
+   - `<details>` collapsible para la lista — evita una pared de texto cuando N tiendas es grande.
+
+3. **Paleta de colores consistente** (`CLUSTER_COLORS`): primeros 6 alineados con `pickRouteColor` (Roja/Azul/Verde/Amarilla/Negro/Blanca) + 2 extras (morado/teal) para K hasta 8. Esto refuerza el mental model "una sub-zona = una camioneta" cuando llegue WB-4.
+
+4. **Read-only en WB-3 MVP**: la página NO crea ni modifica zonas. Banner explícito "Próximamente WB-3b" indica que la acción de commit ("crear N zonas hipotéticas") está diferida. Razones:
+   - Crear sub-zonas implica decidir nombres/códigos, migrar tiendas (cambiar `zone_id`), invalidar caches, recalcular routes pendientes. Mucho scope.
+   - Es decisión estructural que requiere `zones` tabla con `is_sandbox` (no incluido en migración 052) o un mecanismo de "draft zones" sin contaminar real.
+   - Admin con la propuesta visual + métricas puede aplicar manualmente (crear las zonas + reasignar) hasta que WB-3b automatice.
+
+5. **Link desde `/settings/workbench`**: el manager principal del Workbench ahora muestra una sección "Herramientas de análisis" con link prominente a `/settings/workbench/zones`. Discoverable sin ir a buscarlo.
+
+**Alternativas consideradas:**
+- *K-means en lugar de bisección*: descartado — usaría algoritmo distinto al del optimizer en producción. Si la partición resultante difiere del comportamiento real del optimizer, la propuesta engaña. Reusar `clusterStops` da consistencia 1:1.
+- *DBSCAN o clustering por densidad*: tentador para detectar "núcleos densos vs outliers", pero introduce hyperparámetros (eps, minPoints) que el admin no entiende. Bisección con K explícito es legible.
+- *Selector continuo de K (slider)*: descartado para MVP. Dropdown 2-5 cubre el 95% de los casos prácticos (más de 5 sub-zonas en una sola zona es atípico en distribución urbana).
+- *Calcular y mostrar TODAS las opciones K=2..5 simultáneamente*: descartado por performance + UX. Cada propuesta tiene su mapa + tabla; mostrar 4 en paralelo satura. Mejor un solo análisis a la vez, recalcular cambiando K.
+- *Score de "ahorro estimado"* en km/MXN tras partir: descartado por scope. Requeriría correr el optimizer N veces (antes y después) sobre rutas hipotéticas, segundos de cómputo. WB-4 (recomendación de flotilla) puede agregarlo si emerge la demanda.
+- *Commit dentro de WB-3 vía zonas sandbox*: requiere agregar `is_sandbox` a `zones` + flow de migración. Decisión: dejar para WB-3b. Mientras tanto el admin aplica manualmente.
+- *Considerar `service_time_seconds` o `receiving_window`* al clusterizar: descartado. La bisección de capa 1 del optimizer ya ignora estos (los usa el solver VROOM en capa 3). Mantener paridad con producción.
+- *Re-clusterizar incluyendo tiendas inactivas como "consideralas si las activas"*: descartado. Una tienda inactiva está fuera de operación; clusterizarla introduciría ruido.
+
+**Riesgos / Limitaciones:**
+- **Bisección no entiende "barreras" (ríos, avenidas)**: dos tiendas en lados opuestos de Periférico pueden quedar en el mismo cluster por proximidad geodésica. La realidad operativa puede mostrar que ese cruce nunca es eficiente. Mitigación: el admin reviewa la propuesta en el mapa y rechaza si no tiene sentido. Bisección es punto de partida, no oráculo.
+- **`imbalanceScoreKg` puede ser engañoso para zonas con tiendas sin historia**: si 30% de las tiendas de la zona son recién agregadas (kgPerWeek=0), el score solo refleja las que sí tienen historia. Aceptable, pero documentado.
+- **No simula cambio de depot**: si las sub-zonas resultantes deberían salir de CEDIS diferentes, la propuesta no lo refleja. Decisión de depot es WB-4 / capa 2 del optimizer.
+- **Performance con zonas grandes (1000+ tiendas)**: la query y el clustering son O(N log N) cada uno. Con 1000 tiendas: ~50ms cluster + ~150ms agg freqs. Tolerable. Con 5000+ requiere optimización.
+- **No persiste preview**: cada visit re-calcula. Si el admin comparte el link con su equipo, todos ven el cálculo fresh (consistente porque bisección es determinística). OK.
+- **Read-only deja la decisión a la implementación manual**: el admin debe re-crear las zonas y mover tiendas a mano. WB-3b automatizará pero hasta entonces hay fricción.
+- **No considera frecuencia OBJETIVO**: si una zona tiene 10 tiendas con 1 v/sem y 30 con 0.5 v/sem, dividir por conteo (20+20) puede agrupar 8 "calientes" + 12 "frías" vs 2 "calientes" + 18 "frías" — desbalance operativo. El score kg/sem captura parte de esto pero no perfecto.
+- **No probado con zona masiva en producción**: validamos con ~80 tiendas. 500+ no se midió.
+
+**Oportunidades de mejora:**
+- WB-3b: aplicar la propuesta automáticamente creando zonas sandbox + migrando tiendas. Requiere `zones.is_sandbox`.
+- Re-balance manual: drag de tienda entre clusters en el mapa.
+- Tomar en cuenta capacity de la flotilla disponible (entrada al algoritmo).
+- Calcular ahorro estimado en km/MXN comparado con la configuración actual (correr optimizer en background).
+- Detección de outliers: tiendas que viven muy lejos del centroide propuesto y deberían ir a otro cluster.
+- Comparativa de 2-3 valores de K side-by-side con sus métricas.
+- Heatmap de densidad (preview para WB-5).
+- Recomendación automática del K óptimo basado en kg/sem total + capacidad típica de camioneta.
+- Sugerencia inversa: "fusionar zonas X e Y porque están sub-utilizadas".
+- Exportar propuesta a PDF para presentar al equipo comercial.
+
+**Refs:**
+- ADR-096 — algoritmo bisección recursiva (Capa 1 Optimization Engine).
+- ADR-112 / 113 / 114 — Workbench foundation + frecuencias.
+- packages/router/src/clustering.ts — `clusterStops` + `centroid`.
+- apps/platform/src/lib/queries/zone-suggestions.ts — server-side proposal.
+- apps/platform/src/app/(app)/settings/workbench/zones/page.tsx — UI principal.
+- apps/platform/src/app/(app)/settings/workbench/zones/zone-suggestion-map.tsx — mapa cliente.
+- apps/platform/src/app/(app)/settings/workbench/workbench-manager.tsx — link de descubrimiento.
+
+
 
 
 
