@@ -23,6 +23,8 @@ interface SearchParams {
   from?: string;  // YYYY-MM-DD
   to?: string;
   zone?: string;
+  /** UXR-3 drill-down: ?manual=1 expande la lista de rutas con optimization_skipped=true. */
+  manual?: string;
 }
 
 interface PageProps {
@@ -53,7 +55,7 @@ export default async function ReportsPage({ searchParams }: PageProps) {
   let q = supabase
     .from('routes')
     .select(
-      'id, date, status, total_distance_meters, total_duration_seconds, zone_id, optimization_skipped',
+      'id, name, date, status, total_distance_meters, total_duration_seconds, zone_id, vehicle_id, optimization_skipped',
       { count: 'exact' },
     )
     .gte('date', from)
@@ -78,11 +80,13 @@ export default async function ReportsPage({ searchParams }: PageProps) {
 
   const routes = (routesRows ?? []) as Array<{
     id: string;
+    name: string;
     date: string;
     status: RouteStatus;
     total_distance_meters: number | null;
     total_duration_seconds: number | null;
     zone_id: string;
+    vehicle_id: string;
     optimization_skipped: boolean | null;
   }>;
 
@@ -118,11 +122,41 @@ export default async function ReportsPage({ searchParams }: PageProps) {
   // Solo contamos rutas que YA pasaron la decisión (status ≠ DRAFT). Una DRAFT
   // todavía puede correr el optimizer, así que no debería sumar al denominador.
   const decidedRoutes = routes.filter((r) => r.status !== 'DRAFT');
-  const manualRoutes = decidedRoutes.filter((r) => r.optimization_skipped === true).length;
+  const manualRoutesList = decidedRoutes.filter((r) => r.optimization_skipped === true);
+  const manualRoutes = manualRoutesList.length;
   const manualPct =
     decidedRoutes.length > 0
       ? Math.round((manualRoutes / decidedRoutes.length) * 100)
       : null;
+
+  // UXR-3 drill-down: ?manual=1 expande la lista. Cargamos vehicles solo
+  // cuando se necesitan (ahorra una query en el render base).
+  const showManualList = params.manual === '1' && manualRoutesList.length > 0;
+  let vehiclesByIdForManual = new Map<string, { alias: string | null; plate: string }>();
+  if (showManualList) {
+    const vehicleIds = [...new Set(manualRoutesList.map((r) => r.vehicle_id))];
+    const { data: vRows } = await supabase
+      .from('vehicles')
+      .select('id, alias, plate')
+      .in('id', vehicleIds);
+    vehiclesByIdForManual = new Map(
+      (vRows ?? []).map((v) => [
+        v.id as string,
+        { alias: (v.alias as string | null) ?? null, plate: v.plate as string },
+      ]),
+    );
+  }
+  // Link toggle del drill-down — preserva filtros actuales y solo cambia ?manual.
+  const drillDownParams = new URLSearchParams();
+  if (from) drillDownParams.set('from', from);
+  if (to) drillDownParams.set('to', to);
+  if (zoneFilter) drillDownParams.set('zone', zoneFilter);
+  const drillDownExpandedHref = `/reports?${(() => {
+    const p = new URLSearchParams(drillDownParams);
+    p.set('manual', '1');
+    return p.toString();
+  })()}`;
+  const drillDownCollapsedHref = `/reports?${drillDownParams.toString()}`;
 
   // Paradas agregadas — 1 query batch via .in('route_id', [...]).
   const routeIds = routes.map((r) => r.id);
@@ -227,8 +261,7 @@ export default async function ReportsPage({ searchParams }: PageProps) {
       </div>
 
       {/* UXR-3 / ADR-110: visibilidad del % de rutas que el dispatcher publicó
-          sin pasar por el optimizer. Útil para detectar fricción del flow
-          optimizado (si el % es alto, hay algo que no convence). */}
+          sin pasar por el optimizer + drill-down con la lista. */}
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Kpi
           label="% Rutas manuales"
@@ -238,8 +271,59 @@ export default async function ReportsPage({ searchParams }: PageProps) {
               ? 'sin rutas decididas en el rango'
               : `${manualRoutes} de ${decidedRoutes.length} sin VROOM`
           }
+          link={
+            manualRoutes > 0
+              ? {
+                  href: showManualList ? drillDownCollapsedHref : drillDownExpandedHref,
+                  label: showManualList ? 'Ocultar lista ↑' : 'Ver lista ↓',
+                }
+              : undefined
+          }
         />
       </div>
+
+      {showManualList && (
+        <Card className="mb-4">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
+            Rutas manuales ({manualRoutes})
+          </p>
+          <p className="mb-3 text-[11px] text-[var(--color-text-muted)]">
+            Aprobadas/publicadas sin pasar por VROOM. El dispatcher decidió que el
+            orden manual era suficiente.
+          </p>
+          <ul className="divide-y divide-[var(--color-border)] text-sm">
+            {manualRoutesList.map((r) => {
+              const zone = zones.find((z) => z.id === r.zone_id);
+              const vehicle = vehiclesByIdForManual.get(r.vehicle_id);
+              const vehicleLabel = vehicle
+                ? vehicle.alias
+                  ? `${vehicle.alias} · ${vehicle.plate}`
+                  : vehicle.plate
+                : '—';
+              return (
+                <li key={r.id} className="flex items-center justify-between gap-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <Link
+                      href={`/routes/${r.id}`}
+                      className="font-medium hover:underline"
+                      style={{ color: 'var(--vf-text)' }}
+                    >
+                      {r.name}
+                    </Link>
+                    <p className="text-[11px] text-[var(--color-text-muted)]">
+                      <span className="font-mono">{r.date}</span> · {zone?.code ?? '—'} ·{' '}
+                      {vehicleLabel}
+                    </p>
+                  </div>
+                  <span className="font-mono text-[11px] uppercase tracking-wide text-[var(--color-text-muted)]">
+                    {r.status}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+      )}
 
       {/* Breakdown por status */}
       <Card className="mb-4">
@@ -287,7 +371,18 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-function Kpi({ label, value, hint }: { label: string; value: number | string; hint?: string }) {
+function Kpi({
+  label,
+  value,
+  hint,
+  link,
+}: {
+  label: string;
+  value: number | string;
+  hint?: string;
+  /** Acción de drill-down opcional (UXR-3): "Ver lista" / "Ocultar lista". */
+  link?: { href: string; label: string };
+}) {
   return (
     <Card>
       <p className="text-[10px] uppercase tracking-[0.04em]" style={{ color: 'var(--vf-text-mute)' }}>
@@ -303,6 +398,15 @@ function Kpi({ label, value, hint }: { label: string; value: number | string; hi
         <p className="mt-1 text-[10px]" style={{ color: 'var(--vf-text-mute)' }}>
           {hint}
         </p>
+      )}
+      {link && (
+        <Link
+          href={link.href}
+          className="mt-1 inline-block text-[10px] underline-offset-2 hover:underline"
+          style={{ color: 'var(--vf-green-600)' }}
+        >
+          {link.label}
+        </Link>
       )}
     </Card>
   );
