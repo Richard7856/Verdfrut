@@ -55,8 +55,29 @@ export function RouteHeader({
           </Text>
         </View>
       ) : null}
+      {/* UXR-2 / ADR-110: aviso si la secuencia fue armada a mano (sin VROOM).
+          El dispatcher publicó orden manual; el chofer debe saber que la
+          secuencia puede no ser la más corta y avisar si ve algo raro. */}
+      {route?.optimizationSkipped ? <ManualOrderBar /> : null}
       {gps ? <GpsStatusBar gps={gps} /> : null}
       {outbox && outbox.pending + outbox.failed > 0 ? <OutboxBar outbox={outbox} /> : null}
+    </View>
+  );
+}
+
+function ManualOrderBar() {
+  return (
+    <View style={[manualStyles.bar, { backgroundColor: colors.warnSurface }]}>
+      <Text style={[manualStyles.icon, { color: colors.warn }]}>✋</Text>
+      <View style={manualStyles.textColumn}>
+        <Text style={[manualStyles.title, { color: colors.warn }]} numberOfLines={1}>
+          Orden armado manualmente
+        </Text>
+        <Text style={[manualStyles.subtitle, { color: colors.warn }]} numberOfLines={2}>
+          La secuencia no pasó por el optimizador. Si el orden no tiene sentido,
+          avísale al dispatcher antes de arrancar.
+        </Text>
+      </View>
     </View>
   );
 }
@@ -218,5 +239,35 @@ const outboxStyles = StyleSheet.create({
   text: {
     fontSize: 11,
     fontWeight: '600',
+  },
+});
+
+const manualStyles = StyleSheet.create({
+  bar: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginTop: 10,
+    borderRadius: 6,
+  },
+  icon: {
+    fontSize: 16,
+    lineHeight: 18,
+    marginTop: 1,
+  },
+  textColumn: {
+    flex: 1,
+  },
+  title: {
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  subtitle: {
+    fontSize: 11,
+    fontWeight: '500',
+    opacity: 0.9,
   },
 });
