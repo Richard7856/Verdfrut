@@ -5,6 +5,8 @@ import type { UserProfile, UserRole } from '@tripdrive/types';
 import { requireRole } from '@/lib/auth';
 import { listUsers } from '@/lib/queries/users';
 import { listZones } from '@/lib/queries/zones';
+import { createServerClient } from '@tripdrive/supabase/server';
+import { getBillingSeatsContext } from '@/lib/stripe/seat-context';
 import { InviteUserButton } from './invite-user-button';
 import { ToggleUserActiveCell } from './toggle-user-active-cell';
 import { ForceResetButton } from './force-reset-button';
@@ -27,10 +29,25 @@ const ROLE_TONES: Record<UserRole, BadgeTone> = {
 };
 
 export default async function UsersPage() {
-  await requireRole('admin');
+  const caller = await requireRole('admin');
 
   const [users, zones] = await Promise.all([listUsers(), listZones()]);
   const zonesById = new Map(zones.map((z) => [z.id, z]));
+
+  // ADR-111: contexto de billing para el overage warning del invite. Falla
+  // limpio si el customer no tiene tier / billing no configurado — pasamos
+  // null y la modal no muestra el warning.
+  let seatsContext = null;
+  const supabase = await createServerClient();
+  const { data: profile } = await supabase
+    .from('user_profiles')
+    .select('customer_id')
+    .eq('id', caller.id)
+    .maybeSingle();
+  const customerId = (profile?.customer_id as string | undefined) ?? null;
+  if (customerId) {
+    seatsContext = await getBillingSeatsContext(customerId);
+  }
 
   const columns: Column<UserProfile>[] = [
     { key: 'name', header: 'Nombre', cell: (u) => u.fullName },
@@ -82,7 +99,7 @@ export default async function UsersPage() {
         action={
           <div className="flex gap-2">
             <TemplateDownloadButton entity="users" />
-            <InviteUserButton zones={zones} />
+            <InviteUserButton zones={zones} seatsContext={seatsContext} />
           </div>
         }
       />
@@ -92,7 +109,7 @@ export default async function UsersPage() {
         rowKey={(u) => u.id}
         emptyTitle="Sin usuarios"
         emptyDescription="Invita al primer usuario para empezar a operar."
-        emptyAction={<InviteUserButton zones={zones} />}
+        emptyAction={<InviteUserButton zones={zones} seatsContext={seatsContext} />}
       />
     </>
   );

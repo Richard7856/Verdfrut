@@ -6212,6 +6212,104 @@ Además: como producto necesitamos un KPI agregado para detectar **fricción del
 - apps/platform/src/app/(app)/reports/page.tsx — KPI % rutas manuales.
 
 
+## [2026-05-15] ADR-111: Stream Billing cierre — cron diaria de sync de seats + overage warning al invitar
+
+**Contexto:** Stream Billing quedó en 85% tras ADR-102/103/104 (per-seat live, 3 tiers, self-serve signup). Quedaban dos gaps que cerraban el stream:
+
+1. **Drift entre BD y Stripe**: `syncSeats` se llama en cada server action que toca `user_profiles` o `drivers` (invite, toggle, archive, etc.). Pero la sincronización puede fallar:
+   - Stripe responde 5xx → audit registra el error, BD local NO se actualiza, pero el seat ACTIVO en Stripe queda con la quantity vieja → cobramos menos del debido (o más, si fue desactivación).
+   - Scripts SQL manuales / migraciones que cambian flags `is_active` sin pasar por la server action → syncSeats nunca se dispara.
+   - Background calls (`syncSeatsBackground` fire-and-forget) que mueren a la mitad sin que nadie lo note.
+
+   Sin un mecanismo de reconciliación periódica, el drift acumula silenciosamente. Para cuando un cliente ve su factura "rara", ya pasaron semanas.
+
+2. **Visibilidad del cobro al agregar seats**: el admin invita usuarios sin saber cuándo cruza el mínimo del tier. Caso real: cliente Pro tiene 5 choferes (incluidos en la base), invita al 6º, no se da cuenta hasta que llega la factura con el extra de $590. Mala UX y fricción de soporte.
+
+**Decisión:**
+
+1. **Endpoint `/api/cron/sync-stripe-seats`** (`app/api/cron/sync-stripe-seats/route.ts`):
+   - Itera todos los customers con `stripe_subscription_id IS NOT NULL`.
+   - Para cada uno llama `syncSeats({ reason: 'periodic' })`. Si los conteos no cambiaron, `syncSeats` short-circuits con `skipReason='no_change'` (cero llamadas a Stripe). Si hay drift, lo corrige con proration automática y registra en `billing_seats_audit`.
+   - Devuelve resumen JSON: `{ total, drift_corrected, skipped, errors, errorDetails }`. Logs solo cuando hay drift o errores — evita ruido en días sin cambios.
+   - **Auth dual**:
+     - `Authorization: Bearer <CRON_SECRET>` — header que Vercel Cron envía automáticamente con la env var.
+     - `x-cron-token: <CRON_SECRET>` — header para triggers manuales (curl, GitHub Actions, otros schedulers). Mismo secret.
+   - **Procesamiento secuencial** (no paralelo) para no rafaguear Stripe. Latencia esperada N × ~300ms; con `maxDuration: 300s` cubre hasta ~1000 customers.
+   - Acepta tanto GET (default de Vercel Cron) como POST (manual).
+
+2. **`vercel.json` con `crons`**:
+   ```json
+   {
+     "crons": [
+       { "path": "/api/cron/sync-stripe-seats", "schedule": "0 10 * * *" }
+     ]
+   }
+   ```
+   - `0 10 * * *` = 10:00 UTC = 04:00 hora local MX. Pico de actividad mínimo, idem que los otros crons del sistema.
+
+3. **Costos MXN en `TIER_CONFIG`** (`lib/stripe/client.ts`):
+   - Agregamos `extraAdminCostMxn` y `extraDriverCostMxn` a cada tier (starter: $1,500/$590, pro: $3,200/$590, enterprise: $4,500/$690).
+   - Nuevo helper `getExtraCostsForTier(tier)` devuelve los dos valores.
+   - **Importante**: estos costos son SOLO labels para UI (warning). El cobro real lo determina Stripe vía `prices.unit_amount` — si Stripe cambia, hay que actualizar acá manualmente. Sincronización 1×/año o cuando el comercial mueva precios.
+
+4. **`getBillingSeatsContext(customerId)`** (`lib/stripe/seat-context.ts`):
+   - Devuelve `{ tier, adminSeats, driverSeats, minAdmins, minDrivers, extraAdminCostMxn, extraDriverCostMxn, hasActiveSubscription }`.
+   - 3 queries baratas (customer + count user_profiles + count drivers).
+   - Falla limpio: devuelve `null` si el customer no existe, no tiene tier, o billing no está configurado. La UI esconde el warning silenciosamente.
+   - **NO toca Stripe** — solo BD local. Como la cron diaria garantiza drift máximo 24h, el contexto es suficientemente preciso para guidance preventiva.
+
+5. **Warning UI en `InviteUserButton`** (`/settings/users`):
+   - La page fetcha `seatsContext` server-side y lo pasa como prop.
+   - Helper `computeOverage(ctx, role)` calcula si la próxima invitación cruzaría el mínimo del tier para ese seat type:
+     - `zone_manager` → sin cobro extra (no es seat facturable). Sin warning.
+     - `driver` con `driverSeats + 1 > minDrivers` → warning con `extraDriverCostMxn`.
+     - `admin` o `dispatcher` con `adminSeats + 1 > minAdmins` → warning con `extraAdminCostMxn`.
+   - Render inline AMBER ("⚠️ Este será tu chofer #6 [incluidos: 5]. Costo extra: $590 MXN/mes en tu plan Pro. Stripe aplica proration proporcional a los días que queden del ciclo actual.").
+   - **No bloquea el submit** — el admin lee y decide. La continuación está implícita: click "Enviar invitación".
+
+6. **Decisión explícita de NO hacer caps duros**:
+   - El handoff hablaba de "caps duros / overage warnings". Decidimos warning sin block:
+     - Bloquear es paternalista — el admin de un cliente Pro puede legítimamente querer 10 choferes.
+     - Cualquier escape valve (override admin) crea complejidad sin valor real.
+     - Stripe ya cobra correctamente; el riesgo de "agregar seats por error" es solo el de no ver el cobro extra. El warning visible al lado del submit es suficiente.
+
+**Alternativas consideradas:**
+- *Caps duros con escape valve admin*: descartado. El admin del cliente ES el que invita; no hay un super-admin separado que daría el escape. Bloquear y luego abrir excepción para todos es teatro.
+- *Confirm dialog (`window.confirm`)`* en lugar de inline warning: descartado. JS confirm es feo y se ignora. El warning inline en color amber se ve sin interrumpir el flow.
+- *Cron cada hora en lugar de diario*: descartado. La detección de drift no necesita latencia — los call-sites ya sincronizan en realtime; el cron solo cubre fallos raros. Diario es suficiente y barato.
+- *Costos via Stripe API en vez de hardcoded*: descartado. Stripe price lookup agrega 1 round-trip por render del invite modal sin valor real (los precios cambian 1×/año). Hardcoded + comment "actualizar si Stripe cambia" es más simple. Si el desfase se vuelve un problema, agregar lookup con cache de 24h.
+- *Warning también en `/settings/billing` cuando se proyectaría exceso*: descartado por scope. Esa page YA muestra los seats actuales y los extras incluidos. Agregar otra vista de "qué pasaría si..." es overkill. La advertencia vive donde se toma la decisión: en el form de invite.
+- *Endpoint con `Authorization: Bearer` SOLO (sin `x-cron-token`)*: descartado. El soporte dual permite triggers manuales con curl sin replicar la lógica de bearer auth. El mismo secret rige los dos paths.
+- *Procesamiento paralelo de customers en el cron*: descartado. Stripe acepta ~25 req/s pero no queremos arriesgar a clientes nuevos con muchos seats. Secuencial es trivialmente paralelizable después si N crece a 500+.
+
+**Riesgos / Limitaciones:**
+- **Cron secret debe estar configurado en producción**: si `CRON_SECRET` falta, el endpoint responde 500 con mensaje claro pero la cron de Vercel falla silenciosamente. Comprobar después del primer deploy con `vercel logs`.
+- **Drift de costos MXN entre código y Stripe**: si comercial cambia precios en Stripe sin actualizar `TIER_CONFIG`, el warning miente. Mitigación: comentar la fuente de verdad arriba del config y revisar 1×/quarter.
+- **El warning asume `+1`**: si el admin invita a alguien que YA existía (re-invite tras toggle) el conteo no aumenta realmente. El warning aparecería de forma incorrecta. Caso edge poco frecuente — preferimos warning de más a warning de menos.
+- **Hardcoded `'pro'` fallback**: cuando `customer.tier` es null (sesiones legacy pre-migración tier), `syncSeats` asume Pro. Esto no es un cambio nuevo, pero merece auditoría si entran nuevos tiers o si hay tenants sin tier explícito.
+- **El cron itera TODOS los customers en una sola request**: con 1000+ customers, podría rozar el `maxDuration` de 300s. Mitigación futura: shard por customer_id hash o por hora del día.
+- **Sin métrica del cron en dashboard**: drift_corrected y errors solo van a logs. Si esos crecen, no hay alerting hoy. Sentry + alert rule pendiente.
+- **El warning no incluye admin_extra cost cuando se promueve un `zone_manager` a `admin`**: ese flow no pasa por el invite form (es toggle role). El cron lo detecta y cobra, pero el admin no ve el preview. Edge case raro; agregar warning equivalente en role-change action si emerge.
+- **No probamos end-to-end con cuenta Stripe real con drift artificial**: el path de error de Stripe está cubierto por syncSeats existente, pero la cron-completa con drift simulado no se ejercitó. Validación pendiente en producción tras el primer trigger automático.
+
+**Oportunidades de mejora:**
+- Endpoint `/api/billing/preview` que calcule la próxima factura proyectada con los conteos actuales — útil para "¿cuánto pago si invito 3 choferes más?".
+- Métricas Sentry: contador `billing.drift_corrected` y alerta cuando supera N en un día.
+- UI en `/settings/billing` con historial visual de `billing_seats_audit` (qué cambió, cuándo, qué disparó).
+- Warning en role-promotion action (zone_manager → admin) cuando crucemos el mínimo.
+- Auto-sync de costos MXN desde Stripe vía cron mensual (verifica que `TIER_CONFIG.extraAdminCostMxn` sigue alineado con `prices.unit_amount`).
+- Shard del cron por hash de customer_id cuando lleguemos a 500+ customers.
+- Notificación al admin del cliente cuando se cruza un mínimo (email + banner en `/settings/billing`).
+
+**Refs:**
+- ADR-102 / 103 / 104 — antecedentes de per-seat billing, pricing tiered.
+- apps/platform/src/lib/stripe/client.ts — TIER_CONFIG extendido con costos.
+- apps/platform/src/lib/stripe/seat-context.ts — helper de billing context.
+- apps/platform/src/lib/stripe/sync-seats.ts — función `syncSeats` (reason='periodic' añadido).
+- apps/platform/src/app/api/cron/sync-stripe-seats/route.ts — endpoint cron.
+- apps/platform/vercel.json — schedule diario 10:00 UTC.
+- apps/platform/src/app/(app)/settings/users/page.tsx + invite-user-button.tsx — warning UI.
+
 
 
 

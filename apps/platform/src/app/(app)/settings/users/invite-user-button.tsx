@@ -12,7 +12,69 @@ const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
   { value: 'driver', label: 'Chofer (ejecuta rutas)' },
 ];
 
-export function InviteUserButton({ zones }: { zones: Zone[] }) {
+// ADR-111: contexto de billing para el overage warning.
+export interface SeatsContext {
+  tier: 'starter' | 'pro' | 'enterprise';
+  adminSeats: number;
+  driverSeats: number;
+  minAdmins: number;
+  minDrivers: number;
+  extraAdminCostMxn: number;
+  extraDriverCostMxn: number;
+  hasActiveSubscription: boolean;
+}
+
+const TIER_LABELS: Record<SeatsContext['tier'], string> = {
+  starter: 'Operación',
+  pro: 'Pro',
+  enterprise: 'Enterprise',
+};
+
+const fmtMxn = new Intl.NumberFormat('es-MX', {
+  style: 'currency',
+  currency: 'MXN',
+  maximumFractionDigits: 0,
+});
+
+/**
+ * Calcula si invitar a un usuario en `role` excederá el mínimo incluido del
+ * tier. Devuelve los datos para renderizar el warning, o null si no hay cobro
+ * extra (rol no facturable, dentro del mínimo, sin subscription activa).
+ */
+function computeOverage(
+  ctx: SeatsContext | null,
+  role: UserRole,
+): { kind: 'admin' | 'driver'; futureCount: number; min: number; costMxn: number } | null {
+  if (!ctx || !ctx.hasActiveSubscription) return null;
+  if (role === 'zone_manager') return null;
+  if (role === 'driver') {
+    const future = ctx.driverSeats + 1;
+    if (future <= ctx.minDrivers) return null;
+    return {
+      kind: 'driver',
+      futureCount: future,
+      min: ctx.minDrivers,
+      costMxn: ctx.extraDriverCostMxn,
+    };
+  }
+  // admin / dispatcher → mismo bucket de seats.
+  const future = ctx.adminSeats + 1;
+  if (future <= ctx.minAdmins) return null;
+  return {
+    kind: 'admin',
+    futureCount: future,
+    min: ctx.minAdmins,
+    costMxn: ctx.extraAdminCostMxn,
+  };
+}
+
+export function InviteUserButton({
+  zones,
+  seatsContext = null,
+}: {
+  zones: Zone[];
+  seatsContext?: SeatsContext | null;
+}) {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -179,6 +241,32 @@ export function InviteUserButton({ zones }: { zones: Zone[] }) {
               {error}
             </div>
           )}
+
+          {/* ADR-111: overage warning si esta invitación excederá el mínimo
+              incluido del tier. NO bloquea — el admin decide; solo le da
+              visibilidad del cobro extra antes de mandar el invite. */}
+          {(() => {
+            const ov = computeOverage(seatsContext, role);
+            if (!ov) return null;
+            const seatLabel = ov.kind === 'driver' ? 'chofer' : 'usuario administrativo';
+            const ordinal = `#${ov.futureCount}`;
+            return (
+              <div
+                className="md:col-span-2 rounded-[var(--radius-md)] border border-[var(--color-warning-border,#f59e0b)] bg-[var(--color-warning-bg,#fef3c7)] px-3 py-2 text-sm"
+                style={{ color: 'var(--color-warning-fg, #92400e)' }}
+                role="status"
+              >
+                <p className="font-medium">
+                  ⚠️ Este será tu {seatLabel} {ordinal} (incluidos: {ov.min}).
+                </p>
+                <p className="mt-1 text-[12.5px]">
+                  Costo extra: <strong>{fmtMxn.format(ov.costMxn)} / mes</strong> en tu
+                  plan {TIER_LABELS[seatsContext!.tier]}. Stripe aplica proration
+                  proporcional a los días que queden del ciclo actual.
+                </p>
+              </div>
+            );
+          })()}
 
           <div className="md:col-span-2 flex justify-end gap-2 pt-2">
             <Button type="button" variant="ghost" onClick={() => setOpen(false)} disabled={pending}>

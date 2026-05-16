@@ -84,15 +84,25 @@ export type CustomerTier = 'starter' | 'pro' | 'enterprise';
 interface TierConfig {
   minAdmins: number;
   minDrivers: number;
+  /** Costo MXN/mes de un admin extra (sobre el mínimo del tier). */
+  extraAdminCostMxn: number;
+  /** Costo MXN/mes de un chofer extra. */
+  extraDriverCostMxn: number;
   envKeyBase: string;
   envKeyExtraAdmin: string;
   envKeyExtraDriver: string;
 }
 
+// IMPORTANTE: los costos viven en código (no en Stripe) — los usamos en UI
+// para mostrar overage warnings ANTES de invitar (UXR equivalente del billing,
+// ADR-111). Si Stripe cambia los precios, actualiza estos números también.
+// El monto real cobrado siempre lo dicta Stripe; estos labels son guidance.
 const TIER_CONFIG: Record<CustomerTier, TierConfig> = {
   starter: {
     minAdmins: 1,
     minDrivers: 3,
+    extraAdminCostMxn: 1500,
+    extraDriverCostMxn: 590,
     envKeyBase: 'STRIPE_PRICE_ID_STARTER_BASE',
     envKeyExtraAdmin: 'STRIPE_PRICE_ID_STARTER_EXTRA_ADMIN',
     envKeyExtraDriver: 'STRIPE_PRICE_ID_STARTER_EXTRA_DRIVER',
@@ -100,6 +110,8 @@ const TIER_CONFIG: Record<CustomerTier, TierConfig> = {
   pro: {
     minAdmins: 2,
     minDrivers: 5,
+    extraAdminCostMxn: 3200,
+    extraDriverCostMxn: 590,
     envKeyBase: 'STRIPE_PRICE_ID_PRO_BASE',
     envKeyExtraAdmin: 'STRIPE_PRICE_ID_PRO_EXTRA_ADMIN',
     envKeyExtraDriver: 'STRIPE_PRICE_ID_PRO_EXTRA_DRIVER',
@@ -107,6 +119,8 @@ const TIER_CONFIG: Record<CustomerTier, TierConfig> = {
   enterprise: {
     minAdmins: 2,
     minDrivers: 5,
+    extraAdminCostMxn: 4500,
+    extraDriverCostMxn: 690,
     envKeyBase: 'STRIPE_PRICE_ID_ENTERPRISE_BASE',
     envKeyExtraAdmin: 'STRIPE_PRICE_ID_ENTERPRISE_EXTRA_ADMIN',
     envKeyExtraDriver: 'STRIPE_PRICE_ID_ENTERPRISE_EXTRA_DRIVER',
@@ -137,6 +151,20 @@ export function planNameToTier(plan: string): CustomerTier {
 export function getMinimumsForTier(tier: CustomerTier): TierMinimums {
   const cfg = TIER_CONFIG[tier];
   return { minAdmins: cfg.minAdmins, minDrivers: cfg.minDrivers };
+}
+
+/**
+ * Costos MXN/mes de un seat extra del tier dado. Usado por el overage warning
+ * de invite (ADR-111). El cobro real lo determina Stripe — esto es solo label.
+ */
+export function getExtraCostsForTier(
+  tier: CustomerTier,
+): { extraAdminCostMxn: number; extraDriverCostMxn: number } {
+  const cfg = TIER_CONFIG[tier];
+  return {
+    extraAdminCostMxn: cfg.extraAdminCostMxn,
+    extraDriverCostMxn: cfg.extraDriverCostMxn,
+  };
 }
 
 /**
