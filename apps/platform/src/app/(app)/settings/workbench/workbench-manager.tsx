@@ -179,6 +179,19 @@ export function WorkbenchManager({
               kg/sem, y qué zonas están saturadas o sub-utilizadas.
             </p>
           </li>
+          <li>
+            <a
+              href="/settings/workbench/hierarchy"
+              className="font-medium underline-offset-2 hover:underline"
+              style={{ color: 'var(--vf-green-600, #15803d)' }}
+            >
+              🌳 Vista jerárquica
+            </a>
+            <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+              Drill-down de la operación de un día: Zona → Frecuencia → Camioneta
+              → Ruta → Parada. Frecuencias inferidas del histórico.
+            </p>
+          </li>
         </ul>
       </Card>
 
@@ -188,7 +201,7 @@ export function WorkbenchManager({
         </p>
         <ul className="space-y-1 text-xs text-[var(--color-text-muted)]">
           <li>• Aplicar sugerencia de partición de zona como sandbox (WB-3b).</li>
-          <li>• Vista jerárquica Día→Zona→Frecuencia→Camioneta→Ruta→Parada (WB-6).</li>
+          <li>• Frecuencias como entidad operativa persistida (WB-7).</li>
         </ul>
       </Card>
     </div>

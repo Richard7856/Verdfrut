@@ -6781,6 +6781,84 @@ Una tabla por zona no responde estas preguntas; un mapa con capas sí. WB-5 entr
 - apps/platform/src/app/(app)/settings/workbench/workbench-manager.tsx — discovery link.
 
 
+## [2026-05-16] ADR-118: Workbench WB-6 — Vista jerárquica (CIERRE del stream)
+
+**Contexto:** Los WB-1 a WB-5 entregaron herramientas analíticas independientes (sandbox, frecuencias, sugerir zonas, recomendación flotilla, heatmap). Cada una contesta UNA pregunta. WB-6 cierra el stream con una vista de **síntesis**: un solo lugar donde el admin entiende toda la operación de un día específico jerárquicamente. Es la respuesta a "muéstrame todo de lo que está pasando hoy en CDMX, organizado".
+
+Adicional: introduce la **"Frecuencia"** como concepto operativo visible, anticipando una futura tabla `frequencies` (WB-7). Por ahora la inferimos del histórico, lo que ya da el 80% del valor sin requerir migración de datos.
+
+**Decisión:**
+
+1. **Jerarquía de 5 niveles visibles** (Día → Zona → Frecuencia → Camioneta → Ruta → Parada):
+   - **Día**: input via `?date=YYYY-MM-DD` (default hoy en zona local del tenant). Card de resumen arriba con totales (zonas/camionetas/rutas/paradas/kg).
+   - **Zona**: ordenadas por kg total desc. `<details open>` al inicio.
+   - **Frecuencia**: agrupador inferido (ver punto 3). Etiquetado con emoji 📅 y badge verde.
+   - **Camioneta**: alias · placa + chofer + totales agregados de sus rutas del día.
+   - **Ruta**: link a `/routes/[id]` para drill-down completo + status + completedStops/total + kg + km.
+   - **Parada**: tabla con sequence, código, nombre, kg, ETA, status.
+
+2. **Inferencia de "Frecuencia"**: para cada camioneta con ruta en el día objetivo, consultamos sus rutas en los últimos 60 días (status IN PUBLISHED/IN_PROGRESS/COMPLETED, is_sandbox=false). Extraemos día-de-semana (0=Dom..6=Sáb) de cada fecha. Construimos un Set único de DoW y lo convertimos a label legible:
+   - 0 días → "Sin patrón"
+   - 1 día → "Solo Lun" (etc.)
+   - 2-5 días → "Lun/Mié/Vie" (abreviaturas españolas concatenadas)
+   - 6-7 días → "Diaria"
+   Camionetas con MISMO label dentro de la misma zona se agrupan en el mismo `FrequencyGroup`. Esto NO persiste — se infiere fresh cada render.
+
+3. **Estructura UI con `<details open>`**: cada nivel es nativo HTML, sin JS. Por default todos los niveles superiores arrancan abiertos (Zona abierta, Frecuencia/Camioneta/Ruta colapsados). El admin puede ver overview rápido y profundizar donde le interese.
+
+4. **Una sola query por nivel agregada en batch**:
+   - 1 query routes del día filtrado.
+   - 1 query stops con `in('route_id', routeIds)`.
+   - 1 query stores con `in('id', storeIds)`.
+   - 1 query vehicles + zones + drivers (paralelizados).
+   - 1 query history de routes (60d window) para inferir frecuencia, single query con `in('vehicle_id', vehicleIds)`.
+   - Total: ~6 queries para construir todo el árbol. Latencia estimada 100-300ms para un día típico (10-15 rutas).
+
+5. **Filtros y excludes**:
+   - `is_sandbox=false`: solo operación real. La planeación no contamina la síntesis.
+   - `status != CANCELLED`: rutas vivas.
+   - Stops `order('sequence')`: orden correcto para la tabla.
+
+6. **Discoverable desde `/settings/workbench`**: el manager lista las 5 herramientas analíticas (Zonas + Flotilla + Heatmap + Vista jerárquica + Sandbox), cierre del módulo Workbench como suite completa.
+
+**Alternativas consideradas:**
+- *Persistir "Frecuencia" como entidad en BD ahora*: descartado. Inferir del histórico da el 80% del valor con 0% del costo de migración. La entidad real llega cuando emerja un caso operativo concreto que la necesite (ej. crear/editar/asignar una frecuencia manualmente).
+- *Tree component con drag-drop / re-asignación*: descartado por scope. WB-6 es READ-ONLY. La re-asignación de stops vive en `/dispatches/[id]` o `/dia`. Hacer drag aquí duplicaría flujos.
+- *Ventana de inferencia diferente (30d, 90d)*: 60d es compromiso. 30d puede no capturar patrones quincenales (Lun primera + Lun tercera del mes); 90d puede arrastrar patrones obsoletos. Si emerge demanda, hacer ventana configurable.
+- *Mostrar día-de-semana del `date` objetivo en el header*: nice-to-have. Aceptable agregar después.
+- *Animación de transición / virtualización para árboles enormes*: descartado. Con 5-20 rutas/día (típico), el render nativo es instantáneo. Si tenant llega a 50+ rutas/día, considerar lazy-loading por zona.
+- *Vista calendario semana/mes en lugar de día*: dimensión distinta. Útil pero scope grande. Pendiente para WB-6b si emerge.
+- *Permitir ?date= en rango*: complica modelo (no es jerarquía limpia). Mantener single-day.
+
+**Riesgos / Limitaciones:**
+- **Inferencia de frecuencia no captura patrones complejos**: camioneta que opera Lun/Mié/Vie de semana 1 + Mar/Jue de semana 2 → la inferencia mostraría "Lun/Mar/Mié/Jue/Vie" porque agrega todos los días observados. No diferencia bi-semanal de semanal. Para WB-6 MVP aceptable; WB-7 con `frequencies` table podrá capturar patrones recurrentes con anchor week.
+- **Camionetas nuevas sin historia**: si una camioneta tiene su primera ruta hoy, el patrón es "Solo [día]" — se vuelve más útil después de 2-3 semanas de operación.
+- **Sin filtro por zona o vehículo en la URL**: el admin ve TODO. Si emerge demanda de "ver solo zona X", agregar `?zone=`.
+- **Queries `in('route_id', [50+ ids])`**: Postgres lo maneja bien hasta ~10k ids; para tenants enormes (250+ rutas/día) podría requerir pagination.
+- **Sin export PDF / Excel**: la vista jerárquica con drill-down no se traduce fácil a tabla plana. Si emerge demanda, ofrecer export "operación día X" con format custom.
+- **No considera frecuencia OBJETIVO vs REAL**: el admin no puede declarar "esta camioneta debería ser Lun/Mié/Vie" y ver si la real coincide. WB-7 lo cubrirá.
+- **No es printable**: detalles colapsables no son print-friendly. Mitigación: el admin imprime la página dispatch o ruta individual para llevar a junta.
+- **No probado con > 30 rutas en un día**: render con 30+ details puede saturar visualmente. Caso edge para tenants grandes.
+- **`status` en parada está en inglés**: pending/arrived/completed/skipped. UI muestra raw. Refinar después con label español.
+
+**Oportunidades de mejora:**
+- WB-7: tabla `frequencies` persistida, asignación manual, comparativa real vs objetivo.
+- Vista calendario semana con preview por día (mini-jerarquía).
+- Filtros: zona específica, frecuencia específica, "solo no completadas".
+- Acción inline en cada nivel: "Optimizar tiro", "Ver propuestas", "Imprimir layout".
+- Export "día completo" a PDF con la jerarquía aplanada.
+- Vista comparativa: día A vs día B (qué cambió).
+- Indicador de "anomalía": camioneta que normalmente opera Lun/Mié/Vie pero hoy NO está activa.
+- Hover en frecuencia → mini-gráfica de días-de-semana cuando ha operado.
+- Drag-drop en stops cross-route (avanzado).
+
+**Refs:**
+- ADR-112 a ADR-117 — Workbench foundation + herramientas hermanas.
+- apps/platform/src/lib/queries/operation-hierarchy.ts — agregador con inferencia.
+- apps/platform/src/app/(app)/settings/workbench/hierarchy/page.tsx — UI server.
+- apps/platform/src/app/(app)/settings/workbench/workbench-manager.tsx — discovery final.
+
+
 
 
 
