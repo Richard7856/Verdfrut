@@ -24,6 +24,7 @@ import { TransferRouteButton } from './transfer-route-button';
 import { RouteMapLoader } from '@/components/map/route-map-loader';
 import { LiveRouteMapLoader } from '@/components/map/live-route-map-loader';
 import { EtaModeBanner, isEtaModeDemo } from '@/components/shell/eta-mode-banner';
+import { RoutingModeBadge } from '@/components/routing-mode-badge';
 import type { RouteMapStop, RouteMapDepot } from '@/components/map/route-map';
 
 const STATUS_LABELS: Record<RouteStatus, string> = {
@@ -240,6 +241,9 @@ export default async function RouteDetailPage({ params }: PageProps) {
         description={
           <span className="flex items-center gap-2">
             <Badge tone={STATUS_TONES[route.status]}>{STATUS_LABELS[route.status]}</Badge>
+            {/* UXR-2: la ruta es manual o pasó por VROOM. Mostramos ambos labels en
+                detalle (showOptimized) para que el dispatcher confirme el modo. */}
+            <RoutingModeBadge route={route} showOptimized />
             <span style={{ color: 'var(--vf-text-mute)' }}>· v{route.version}</span>
             <span style={{ color: 'var(--vf-text-mute)' }}>·</span>
             <Link href="/routes" className="text-xs hover:underline" style={{ color: 'var(--vf-text-mute)' }}>

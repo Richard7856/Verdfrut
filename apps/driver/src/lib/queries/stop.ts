@@ -142,6 +142,7 @@ export async function getStopContext(stopId: string): Promise<StopContext | null
       updatedAt: routeRes.data.updated_at,
       dispatchId: routeRes.data.dispatch_id ?? null,
       depotOverrideId: (routeRes.data as { depot_override_id?: string | null }).depot_override_id ?? null,
+      optimizationSkipped: (routeRes.data as { optimization_skipped?: boolean | null }).optimization_skipped ?? false,
     },
     report: reportRes.data ? mapDeliveryReport(reportRes.data) : null,
     driverId: driverRow.id,

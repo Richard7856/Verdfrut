@@ -9,6 +9,7 @@ import { requireRole } from '@/lib/auth';
 import { listRoutes, countStopsForRoutes } from '@/lib/queries/routes';
 import { listZones } from '@/lib/queries/zones';
 import { listVehicles } from '@/lib/queries/vehicles';
+import { RoutingModeBadge } from '@/components/routing-mode-badge';
 
 export const metadata = { title: 'Rutas' };
 
@@ -134,7 +135,12 @@ export default async function RoutesPage({ searchParams }: PageProps) {
     {
       key: 'status',
       header: 'Estado',
-      cell: (r) => <Badge tone={STATUS_TONES[r.status]}>{STATUS_LABELS[r.status]}</Badge>,
+      cell: (r) => (
+        <span className="inline-flex items-center gap-1.5">
+          <Badge tone={STATUS_TONES[r.status]}>{STATUS_LABELS[r.status]}</Badge>
+          <RoutingModeBadge route={r} compact />
+        </span>
+      ),
     },
   ];
 

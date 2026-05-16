@@ -65,6 +65,31 @@ export function RouteHeader({ route, totalStops, completedStops, timezone }: Pro
           </span>
         )}
       </div>
+
+      {route.optimizationSkipped && (
+        // UXR-2 / ADR-110: la ruta no pasó por el optimizer — el dispatcher
+        // publicó el orden manual. El chofer debería saberlo porque la
+        // secuencia puede no ser la más corta y los km estimados son
+        // haversine (subestiman tráfico real). Si ve algo raro, debe avisar.
+        <div
+          role="status"
+          className="mt-3 flex items-start gap-2 rounded-md border px-3 py-2 text-xs"
+          style={{
+            background: 'color-mix(in oklch, var(--vf-warn, #d97706) 12%, transparent)',
+            borderColor: 'color-mix(in oklch, var(--vf-warn, #d97706) 35%, transparent)',
+            color: 'var(--vf-warn, #b45309)',
+          }}
+        >
+          <span aria-hidden className="mt-0.5">✋</span>
+          <div>
+            <p className="font-medium">Orden armado manualmente</p>
+            <p className="mt-0.5 text-[11px] opacity-90">
+              El dispatcher no corrió el optimizador para esta ruta. Si el orden
+              no tiene sentido, avísale antes de arrancar.
+            </p>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

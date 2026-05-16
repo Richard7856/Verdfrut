@@ -189,6 +189,7 @@ export async function getStopContext(stopId: string): Promise<StopContext | null
       updatedAt: routeRow.updated_at,
       dispatchId: routeRow.dispatch_id,
       depotOverrideId: routeRow.depot_override_id,
+      optimizationSkipped: (routeRow as { optimization_skipped?: boolean | null }).optimization_skipped ?? false,
     },
     driverId,
   };

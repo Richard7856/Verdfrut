@@ -6129,6 +6129,89 @@ Además: el dispatcher no tenía manera clara de "publicar este orden manual" �
 - packages/orchestrator/src/router-handoff.test.ts + role-mapping.test.ts — tests actualizados.
 
 
+## [2026-05-15] ADR-110: Stream UX-Routes cierre — badge Manual/Optimizada (UXR-2) + KPI rutas manuales (UXR-3)
+
+**Contexto:** Tras ADR-108 (state machine flexible), `routes.optimization_skipped` se setea en TRUE cuando el dispatcher publica desde DRAFT sin pasar por VROOM. La columna existe en BD y `approveRoute(opts.skippedOptimization)` la usa, pero NINGUNA superficie UI lo lee — el admin/dispatcher/chofer no podían saber si una ruta fue armada por el optimizer o a mano. Stream UX-Routes quedó en 80% por este gap.
+
+Caso concreto: dispatcher abre `/dia/hoy` y ve 12 rutas APPROVED. ¿Cuáles pasaron por VROOM, cuáles las publicó él directo? Sin badge tiene que abrir cada una para deducirlo del historial. Y el chofer, al recibir la ruta, asume que el orden es óptimo aunque sea manual — termina manejando 30km extras pensando que es lo mejor que se puede hacer.
+
+Además: como producto necesitamos un KPI agregado para detectar **fricción del flow optimizado**. Si el % de rutas manuales sube mes a mes, algo no convence (UX confusa, optimizer es lento, resultados malos en ciertas zonas). Sin el número no hay señal.
+
+**Decisión:**
+
+1. **Extender el type `Route` con `optimizationSkipped: boolean`** (`packages/types/src/domain/route.ts`). Default `false` — sesiones legacy quedan como "optimizadas" implícitamente (no perdemos por imprecisar; el flag se introdujo en ADR-108 y ahí está).
+
+2. **Mappers row → domain actualizados en todos los queries que devuelven `Route`**:
+   - `apps/platform/src/lib/queries/routes.ts` (ROUTE_COLS + toRoute).
+   - `apps/driver/src/lib/queries/route.ts` (ROUTE_COLS + toRoute).
+   - `apps/driver/src/lib/queries/stop.ts` (literal del route en getStopContext).
+   - `apps/driver-native/src/lib/queries/route.ts` (ROUTE_COLS + toRoute).
+   - `apps/driver-native/src/lib/queries/stop.ts` (literal del route).
+
+   Patrón: `optimizationSkipped: row.optimization_skipped ?? false` — null en BD se trata como false (legacy seguro).
+
+3. **Componente `<RoutingModeBadge>`** (`apps/platform/src/components/routing-mode-badge.tsx`):
+   - Props: `route` (status + optimizationSkipped), `showOptimized` (default false), `compact` (default false).
+   - DRAFT → null (todavía no se decide).
+   - `optimizationSkipped=true` → "✋ Manual" tono warning.
+   - `optimizationSkipped=false` → "🤖 Optimizada" tono info, **solo cuando `showOptimized=true`**. En listas con N rutas optimizadas, mostrar el badge en todas es ruido visual — el default oculta el caso "correcto" y solo señala el manual.
+   - Variante compact con estilos inline para tablas (pill ~10px), variante default usa `<Badge>` de `@tripdrive/ui`.
+   - Tooltip explica al admin qué significa cada modo.
+
+4. **Tres superficies del admin platform**:
+   - **`/routes` lista**: compact badge en la columna Estado, junto al status badge. Solo aparece para rutas manuales (rule: only-show-deviations).
+   - **`/routes/[id]` detalle**: badge en `PageHeader` description, con `showOptimized` para que el dispatcher confirme explícitamente qué modo se usó.
+   - **`/dispatches/[id]` route-stops-card**: compact badge dentro del header de cada card de ruta, alineado con el status badge.
+
+5. **Driver app — banner**:
+   - `apps/driver/src/components/route/route-header.tsx` muestra un mini-banner amber con icon `✋` cuando `route.optimizationSkipped=true`. Texto:
+     > **Orden armado manualmente** — El dispatcher no corrió el optimizador para esta ruta. Si el orden no tiene sentido, avísale antes de arrancar.
+   - Persistente (no dismissible). El chofer lo ve cada vez que abre la ruta — refuerzo continuo de "esta secuencia no es el resultado de un optimizer". Lo aceptamos porque (a) la mayoría de rutas SON optimizadas (banner es excepción, no la regla), y (b) si fuera dismissible el chofer lo cerraría sin leerlo.
+   - Solo en `apps/driver` (web). `apps/driver-native` ya hidrata `optimizationSkipped` en el query — la UI nativa del banner es un follow-up de bajo costo.
+
+6. **KPI `/reports`**:
+   - Nueva fila de KPIs con `% Rutas manuales`.
+   - Denominador: **rutas con status ≠ DRAFT** (las DRAFT todavía pueden optimizarse, no cuentan como decididas). Esta exclusión es importante para que el % no se infle con rutas que están en el limbo.
+   - Numerador: `optimization_skipped === true`.
+   - Hint debajo del número: "N de M sin VROOM" para que el admin entienda la base.
+   - Filtros existentes (rango fechas + zona) aplican automáticamente porque la query base ya filtra.
+
+**Alternativas consideradas:**
+- *Mostrar `🤖 Optimizada` SIEMPRE en lugar de solo manual*: descartado. En listas/dashboards con 90%+ de rutas optimizadas el badge se vuelve confeti visual y deja de señalar nada. La regla "solo mostrar la desviación" produce más señal. En `/routes/[id]` detalle sí mostramos ambos (showOptimized) porque ahí el admin viene a inspeccionar.
+- *Banner dismissible en driver app*: descartado. Si se puede cerrar, el chofer lo cierra una vez y nunca más lo lee. Mantenerlo persistente lo convierte en parte del contexto operativo, no en una notificación.
+- *KPI con denominador "rutas completadas" en vez de "decididas"*: descartado. Esperar a COMPLETED retrasa la señal — queremos detectar el patrón cuando se publica, no semanas después. Status ≠ DRAFT captura el momento de decisión real.
+- *Badge en map markers / live tracking*: descartado por scope. La inspección del modo ocurre en lista/detalle/header, no en el mapa táctico. Si en el futuro hay un caso operativo claro lo agregamos.
+- *Eventos analytics (Sentry / Posthog) cuando dispatcher publica manual*: descartado por scope. Tenemos el flag en BD, basta para reportes ad-hoc. Agregar eventing es otra deuda.
+- *Driver-native banner como parte de este ADR*: descartado por scope. La query ya hidrata el flag; pintar el banner en RN requiere editar un componente diferente con su propio styling system. Mejor ciclo separado.
+
+**Riesgos / Limitaciones:**
+- **Rutas legacy pre-ADR-108 quedan como "Optimizada"**: el flag se introdujo en migración 051, las rutas anteriores tienen `optimization_skipped=NULL` que el mapper convierte a `false`. Si una ruta antigua era manual, ahora figura como optimizada. Aceptado — no podemos reconstruir el modo retroactivamente y el costo de tener un % bajo en mes histórico es menor.
+- **El badge no diferencia "optimizada con cache hit" vs "optimizada con VROOM fresh"** (ADR-107 cache de matriz Mapbox). Para el dispatcher es igual — ambos pasaron por el flow optimizado. Para debugging de costos sí importa, pero ese análisis vive en logs no en UI.
+- **El driver app web banner no aparece en driver-native**: hidratamos el flag pero falta pintar el banner en RN. El chofer en native no ve la advertencia hoy. Follow-up.
+- **KPI no segmenta por dispatcher** (quién publicó manual). Útil cuando hay 5+ dispatchers — uno puede estar evitando el optimizer sistemáticamente. Hoy con 1-2 usuarios no se necesita; cuando entren equipos grandes, agregar drill-down.
+- **% manuales puede saltar con poca data**: si en el rango solo hay 3 rutas decididas y 1 es manual, el KPI dice 33%. Suficiente con el hint "1 de 3" para evitar interpretarlo mal — pero alguien podría sacar de contexto.
+- **Sin alerta cuando el % sube de tendencia**: el KPI muestra el snapshot del rango. Comparativa mes-vs-mes y alerta cuando crece pendiente de un dashboard analítico más completo.
+- **Tests no agregados**: el cambio es de display, sin lógica de negocio nueva más allá del filtro `status !== 'DRAFT'`. Riesgo bajo. Si introducimos comportamiento condicional sobre el flag (ej. bloquear publicación manual en cierto tier), agregar tests entonces.
+
+**Oportunidades de mejora:**
+- Banner equivalente en `apps/driver-native` route-header.
+- Drill-down del KPI: lista de las rutas manuales en el rango con link al detalle.
+- Comparativa MoM/WoW del % manuales (mini-chart con tendencia).
+- Filtro `?manual=true|false` en `/routes` para enfocarse en uno u otro.
+- KPI complementario: `% rutas manuales con km > optimizable estimado` (cuando guardemos métricas haversine VS optimizer alternativo).
+- Notificación al admin cuando el % cruza un umbral (ej. >40% en un mes).
+- Reason de por qué fue manual: input opcional al publicar directo ("orden ya validado en visual builder", "VROOM no entiende mi zona", etc.). Captura información cualitativa para mejorar el optimizer.
+
+**Refs:**
+- ADR-108 — origen de `optimization_skipped` y del flow publicar directo.
+- supabase/migrations/00000000000051_routes_optimization_skipped.sql — columna BD.
+- packages/types/src/domain/route.ts:50-57 — `optimizationSkipped` en el type.
+- apps/platform/src/components/routing-mode-badge.tsx — componente reusable.
+- apps/platform/src/app/(app)/routes/page.tsx + routes/[id]/page.tsx + dispatches/[id]/route-stops-card.tsx — integración admin.
+- apps/driver/src/components/route/route-header.tsx — banner driver.
+- apps/platform/src/app/(app)/reports/page.tsx — KPI % rutas manuales.
+
+
 
 
 

@@ -44,6 +44,15 @@ export interface Route {
    * para que la misma camioneta pueda salir de un CEDIS distinto en cada ruta.
    */
   depotOverrideId: string | null;
+  /**
+   * TRUE si la ruta se aprobó/publicó desde DRAFT sin pasar por VROOM (ADR-108).
+   * El dispatcher decidió que el orden manual era suficiente. El chofer recibió
+   * las paradas con métricas haversine en vez de optimizer real. Se usa para:
+   * — badge UI "✋ Manual" vs "🤖 Optimizada" (UXR-2, ADR-110).
+   * — aviso en driver app para que el chofer sepa que la secuencia es manual.
+   * — KPI `% rutas manuales` por mes en /reports (UXR-3, ADR-110).
+   */
+  optimizationSkipped: boolean;
 }
 
 export interface RouteVersion {

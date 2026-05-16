@@ -33,13 +33,15 @@ interface RouteRow {
   created_at: string;
   updated_at: string;
   dispatch_id: string | null;
+  optimization_skipped?: boolean | null;
+  depot_override_id?: string | null;
 }
 
 const ROUTE_COLS = `
   id, name, date, vehicle_id, driver_id, zone_id, status, version,
   total_distance_meters, total_duration_seconds, estimated_start_at, estimated_end_at,
   actual_start_at, actual_end_at, published_at, published_by, approved_at, approved_by,
-  created_by, created_at, updated_at, dispatch_id
+  created_by, created_at, updated_at, dispatch_id, depot_override_id, optimization_skipped
 `;
 
 function toRoute(row: RouteRow): Route {
@@ -66,7 +68,8 @@ function toRoute(row: RouteRow): Route {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     dispatchId: row.dispatch_id,
-    depotOverrideId: (row as { depot_override_id?: string | null }).depot_override_id ?? null,
+    depotOverrideId: row.depot_override_id ?? null,
+    optimizationSkipped: row.optimization_skipped ?? false,
   };
 }
 

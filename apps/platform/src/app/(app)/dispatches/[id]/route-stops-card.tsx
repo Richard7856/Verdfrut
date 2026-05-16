@@ -40,6 +40,7 @@ import {
 } from '../../routes/actions';
 import { AddStopButton } from '../../routes/[id]/add-stop-button';
 import { RemoveVehicleButton } from './remove-vehicle-button';
+import { RoutingModeBadge } from '@/components/routing-mode-badge';
 
 const STATUS: Record<RouteStatus, { text: string; tone: 'neutral' | 'info' | 'success' | 'warning' | 'danger' }> = {
   DRAFT: { text: 'Borrador', tone: 'neutral' },
@@ -383,7 +384,12 @@ export function RouteStopsCard({
           )}
         </div>
         <div className="flex flex-col items-end gap-1">
-          <Badge tone={status.tone}>{status.text}</Badge>
+          <div className="flex items-center gap-1.5">
+            <Badge tone={status.tone}>{status.text}</Badge>
+            {/* UXR-2: marcar rutas publicadas/aprobadas que evitaron el optimizer
+                — el dispatcher las distingue de un vistazo del lote VROOM. */}
+            <RoutingModeBadge route={route} compact />
+          </div>
           {/* Optimizar/re-optimizar UNA ruta — solo DRAFT/OPTIMIZED y con paradas. */}
           {(route.status === 'DRAFT' || route.status === 'OPTIMIZED') && items.length > 0 && (
             <Button

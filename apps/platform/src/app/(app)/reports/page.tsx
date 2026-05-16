@@ -53,7 +53,7 @@ export default async function ReportsPage({ searchParams }: PageProps) {
   let q = supabase
     .from('routes')
     .select(
-      'id, date, status, total_distance_meters, total_duration_seconds, zone_id',
+      'id, date, status, total_distance_meters, total_duration_seconds, zone_id, optimization_skipped',
       { count: 'exact' },
     )
     .gte('date', from)
@@ -83,6 +83,7 @@ export default async function ReportsPage({ searchParams }: PageProps) {
     total_distance_meters: number | null;
     total_duration_seconds: number | null;
     zone_id: string;
+    optimization_skipped: boolean | null;
   }>;
 
   // Buckets por status.
@@ -112,6 +113,16 @@ export default async function ReportsPage({ searchParams }: PageProps) {
     (s, r) => s + (r.total_duration_seconds ?? 0) / 3600,
     0,
   );
+
+  // UXR-3 / ADR-110: % rutas manuales (DRAFT → APPROVED sin VROOM).
+  // Solo contamos rutas que YA pasaron la decisión (status ≠ DRAFT). Una DRAFT
+  // todavía puede correr el optimizer, así que no debería sumar al denominador.
+  const decidedRoutes = routes.filter((r) => r.status !== 'DRAFT');
+  const manualRoutes = decidedRoutes.filter((r) => r.optimization_skipped === true).length;
+  const manualPct =
+    decidedRoutes.length > 0
+      ? Math.round((manualRoutes / decidedRoutes.length) * 100)
+      : null;
 
   // Paradas agregadas — 1 query batch via .in('route_id', [...]).
   const routeIds = routes.map((r) => r.id);
@@ -213,6 +224,21 @@ export default async function ReportsPage({ searchParams }: PageProps) {
         <Kpi label="Tiempo manejo" value={`${totalDriveHours.toFixed(0)} h`} hint="Optimizer estimado" />
         <Kpi label="Paradas completas" value={completedStops} hint={`${completedStops + pendingStops + skippedStops} total`} />
         <Kpi label="Paradas pendientes" value={pendingStops} hint={`${skippedStops} omitidas`} />
+      </div>
+
+      {/* UXR-3 / ADR-110: visibilidad del % de rutas que el dispatcher publicó
+          sin pasar por el optimizer. Útil para detectar fricción del flow
+          optimizado (si el % es alto, hay algo que no convence). */}
+      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Kpi
+          label="% Rutas manuales"
+          value={manualPct === null ? '—' : `${manualPct}%`}
+          hint={
+            manualPct === null
+              ? 'sin rutas decididas en el rango'
+              : `${manualRoutes} de ${decidedRoutes.length} sin VROOM`
+          }
+        />
       </div>
 
       {/* Breakdown por status */}
