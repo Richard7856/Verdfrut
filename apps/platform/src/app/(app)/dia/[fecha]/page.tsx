@@ -152,6 +152,15 @@ export default async function DiaDetailPage({ params, searchParams }: Props) {
       <PageHeader
         title={`Día ${fecha}`}
         description="Todas las rutas del día en un solo mapa. Filtra por zona o estado. Click en una ruta del listado para editar la camioneta."
+        action={
+          <Link
+            href={`/dispatches/new/visual?date=${fecha}`}
+            className="rounded-md border border-emerald-700 bg-emerald-950/30 px-3 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-950/50"
+            title="Armar un plan del día desde el mapa: selecciona tiendas y asígnalas a camionetas visualmente"
+          >
+            🗺️ Armar día visual
+          </Link>
+        }
       />
 
       <div className="mb-3">
@@ -171,9 +180,9 @@ export default async function DiaDetailPage({ params, searchParams }: Props) {
           <Metric label="Paradas" value={`${totals.completedStops} / ${totals.totalStops}`} hint="completadas" />
           <Metric label="Distancia" value={formatKilometers(totals.distanceMeters)} hint="suma de rutas" />
           <Metric
-            label="Tiros agrupados"
+            label="Planes activos"
             value={`${uniqueDispatchIds.length}`}
-            hint="contenedores con rutas hoy"
+            hint="grupos creados hoy"
           />
         </div>
       </Card>
@@ -236,8 +245,9 @@ export default async function DiaDetailPage({ params, searchParams }: Props) {
         {uniqueDispatchIds.length > 0 && (
           <div className="mt-4 rounded-md border border-[var(--color-border)] bg-[var(--vf-surface-2)] p-3">
             <p className="text-xs text-[var(--color-text-muted)]">
-              Para editar agrupaciones (mover paradas entre camionetas en bloque, optimizar tiro
-              completo, etc.) entra al detalle del tiro:
+              Edición avanzada — mover paradas entre camionetas en bloque, optimizar todo el
+              plan, ver propuestas con costo MXN, agregar más camionetas. Abre el plan al que
+              pertenece la ruta:
             </p>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {uniqueDispatchIds.map((id) => (
@@ -246,7 +256,7 @@ export default async function DiaDetailPage({ params, searchParams }: Props) {
                   href={`/dispatches/${id}`}
                   className="rounded-md border border-[var(--color-border)] bg-[var(--vf-surface-3)] px-2 py-1 text-xs text-[var(--color-text)] hover:bg-[var(--vf-surface-2)]"
                 >
-                  Editar tiro {id.slice(0, 8)}…
+                  Abrir plan {id.slice(0, 8)}…
                 </Link>
               ))}
             </div>

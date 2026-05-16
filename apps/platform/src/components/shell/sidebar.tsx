@@ -42,7 +42,12 @@ const NAV_ITEMS: NavItem[] = [
 
   { href: '/dia', label: '📅 Día', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
   { href: '/routes', label: 'Rutas', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
-  { href: '/dispatches', label: 'Tiros (planeación)', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
+  // /dispatches removido del sidebar 2026-05-15: el concepto "tiro = contenedor
+  // de rutas" confundía a customers nuevos (esperaban ver "operación del día",
+  // no un contenedor abstracto). El URL /dispatches/[id] sigue accesible como
+  // drill-down desde /dia (chips de tiros agrupados al pie del listado), y la
+  // página /dispatches redirige a /dia. Fase 2: edición directa cross-dispatch
+  // en /dia hará que el concepto desaparezca también del modelo de URLs.
   { href: '/settings/vehicles', label: 'Flotilla', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
   { href: '/settings/depots', label: 'CEDIS / Hubs', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
   { href: '/incidents', label: 'Incidencias', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },

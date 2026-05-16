@@ -1,6 +1,6 @@
 # TripDrive — Roadmap
 
-> Actualizado el 2026-05-15. La plataforma se llama **TripDrive** (dominio `tripdrive.xyz` en Vercel). Primer cliente productivo: **VerdFrut** → NETO CDMX/Toluca.
+> Actualizado el 2026-05-15 (noche post-OE-3). Plataforma: **TripDrive** (`tripdrive.xyz`). Primer cliente productivo: **VerdFrut** → NETO CDMX/Toluca. Self-serve signup + Stripe billing per-seat en producción.
 
 ---
 
@@ -12,6 +12,24 @@ output. El costo MXN es secundario hasta que veamos producción real con
 2+ clientes activos. (Confirmado por user 2026-05-15.)
 
 ---
+
+## 🎯 Próximas prioridades (post-OE-3)
+
+### 🥇 Stream UX — Unificar el concepto "Día" (eliminar "Tiros" del modelo mental)
+
+**Por qué**: el concepto "tiro = contenedor de N rutas" era nuestro,
+no del cliente. Customers nuevos veían "Día" y "Tiros" en sidebar sin
+entender la diferencia. 2026-05-15 escondimos `/dispatches` del nav
+(redirect a `/dia`) y dejamos `/dispatches/[id]` como drill-down avanzado.
+Faltan 2 fases:
+
+| Sprint | Entrega | Status |
+|---|---|---|
+| **UX-Fase 1** | Esconder `/dispatches` del sidebar + redirect a `/dia`. Drill-down `/dispatches/[id]` accesible desde chips "Abrir plan xxxxx". Botón "Armar día visual" surge en `/dia`. | ✅ 2026-05-15 |
+| **UX-Fase 2** | Edición directa en `/dia/[fecha]`: bulk select de paradas cross-dispatch, mover entre camionetas sin entrar al "plan" específico, optimize de todo el día con un click. El URL `/dispatches/[id]` queda como vista legacy. | ⏳ próxima sesión (~3h) |
+| **UX-Fase 3** | Relax `routes.dispatch_id` NOT NULL en BD. Auto-agrupación por `(date, zone, customer_id)`. El concepto "tiro" desaparece también del modelo. | ⏳ cuando UX-Fase 2 esté estable (~4h) |
+
+### 🥈 Stream OE — Optimization Engine (feature central, ADR-096)
 
 ## 🎯 Estado pre-demo 2026-05-15 (noche)
 
@@ -26,7 +44,7 @@ output. El costo MXN es secundario hasta que veamos producción real con
 
 ---
 
-## 🚨 P0 ACTUAL — Dos streams en paralelo
+## 🚨 P0 ACTUAL — Streams en paralelo
 
 ### Stream OE — Optimization Engine (feature central, ADR-096)
 
@@ -46,7 +64,8 @@ alternativas óptimas es **el value prop completo del producto**.
 |---|---|---|
 | **OE-1** | Capas 1+2 — clustering bisección + asignación greedy | ✅ 2026-05-15 (ADR-097) |
 | **OE-2** | Capa 4 — propuesta N alternativas + costo MXN + endpoint `internal/propose-routes` + migración 045 `customers.optimizer_costs` | ✅ 2026-05-15 (ADR-100) |
-| **OE-3** | Tools `propose_route_plan` + `apply_route_plan` en el router agent (ver Stream R) + UI `RouteProposalCard` con map preview | ⏳ depende de R3 |
+| **OE-3** | Tools `propose_route_plan` + `apply_route_plan` + UI `/dispatches/[id]/propose` con 3 cards (cheapest/balanced/fastest) + breakdown costo MXN + apply buttons | ✅ 2026-05-15 (ADR-105) |
+| **OE-3.1** | Map preview por opción en las cards de propose. Cache del plan completo en la response (stops + sequences + ETAs) para apply instantáneo sin re-correr VROOM. | ⏳ pendiente (~3h) |
 | **OE-4** | Refinamientos: constraints (ventanas horarias, capacity multi-dim), cache matriz Google Routes, A/B testing default option | ⏳ pendiente |
 
 **Métrica de éxito**: km totales por tiro CDMX 21 stops ≤ 280 (vs 421 hoy
