@@ -99,6 +99,13 @@ interface CreateDriverInput {
  */
 export async function createDriver(input: CreateDriverInput): Promise<{ id: string }> {
   const supabase = await createServerClient();
+  // ADR-112/113: tag is_sandbox según el modo Workbench actual. NOTA: el
+  // invite-user-flow real crea PRIMERO el user_profile via service-role (sin
+  // contexto de cookie del admin) y luego llama createDriver. Para WB-1b
+  // mantenemos la convención que createDriver herede el modo del caller —
+  // si el admin invita desde modo sandbox, el driver registry queda sandbox,
+  // pero el user_profile vive como real (no tiene is_sandbox por diseño).
+  const sandbox = await isSandboxMode();
   const { data, error } = await supabase
     .from('drivers')
     .insert({
@@ -106,6 +113,7 @@ export async function createDriver(input: CreateDriverInput): Promise<{ id: stri
       zone_id: input.zoneId,
       license_number: input.licenseNumber ?? null,
       license_expires_at: input.licenseExpiresAt ?? null,
+      is_sandbox: sandbox,
     })
     .select('id')
     .single();

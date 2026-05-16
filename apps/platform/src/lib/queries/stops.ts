@@ -104,10 +104,25 @@ interface CreateStopsInput {
 /**
  * Inserta múltiples paradas en bulk. Usado al crear/optimizar una ruta.
  * Si ya existían paradas para la ruta, hay que borrarlas antes (deleteStopsForRoute).
+ *
+ * ADR-112/113: is_sandbox de los stops hereda del route padre — NO del cookie
+ * del request. Razón: este helper se llama desde paths background (optimizer
+ * pipeline, RPC restructure) donde el cookie puede no reflejar el modo del
+ * dato. La verdad la dicta el route.
  */
 export async function createStops(input: CreateStopsInput): Promise<Stop[]> {
   if (input.stops.length === 0) return [];
   const supabase = await createServerClient();
+
+  // Resolver is_sandbox del route padre. Si la query falla, defaulteamos a
+  // false (operación real) — defensa para no escribir accidentalmente a
+  // sandbox cuando la fuente es ambigua.
+  const { data: routeRow } = await supabase
+    .from('routes')
+    .select('is_sandbox')
+    .eq('id', input.routeId)
+    .maybeSingle();
+  const routeSandbox = Boolean(routeRow?.is_sandbox ?? false);
 
   const rows = input.stops.map((s) => ({
     route_id: input.routeId,
@@ -117,6 +132,7 @@ export async function createStops(input: CreateStopsInput): Promise<Stop[]> {
     planned_arrival_at: s.plannedArrivalAt ?? null,
     planned_departure_at: s.plannedDepartureAt ?? null,
     status: 'pending' as StopStatus,
+    is_sandbox: routeSandbox,
   }));
 
   const { data, error } = await supabase.from('stops').insert(rows).select(STOP_COLS);

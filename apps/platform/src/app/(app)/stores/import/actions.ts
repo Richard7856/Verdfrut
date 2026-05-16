@@ -15,6 +15,7 @@ import { revalidatePath } from 'next/cache';
 import { logger } from '@tripdrive/observability';
 import { requireRole } from '@/lib/auth';
 import { createServerClient } from '@tripdrive/supabase/server';
+import { isSandboxMode } from '@/lib/workbench-mode';
 
 // Tipo de retorno propio (el ActionResult global no es genérico).
 type Result<T> = { ok: true; data: T } | { ok: false; error: string };
@@ -385,6 +386,8 @@ export async function bulkImportStores(
       };
     }
 
+    // ADR-112/113: tag is_sandbox según el modo Workbench actual del caller.
+    const sandbox = await isSandboxMode();
     // customer_id lo setea el trigger auto_set_customer_id (mig 037).
     const { error } = await supabase.from('stores').insert(
       toInsert.map((s) => ({
@@ -399,6 +402,7 @@ export async function bulkImportStores(
         demand: [100, 1, 5],
         coord_verified: true, // el user confirmó visualmente
         is_active: true,
+        is_sandbox: sandbox,
       })) as never,
     );
 

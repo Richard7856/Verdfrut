@@ -112,6 +112,9 @@ interface CreateStoreInput {
 
 export async function createStore(input: CreateStoreInput): Promise<Store> {
   const supabase = await createServerClient();
+  // ADR-112/113: tag is_sandbox según el modo Workbench actual. Si admin
+  // está en sandbox, la tienda creada es hipotética (no llega al chofer).
+  const sandbox = await isSandboxMode();
   const { data, error } = await supabase
     .from('stores')
     .insert({
@@ -127,6 +130,7 @@ export async function createStore(input: CreateStoreInput): Promise<Store> {
       receiving_window_end: input.receivingWindowEnd ?? null,
       service_time_seconds: input.serviceTimeSeconds ?? 900,
       demand: input.demand ?? DEFAULT_DEMAND,
+      is_sandbox: sandbox,
     })
     .select(STORE_COLS)
     .single();

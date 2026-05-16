@@ -23,4 +23,9 @@ export interface Dispatch {
    * 7 días desde que se activa. El endpoint público filtra `expires_at > NOW()`.
    */
   publicShareExpiresAt: string | null;
+  /**
+   * ADR-112 / Workbench WB-1: TRUE si el tiro vive en el modo planeación.
+   * Default FALSE (operación real). Cambia via promote/clone (ADR-113).
+   */
+  isSandbox: boolean;
 }

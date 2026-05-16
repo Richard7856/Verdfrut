@@ -24,6 +24,7 @@ import { ShareDispatchButton } from './share-dispatch-button';
 import { AddVehicleButton } from './add-vehicle-button';
 import { RestructureSnapshotBanner } from './restructure-snapshot-banner';
 import { OptimizeDispatchButton } from './optimize-dispatch-button';
+import { WorkbenchCloneButton } from './workbench-clone-button';
 import type { ChatStatus, DispatchStatus, Store } from '@tripdrive/types';
 
 export const dynamic = 'force-dynamic';
@@ -151,9 +152,18 @@ export default async function DispatchDetailPage({ params }: Props) {
         action={
           <div className="flex items-center gap-2">
             <Badge tone={status.tone}>{status.text}</Badge>
+            {dispatch.isSandbox && (
+              <Badge tone="warning" title="Este tiro vive en modo planeación. No afecta operación real.">
+                🧪 Sandbox
+              </Badge>
+            )}
             <ShareDispatchButton
               dispatchId={dispatch.id}
               currentToken={dispatch.publicShareToken}
+            />
+            <WorkbenchCloneButton
+              dispatchId={dispatch.id}
+              sourceIsSandbox={dispatch.isSandbox}
             />
             <DispatchActions dispatch={dispatch} />
           </div>

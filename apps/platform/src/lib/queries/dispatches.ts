@@ -18,10 +18,11 @@ interface DispatchRow {
   updated_at: string;
   public_share_token: string | null;
   public_share_expires_at: string | null;
+  is_sandbox: boolean | null;
 }
 
 const DISPATCH_COLS =
-  'id, name, date, zone_id, status, notes, created_by, created_at, updated_at, public_share_token, public_share_expires_at';
+  'id, name, date, zone_id, status, notes, created_by, created_at, updated_at, public_share_token, public_share_expires_at, is_sandbox';
 
 function toDispatch(row: DispatchRow): Dispatch {
   return {
@@ -36,6 +37,7 @@ function toDispatch(row: DispatchRow): Dispatch {
     updatedAt: row.updated_at,
     publicShareToken: row.public_share_token,
     publicShareExpiresAt: row.public_share_expires_at,
+    isSandbox: row.is_sandbox ?? false,
   };
 }
 

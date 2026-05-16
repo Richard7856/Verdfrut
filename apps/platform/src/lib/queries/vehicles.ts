@@ -101,6 +101,8 @@ interface CreateVehicleInput {
 
 export async function createVehicle(input: CreateVehicleInput): Promise<Vehicle> {
   const supabase = await createServerClient();
+  // ADR-112/113: tag is_sandbox según el modo Workbench actual.
+  const sandbox = await isSandboxMode();
   const { data, error } = await supabase
     .from('vehicles')
     .insert({
@@ -118,6 +120,7 @@ export async function createVehicle(input: CreateVehicleInput): Promise<Vehicle>
       engine_size_l: input.engineSizeL ?? null,
       fuel_consumption_l_per_100km: input.fuelConsumptionLPer100km ?? null,
       notes: input.notes ?? null,
+      is_sandbox: sandbox,
     })
     .select(VEHICLE_COLS)
     .single();

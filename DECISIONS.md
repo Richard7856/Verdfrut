@@ -6389,6 +6389,90 @@ Stream Workbench nace para cerrar este gap. WB-1 es la foundation que todas las 
 - apps/platform/src/lib/queries/dispatches.ts:getDispatchByPublicToken — defensa share.
 
 
+## [2026-05-16] ADR-113: Workbench WB-1b — Promote sandbox→real + Clone real→sandbox + tagging completo
+
+**Contexto:** WB-1 (ADR-112) entregó la foundation del sandbox: filtros por modo, toggle, banner, reset. Pero quedaron dos gaps que impedían cerrarlo al 100%:
+
+1. **No había forma de "graduar" un escenario sandbox**: el admin podía armar un tiro hipotético perfecto pero no había acción para convertirlo en operación real. Forzaba a recrear manualmente, derrotando el valor del sandbox.
+
+2. **No había forma de "experimentar con la operación de hoy"**: si el dispatcher tenía una operación real en curso y quería probar variaciones ("¿qué pasa si parto la ruta Roja en dos?"), tenía que armar el escenario desde cero en sandbox en lugar de clonar lo que ya existía.
+
+Adicional: **catálogo y rutas legacy no taggeaban `is_sandbox`** todavía. createStore, createVehicle, createDriver, createDraftRoute, createStops, bulkImportStores — todas insertaban con default `false`, lo que significaba que ESTANDO en modo sandbox, si el admin creaba una tienda, terminaba en operación real por accidente.
+
+**Decisión:**
+
+1. **`cloneDispatchAction(dispatchId, targetSandbox)`** — server action única que soporta las dos direcciones por simetría:
+   - `targetSandbox=false` ⇒ **promote** (sandbox → real).
+   - `targetSandbox=true` ⇒ **clone-to-sandbox** (real → sandbox).
+   - Lógica común: lee source dispatch + rutas + stops, crea copias nuevas con UUIDs nuevos, mapea FK source→new al insertar stops.
+   - El source dispatch queda **intacto** en ambos casos (copy, no move). El admin decide después si lo borra (vía Reset del sandbox o manualmente).
+
+2. **Validación de catálogo en promote**: si target=real, validamos que TODAS las referencias (`vehicle_id`, `driver_id`, `store_id` en stops) apunten a items reales (`is_sandbox=false`). Si encuentra alguna sandbox, bloquea con mensaje claro: *"No se puede promover: este escenario usa catálogo hipotético. Camioneta(s) hipotéticas: …, 2 chofer(es) hipotéticos, Tienda(s) hipotéticas: TOL-1, MEX-44…"*. El admin entiende qué cambiar antes de reintentar.
+
+3. **Reset al promover**: status del nuevo dispatch siempre arranca en `'planning'` (no arrastra `dispatched`/`completed`). Stops siempre arrancan `'pending'`. Esto evita estados operativos zombies (e.g. un dispatch sandbox marcado como `dispatched` haría poco sentido al volverse real con choferes que nunca lo recibieron).
+
+4. **Cleanup-on-error**: si la creación falla a media transacción (e.g. insert de stops error), borramos lo creado parcialmente para no dejar zombies. No usamos transacción RPC por scope — secuencial con cleanup es aceptable para WB-1b. Si emergen race conditions, migrar a `tripdrive_clone_dispatch` RPC.
+
+5. **UI — Botón `WorkbenchCloneButton` en `/dispatches/[id]`**:
+   - Sandbox dispatch ⇒ `📤 Promover a operación real` (variant primary, llama atención).
+   - Real dispatch ⇒ `🧪 Clonar al sandbox` (variant secondary, alternativa).
+   - Confirm explícito explicando qué pasa con el source ("queda intacto") y qué pasa con el target ("el chofer SÍ podrá recibirlo cuando lo publiques").
+   - Toast con resumen `${routes} ruta(s) y ${stops} parada(s) copiadas` + redirect al nuevo dispatch.
+
+6. **Badge `🧪 Sandbox` en el `PageHeader`** del dispatch detail cuando `dispatch.isSandbox=true` — refuerzo visual cuando el admin está viendo un escenario hipotético directamente.
+
+7. **Tag completo `is_sandbox` en helpers de creación**:
+   - `createStore`, `createVehicle`, `createDriver`: leen `isSandboxMode()` del cookie y propagan.
+   - `bulkImportStores` (Excel + mapa): mismo patrón.
+   - `createDraftRoute`: heredan de `dispatch.is_sandbox` si tienen padre; sino del cookie. Razón: la consistencia jerárquica gana sobre el modo del request (un dispatch real con una ruta sandbox sería incoherente).
+   - `createStops`: hereda de `route.is_sandbox` (lookup explícito antes de insert). NUNCA del cookie, porque createStops se llama desde paths background (optimizer pipeline, RPC restructure) donde el cookie del cliente puede no aplicar.
+
+8. **`Dispatch` type extendido**: `isSandbox: boolean` agregado en `packages/types/src/domain/dispatch.ts`. Mapper en `queries/dispatches.ts` ahora lee `is_sandbox` con default `false`.
+
+**Alternativas consideradas:**
+- *Move (sandbox → real) en lugar de copy*: descartado. Move pierde el history del experimento. Copy permite que el admin compare "el sandbox que armé vs lo que terminó en real" si quiere.
+- *Promote SIN validación de catálogo*: descartado. Si una camioneta hipotética se promociona, el dispatch real apunta a una camioneta sandbox — al optimizar el chofer recibiría una ruta con una camioneta que el sistema considera planeación. Romper invariante.
+- *Cascade promote del catálogo*: si el sandbox usa una camioneta hipotética, auto-promoverla a real junto con el dispatch. Descartado por scope: requiere validar a su vez los `depot_id` del vehículo, el `zone_id`, etc. Cadena recursiva. WB-1b se queda en "bloquea con mensaje claro"; cascade es candidato a WB-1c si la fricción real lo justifica.
+- *Status preservation*: clonar conservando status del source. Descartado. Status `dispatched`/`completed`/`cancelled` no aplica a un dispatch nuevo (su ejecución arranca de cero). Reset a `planning` es lo correcto.
+- *Transacción RPC*: usar `tripdrive_clone_dispatch` RPC para atomicidad. Descartado por scope — cleanup-on-error es suficiente para WB-1b. Reevaluar si producción muestra zombies.
+- *Botón "Mover a sandbox / a real"* con confirmación destructiva: descartado. Move es más confuso UX. Copy es predecible: "lo que ves se duplica donde lo quieres".
+- *user_profiles con is_sandbox*: descartado. Los admin/dispatcher hipotéticos no aportan valor en WB-1/1b (no hay "qué pasa si contrato otro dispatcher"). Si emerge, agregar en WB-2+.
+- *Tag is_sandbox via DB trigger en lugar de en cada helper*: tentador para evitar olvidos, pero el trigger no tiene acceso al cookie del request HTTP. Habría que pasar via session var de Postgres, que es overhead. Convención explícita es más simple.
+
+**Riesgos / Limitaciones:**
+- **`createStops` y `createDraftRoute` heredan, no del cookie**: significa que si un día un caller externo llama estos helpers con UUIDs custom, el is_sandbox se determina por la fuente. Es lo correcto pero documenta atípicamente.
+- **Promote no copia métricas del optimizer** (total_distance_meters, etc.): el dispatch promovido arranca con métricas nulas, requiere re-optimización para llenarlas. Aceptable — son métricas calculadas, no datos del user.
+- **Clone-to-sandbox de un dispatch IN_PROGRESS / COMPLETED**: técnicamente posible y soportado. El clon arranca DRAFT/planning, así que no hay riesgo. Caso de uso: "esta operación de la semana pasada salió mal, déjame probar variaciones en sandbox para ver qué hubiera hecho mejor". Valor analítico.
+- **No hay vínculo entre source y clone**: el dispatch nuevo no tiene `cloned_from` column. Si el admin clona 5 veces, no recuerda cuál vino de cuál. Mitigación: el nombre tiene sufijo `(sandbox)` o `(promovido)` para diferenciar visualmente. Si emerge la necesidad de un grafo de origen, agregar `parent_dispatch_id`.
+- **Promote no permite renombrar / re-fecha**: hereda nombre + sufijo y fecha del source. Si el admin quiere "tomar este escenario y aplicarlo el próximo lunes", tiene que clonar a real y luego editar fecha/nombre. Friction aceptable para WB-1b; agregar args opcionales si emerge.
+- **Bulk store import en sandbox**: si el admin sube un Excel con 200 tiendas mientras está en modo sandbox, esas 200 tiendas son hipotéticas. Si era trabajo real, debe entrar en real mode antes de importar. Mitigación: el banner amber persistente del shell hace muy difícil olvidar el modo. El import-action no lo verifica explícitamente (no bloquea por modo) — el admin es responsable.
+- **`createDriver` lee del cookie**: el invite-user flow del platform corre con cookie del admin invitando — funciona bien. PERO: si en el futuro hay un script o webhook que cree drivers sin cookie, defaultea a `false` (operación real), que es el path seguro.
+- **No probamos end-to-end con un dispatch grande (50+ rutas, 1000+ stops)**: la inserción secuencial de rutas + insert bulk de stops debería escalar, pero no se midió. Si la operación tarda >10s en producción, optimizar a paralelo o RPC.
+
+**Oportunidades de mejora:**
+- Lazy promote: validar refs catálogo SIN bloquear; ofrecer "cascade promote catálogo hipotético" como opción.
+- Diff visual antes de promote ("el sandbox tiene 3 rutas que NO están en operación, ¿continuar?").
+- `cloned_from_dispatch_id` column para grafo de origen y "ver el escenario que generó este real".
+- Editor de nombre/fecha al promover ("aplicar como tiro del próximo Lunes con nombre X").
+- Promote masivo: seleccionar N sandbox dispatches y promoverlos en bulk con un solo botón.
+- Bulk store import: bloquear o avisar fuerte si se hace en modo sandbox sin intención.
+- WB-2 a WB-6 sobre esta foundation: frecuencias, sugerencias de zonas, recomendación de flotilla, heatmaps, vista jerárquica.
+
+**Refs:**
+- ADR-112 — foundation del sandbox.
+- packages/types/src/domain/dispatch.ts — `isSandbox` en el Dispatch type.
+- apps/platform/src/lib/queries/dispatches.ts — mapper actualizado.
+- apps/platform/src/app/(app)/dispatches/[id]/clone-action.ts — server action de clone/promote.
+- apps/platform/src/app/(app)/dispatches/[id]/workbench-clone-button.tsx — botón UI.
+- apps/platform/src/app/(app)/dispatches/[id]/page.tsx — integración + badge 🧪 Sandbox.
+- apps/platform/src/lib/queries/stores.ts:createStore — tag is_sandbox cookie-based.
+- apps/platform/src/lib/queries/vehicles.ts:createVehicle — idem.
+- apps/platform/src/lib/queries/drivers.ts:createDriver — idem.
+- apps/platform/src/lib/queries/routes.ts:createDraftRoute — hereda de dispatch padre o cookie.
+- apps/platform/src/lib/queries/stops.ts:createStops — hereda de route padre.
+- apps/platform/src/app/(app)/stores/import/actions.ts:bulkImportStores — tag is_sandbox cookie-based.
+
+
 
 
 

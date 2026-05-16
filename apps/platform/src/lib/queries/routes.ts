@@ -167,6 +167,20 @@ interface CreateRouteInput {
 
 export async function createDraftRoute(input: CreateRouteInput): Promise<Route> {
   const supabase = await createServerClient();
+  // ADR-112/113: si la ruta pertenece a un dispatch, hereda is_sandbox de él
+  // (consistencia jerárquica). Si no tiene dispatch, hereda del cookie del
+  // request actual. El primer path es el común vía createAndOptimizeRoute.
+  let sandbox = false;
+  if (input.dispatchId) {
+    const { data: parent } = await supabase
+      .from('dispatches')
+      .select('is_sandbox')
+      .eq('id', input.dispatchId)
+      .maybeSingle();
+    sandbox = Boolean(parent?.is_sandbox ?? false);
+  } else {
+    sandbox = await isSandboxMode();
+  }
   const { data, error } = await supabase
     .from('routes')
     .insert({
@@ -178,6 +192,7 @@ export async function createDraftRoute(input: CreateRouteInput): Promise<Route> 
       status: 'DRAFT',
       created_by: input.createdBy,
       dispatch_id: input.dispatchId ?? null,
+      is_sandbox: sandbox,
     })
     .select(ROUTE_COLS)
     .single();
