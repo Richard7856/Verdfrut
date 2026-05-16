@@ -166,6 +166,19 @@ export function WorkbenchManager({
               actual (kg/sem + paradas/sem) y compara con lo que tienes hoy.
             </p>
           </li>
+          <li>
+            <a
+              href="/settings/workbench/heatmap"
+              className="font-medium underline-offset-2 hover:underline"
+              style={{ color: 'var(--vf-green-600, #15803d)' }}
+            >
+              🔥 Heatmap de operación
+            </a>
+            <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+              Mapa con capas visuales: dónde se concentran visitas, dónde está el
+              kg/sem, y qué zonas están saturadas o sub-utilizadas.
+            </p>
+          </li>
         </ul>
       </Card>
 
@@ -175,7 +188,6 @@ export function WorkbenchManager({
         </p>
         <ul className="space-y-1 text-xs text-[var(--color-text-muted)]">
           <li>• Aplicar sugerencia de partición de zona como sandbox (WB-3b).</li>
-          <li>• Heatmaps en mapa por frecuencia/kg (WB-5).</li>
           <li>• Vista jerárquica Día→Zona→Frecuencia→Camioneta→Ruta→Parada (WB-6).</li>
         </ul>
       </Card>

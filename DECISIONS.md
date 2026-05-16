@@ -6701,6 +6701,86 @@ WB-4 cierra ese gap dándole al admin una **estimación de capacidad bruta** bas
 - apps/platform/src/app/(app)/settings/workbench/workbench-manager.tsx — link descubrimiento.
 
 
+## [2026-05-16] ADR-117: Workbench WB-5 — Heatmap de operación (3 lentes)
+
+**Contexto:** Las herramientas previas del Workbench dan números (WB-2 frecuencias, WB-3 sugerencia de zonas, WB-4 recomendación de flotilla). Eso es necesario pero insuficiente: para reuniones con comercial / cliente, el admin necesita una **imagen** que comunique la realidad operativa sin tablas. Las preguntas típicas son visuales:
+
+- *"¿Dónde se concentra mi demanda en CDMX?"* — frecuencia.
+- *"¿Dónde está el peso?"* — volumen.
+- *"¿Qué zonas están al límite?"* — capacidad.
+
+Una tabla por zona no responde estas preguntas; un mapa con capas sí. WB-5 entrega eso.
+
+**Decisión:**
+
+1. **Helper `getHeatmapData()`** (`lib/queries/heatmap-data.ts`):
+   - Trae todas las tiendas reales activas con sus coords.
+   - Paraleliza: `getStoreFrequencyStats` (WB-2) + `recommendFleet` (WB-4).
+   - Construye una sola estructura con `stores[]` enriquecidos + `max[]` por modo (para normalización de heatmap weight) + `zoneStats[]` (para sidebar de utilización).
+   - Cada `HeatmapStore`: `{ id, code, name, lat, lng, zoneId, zoneCode, visitsPerWeek, kgPerWeek, zoneUtilizationPct }`.
+
+2. **Página `/settings/workbench/heatmap`** con 3 lentes via `?mode=`:
+   - **`frequency`**: heatmap layer con `weight = visitsPerWeek`. Paleta azul→morado (movimiento operativo).
+   - **`volume`**: heatmap con `weight = kgPerWeek`. Paleta amber→rojo (carga). **Default**.
+   - **`utilization`**: SIN heatmap. Cada tienda renderizada como círculo coloreado según `zoneUtilizationPct` (>100% rojo, >85% amber, ≤85% verde).
+   - Selector horizontal arriba con 3 cards click-to-switch + descripción corta.
+
+3. **Cliente Mapbox** (`heatmap-client.tsx`):
+   - GeoJSON source con todas las tiendas como features con properties.
+   - Heatmap layer con expresiones de paint:
+     - `heatmap-weight`: interpolación lineal del valor del prop al `max` del dataset, normalizado [0..1].
+     - `heatmap-intensity`: sube 1→3 al hacer zoom (preserva detalle al acercar).
+     - `heatmap-radius`: 4→30 al hacer zoom.
+     - `heatmap-opacity`: baja al zoom alto (0.9→0.5) para que los círculos individuales destaquen.
+   - Circle layer SIEMPRE presente:
+     - Modo heatmap: círculos chicos oscuros, opacidad 0.3→0.95 según zoom.
+     - Modo utilization: círculos grandes coloreados por threshold, bordes blancos.
+   - Popup onClick: code/name + zona + visitas/sem + kg/sem + uso de zona.
+
+4. **Sidebar de hotspots** server-side:
+   - frequency/volume: top 10 tiendas ordenadas por el metric activo.
+   - utilization: lista de zonas ordenadas por `utilizationPct` desc.
+
+5. **Read-only**: zero writes. Análisis visual puro.
+
+**Alternativas consideradas:**
+- *Choropleth por zonas (polígonos coloreados)*: descartado — `zones` no tiene polígonos en BD, solo code/name. Para WB-5 MVP usar circle markers por tienda con color de zona da el mismo insight visual sin requerir GIS. Si futuro WB-5b requiere polígonos, agregar tabla `zone_polygons` o derivarlos de la convex hull de las tiendas.
+- *Heatmap también para utilization*: descartado — utilization NO es una densidad geográfica (es un atributo categórico por zona). Heatmap sumaría puntos cercanos sin lógica, dando colores engañosos. Circle markers categóricos comunican mejor.
+- *Toggle entre 3 capas simultáneas (todas a la vez)*: descartado por sobrecarga visual. Un mapa con 3 heatmaps superpuestos es ilegible. Single-lens con switcher rápido es mejor UX.
+- *Animación temporal (heatmap evolucionando por semana)*: descartado por scope. Requiere series temporales por semana, más queries, más control de UI. Pendiente WB-5b si emerge demanda comercial.
+- *Mapboxgl.AddLayer con clustering*: descartado — los clusters mapbox son para puntos individuales no para análisis de densidad. Heatmap nativo cubre el caso.
+- *Permitir filtrar por zona en el heatmap*: nice-to-have pero el sidebar de hotspots ya da la dimensión por zona. Si emerge demanda, agregar `?zone=<id>` (read-only filter).
+
+**Riesgos / Limitaciones:**
+- **Tiendas sin operación (visits=0)**: aparecen como puntos fríos en el heatmap. Correcto pero pueden confundir si el admin las ignoraba. La leyenda explica "áreas frías = inactivas".
+- **Normalización por `max` global**: una sola tienda outlier (e.g. tienda mayorista con 5000 kg/sem mientras el resto promedia 200) aplasta la escala — el resto se ve uniforme. Mitigación: opciones futuras para normalizar por percentil 95 (winsorize).
+- **Heatmap paint expression performance**: con 2000+ stores en una zona urbana, mapbox puede ralentizarse al renderizar. Validamos con ~200 stores; 1000+ no se midió.
+- **Utilization mode depende de `recommendFleet`**: si los inputs default de WB-4 (days=5, stops=14) no aplican al cliente, el % de uso es teórico. El admin no puede ajustar esos parámetros desde WB-5 — debe ir a WB-4 primero para sentirse cómodo con los números, luego volver a WB-5 a ver visualmente.
+- **No considera tipo de vehículo en utilization**: si una zona tiene Sprinter y otra Kangoo, el % de uso usa la mediana — no diferencia. WB-4b lo refinará.
+- **Sidebar fixed a top 10**: con 2000 tiendas, ranking de top 10 puede ser representativo o no según distribución. Para MVP es OK.
+- **No printable**: el heatmap es interactivo. Para imprimir/PDF al cliente, captura de pantalla por ahora. Si emerge demanda, agregar export PNG vía `map.getCanvas().toDataURL()`.
+- **No probado con flotas mixtas reales**: con flota homogénea VerdFrut sí. Cliente con mix Sprinter/Kangoo daría utilization "promedio" potencialmente engañoso.
+
+**Oportunidades de mejora:**
+- Polígonos de zonas (convex hull o draw manual) con choropleth real.
+- Filtro `?zone=<id>` para enfocarse en una zona.
+- Animación temporal: serializar últimas 4 semanas para ver evolución.
+- Export PNG / PDF para reuniones físicas.
+- Heatmap inverso: "tiendas stale" (sin visita reciente) como zonas calientes en rojo.
+- Comparativa side-by-side modo real vs modo sandbox.
+- Tooltip enriquecido: histórico mini-gráfica por tienda en hover.
+- Layer adicional "rutas en ejecución hoy" superpuesta para correlación visual real-time.
+- Recomendación contextual: hover en zona roja → tooltip "Considera partirla (WB-3) o agregar 2 camionetas (WB-4)".
+
+**Refs:**
+- ADR-114 — frecuencias (input principal).
+- ADR-116 — recommendFleet (utilization por zona).
+- apps/platform/src/lib/queries/heatmap-data.ts — agregador.
+- apps/platform/src/app/(app)/settings/workbench/heatmap/page.tsx — UI server.
+- apps/platform/src/app/(app)/settings/workbench/heatmap/heatmap-client.tsx — Mapbox layers.
+- apps/platform/src/app/(app)/settings/workbench/workbench-manager.tsx — discovery link.
+
+
 
 
 
