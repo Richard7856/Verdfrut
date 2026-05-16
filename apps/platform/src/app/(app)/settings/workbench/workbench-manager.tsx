@@ -200,8 +200,8 @@ export function WorkbenchManager({
           Próximamente
         </p>
         <ul className="space-y-1 text-xs text-[var(--color-text-muted)]">
-          <li>• Aplicar sugerencia de partición de zona como sandbox (WB-3b).</li>
-          <li>• Frecuencias como entidad operativa persistida (WB-7).</li>
+          <li>• Aplicar la sugerencia de partición de zona automáticamente al sandbox.</li>
+          <li>• Frecuencias semanales como entidad operativa que puedes editar y asignar.</li>
         </ul>
       </Card>
     </div>

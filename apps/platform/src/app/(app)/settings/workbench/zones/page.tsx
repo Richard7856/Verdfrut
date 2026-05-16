@@ -187,12 +187,13 @@ export default async function SuggestZonesPage({ searchParams }: PageProps) {
 
           <Card>
             <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
-              Próximamente — WB-3b
+              Próximamente
             </p>
             <p className="text-xs text-[var(--color-text-muted)]">
-              Aplicar esta propuesta creará automáticamente N zonas hipotéticas
-              (en modo planeación) con las tiendas re-asignadas. Mientras tanto,
-              úsalo como guía visual para tomar la decisión y aplicar manualmente.
+              Aplicar la propuesta creará automáticamente las sub-zonas en modo
+              planeación con las tiendas re-asignadas. Mientras tanto, úsalo como
+              guía visual para tomar la decisión y aplicar manualmente desde
+              Configuración → Zonas y Tiendas.
             </p>
           </Card>
         </div>

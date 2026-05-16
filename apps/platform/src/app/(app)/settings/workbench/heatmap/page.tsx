@@ -112,7 +112,7 @@ export default async function HeatmapPage({ searchParams }: PageProps) {
               )}
               {mode === 'utilization' && (
                 <>
-                  <li>• Cada tienda se colorea según el % uso de su zona (WB-4).</li>
+                  <li>• Cada tienda se colorea según el % de uso de la flotilla de su zona.</li>
                   <li>• Verde = holgura ({'<'}85%) · Amber = al límite (85-100%) · Rojo = saturada ({'>'}100%).</li>
                   <li>• Útil para ver de un vistazo qué zonas necesitan crecer la flotilla.</li>
                 </>

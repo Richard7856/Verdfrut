@@ -38,7 +38,7 @@ const NAV_ITEMS: NavItem[] = [
   // CLIENTES — shell del feature multi-cliente (en desarrollo). Mientras es
   // shell-only, todo NETO opera con el modelo actual; la sección sirve para
   // mostrar la visión del feature en la presentación.
-  { href: '/customers', label: 'Clientes', roles: ['admin', 'dispatcher'], group: 'CLIENTES', badge: 'Nuevo' },
+  { href: '/customers', label: 'Clientes', roles: ['admin', 'dispatcher'], group: 'CLIENTES' },
 
   { href: '/dia', label: '📅 Día', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
   { href: '/routes', label: 'Rutas', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
