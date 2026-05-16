@@ -8,6 +8,7 @@
 
 import { useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Button, toast } from '@tripdrive/ui';
 import type { Route } from '@tripdrive/types';
 import {
@@ -110,6 +111,20 @@ export function RouteActions({ route }: { route: Route }) {
     });
   }
 
+  // Botón "Imprimir layout" — útil en cualquier estado: previewing antes de
+  // optimizar, documento operativo en APPROVED/PUBLISHED, referencia en
+  // IN_PROGRESS/COMPLETED. Abre /print/routes/[id] en nueva pestaña.
+  const printButton = (
+    <Link
+      href={`/print/routes/${route.id}`}
+      target="_blank"
+      rel="noopener"
+      title="Abre la vista imprimible para generar el PDF del layout de carga"
+    >
+      <Button variant="ghost">📄 PDF</Button>
+    </Link>
+  );
+
   // DRAFT — recién creada o con paradas armadas manualmente.
   // 2 caminos:
   //  a) Optimizar (legacy) → VROOM re-ordena → APPROVED → publicar luego
@@ -123,6 +138,7 @@ export function RouteActions({ route }: { route: Route }) {
         <Button variant="primary" onClick={handlePublishDirect} isLoading={pending}>
           🚀 Publicar directo
         </Button>
+        {printButton}
         <Button variant="ghost" onClick={handleCancel} isLoading={pending}>
           Cancelar
         </Button>
@@ -142,6 +158,7 @@ export function RouteActions({ route }: { route: Route }) {
         <Button variant="primary" onClick={handlePublishDirect} isLoading={pending}>
           🚀 Publicar directo
         </Button>
+        {printButton}
         <Button variant="ghost" onClick={handleCancel} isLoading={pending}>
           Cancelar
         </Button>
@@ -155,6 +172,7 @@ export function RouteActions({ route }: { route: Route }) {
         <Button variant="primary" onClick={handlePublish} isLoading={pending}>
           Publicar a chofer
         </Button>
+        {printButton}
         <Button variant="ghost" onClick={handleCancel} isLoading={pending}>
           Cancelar
         </Button>
@@ -162,6 +180,7 @@ export function RouteActions({ route }: { route: Route }) {
     );
   }
 
-  // PUBLISHED, IN_PROGRESS, COMPLETED, CANCELLED — sin acciones disponibles aquí.
-  return null;
+  // PUBLISHED, IN_PROGRESS, COMPLETED, CANCELLED — solo lectura, pero seguimos
+  // permitiendo descargar el PDF (caso operativo: almacenista reimprime).
+  return <div className="flex gap-2">{printButton}</div>;
 }

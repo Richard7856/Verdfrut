@@ -88,6 +88,16 @@ export function DispatchActions({ dispatch }: Props) {
   if (!editing) {
     return (
       <div className="flex items-center gap-1">
+        <a
+          href={`/print/dispatches/${dispatch.id}`}
+          target="_blank"
+          rel="noopener"
+          title="Vista imprimible: 1 hoja por camioneta para que el almacenista arme el layout."
+        >
+          <Button type="button" variant="ghost" size="sm">
+            📄 PDF
+          </Button>
+        </a>
         <Button type="button" variant="ghost" size="sm" onClick={() => setEditing(true)}>
           Editar
         </Button>
