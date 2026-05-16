@@ -35,9 +35,24 @@ interface Props {
   scope?:
     | { type: 'dispatch'; dispatchId: string }
     | { type: 'day'; fecha: string };
+  /**
+   * ADR-123: vehículos disponibles para "Nueva ruta desde selección". Si no
+   * se pasan, el botón "＋ Nueva ruta" del toolbar queda inhabilitado con
+   * tooltip explicativo. La página caller construye la lista filtrando por
+   * zona del scope + vehículos no asignados a rutas vivas del día.
+   */
+  availableVehiclesForNewRoute?: Array<{ id: string; label: string; zoneId: string }>;
+  /** Choferes activos para asignación opcional al crear la ruta nueva. */
+  availableDriversForNewRoute?: Array<{ id: string; fullName: string; zoneId: string }>;
 }
 
-export async function MultiRouteMapServer({ routes, mapboxToken, scope }: Props) {
+export async function MultiRouteMapServer({
+  routes,
+  mapboxToken,
+  scope,
+  availableVehiclesForNewRoute,
+  availableDriversForNewRoute,
+}: Props) {
   if (routes.length === 0) return null;
 
   // H4.1 / ADR-054: una sola query batch para todas las stops vía
@@ -121,6 +136,8 @@ export async function MultiRouteMapServer({ routes, mapboxToken, scope }: Props)
         routes={entries}
         mapboxToken={mapboxToken}
         scope={scope}
+        availableVehiclesForNewRoute={availableVehiclesForNewRoute ?? []}
+        availableDriversForNewRoute={availableDriversForNewRoute ?? []}
       />
     );
   }

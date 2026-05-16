@@ -149,6 +149,28 @@ export default async function DiaDetailPage({ params, searchParams }: Props) {
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? '';
   const mapRoutes = routes.filter((r) => (stopCounts.get(r.id)?.total ?? 0) > 0);
 
+  // ADR-123: pool de camiones+choferes para "Nueva ruta desde selección".
+  // Filtramos camiones no usados por ninguna ruta viva del día (queremos
+  // dar al user opciones, no listar todo el catálogo). En /dia podemos
+  // tener rutas de distintas zonas, así que NO filtramos por zona aquí —
+  // la action infiere la zona de la primera parada seleccionada.
+  const usedVehicleIdsThisDay = new Set(allRoutes.map((r) => r.vehicleId));
+  const availableVehiclesForNewRoute = vehicles
+    .filter((v) => v.isActive && !usedVehicleIdsThisDay.has(v.id))
+    .map((v) => ({
+      id: v.id,
+      label: v.alias ? `${v.alias} (${v.plate})` : v.plate,
+      zoneId: v.zoneId,
+    }));
+  const driverProfilesByUserId = new Map(zoneUsers.map((p) => [p.id, p]));
+  const availableDriversForNewRoute = zoneDrivers
+    .map((d) => {
+      const profile = driverProfilesByUserId.get(d.userId);
+      if (!profile || !profile.isActive) return null;
+      return { id: d.id, fullName: profile.fullName, zoneId: d.zoneId };
+    })
+    .filter((x): x is { id: string; fullName: string; zoneId: string } => x !== null);
+
   // Dispatches únicos involucrados (para el drill-down "ver/editar grupo").
   const uniqueDispatchIds = Array.from(
     new Set(routes.map((r) => r.dispatchId).filter((x): x is string => Boolean(x))),
@@ -261,6 +283,13 @@ export default async function DiaDetailPage({ params, searchParams }: Props) {
             // ADR-121 Fase 1: scope solo si el plan permite drag/lasso bulk.
             // Sin scope, el mapa se renderiza read-only (sin "Modo Selección").
             scope={planFeatures.dragEditMap ? { type: 'day', fecha } : undefined}
+            // ADR-123: pool de camiones+choferes para "Nueva ruta desde selección".
+            availableVehiclesForNewRoute={
+              planFeatures.dragEditMap ? availableVehiclesForNewRoute : undefined
+            }
+            availableDriversForNewRoute={
+              planFeatures.dragEditMap ? availableDriversForNewRoute : undefined
+            }
           />
         </div>
       ) : (

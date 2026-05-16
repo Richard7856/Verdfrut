@@ -199,6 +199,9 @@ export default async function DispatchDetailPage({ params }: Props) {
             // Sin scope, el mapa cae a read-only — el user sigue viendo todo
             // pero no puede seleccionar paradas para mover en bulk.
             scope={planFeatures.dragEditMap ? { type: 'dispatch', dispatchId: dispatch.id } : undefined}
+            // ADR-123: pool de camiones+choferes para "Nueva ruta desde selección".
+            availableVehiclesForNewRoute={planFeatures.dragEditMap ? availableVehicles : undefined}
+            availableDriversForNewRoute={planFeatures.dragEditMap ? availableDriverOpts : undefined}
           />
         </div>
       )}

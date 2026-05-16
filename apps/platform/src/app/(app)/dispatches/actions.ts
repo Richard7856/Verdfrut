@@ -684,6 +684,219 @@ export async function addEmptyRouteToDispatchAction(
 }
 
 /**
+ * Crea una ruta nueva (con vehículo + chofer opcional) y mueve `stopIds`
+ * seleccionados a ella en una sola operación. ADR-123 (2026-05-16).
+ *
+ * Resuelve la fricción UX previa: para crear una ruta desde el mapa con
+ * paradas seleccionadas el user tenía que (1) "+ Agregar camioneta" → ruta
+ * vacía, (2) volver al mapa, (3) seleccionar paradas, (4) "Mover a →
+ * nueva ruta". Ahora es 1 click + modal de 2 campos.
+ *
+ * Scope:
+ *  - `dispatch`: la ruta nueva se ata al dispatch existente. Zona heredada.
+ *  - `day`: la ruta nueva es ORPHAN (dispatch_id=null, ADR-119). Zona se
+ *    infiere de la ruta origen de la primera parada seleccionada.
+ *
+ * Reusa internamente `moveStopToAnotherRoute` para cada stop — misma lógica
+ * que `bulkMoveStopsAction`. Operación parcial OK: si algunos stops fallan
+ * (ya completados, etc.) la ruta queda creada con los que sí se movieron.
+ */
+export interface CreateRouteFromSelectionResult {
+  routeId: string;
+  routeName: string;
+  moved: number;
+  failed: Array<{ stopId: string; reason: string }>;
+}
+
+export async function createRouteFromSelectionAction(
+  stopIds: string[],
+  vehicleId: string,
+  driverId: string | null,
+  scope:
+    | { type: 'dispatch'; dispatchId: string }
+    | { type: 'day'; fecha: string },
+): Promise<ActionResult & { result?: CreateRouteFromSelectionResult }> {
+  const profile = await requireRole('admin', 'dispatcher');
+  try {
+    // Mismo gate que bulkMoveStopsAction — usar la lasso/bulk es feature Pro+.
+    await requireCustomerFeature('dragEditMap');
+
+    if (!Array.isArray(stopIds) || stopIds.length === 0) {
+      return { ok: false, error: 'Selecciona al menos una parada para la ruta nueva.' };
+    }
+    if (stopIds.length > 200) {
+      return { ok: false, error: 'Máximo 200 paradas por operación.' };
+    }
+    requireUuid('vehicleId', vehicleId);
+    if (driverId) requireUuid('driverId', driverId);
+    for (const sid of stopIds) requireUuid('stopId', sid);
+
+    const supabase = await createServerClient();
+
+    // Resolver date + zone + dispatch_id según scope.
+    let date: string;
+    let zoneId: string;
+    let dispatchId: string | null;
+    let dispatchName: string | null = null;
+
+    if (scope.type === 'dispatch') {
+      requireUuid('dispatchId', scope.dispatchId);
+      const { data, error } = await supabase
+        .from('dispatches')
+        .select('id, name, date, zone_id')
+        .eq('id', scope.dispatchId)
+        .maybeSingle();
+      if (error || !data) {
+        throw new ValidationError('dispatchId', 'Tiro no encontrado.');
+      }
+      date = data.date as string;
+      zoneId = data.zone_id as string;
+      dispatchId = data.id as string;
+      dispatchName = data.name as string;
+    } else {
+      // scope === 'day' — ruta orphan. Inferir zone_id de la ruta origen
+      // de la primera parada seleccionada (todas deben ser misma fecha
+      // por construcción del UI: /dia/[fecha] solo muestra esa fecha).
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(scope.fecha)) {
+        return { ok: false, error: 'fecha debe ser YYYY-MM-DD' };
+      }
+      date = scope.fecha;
+      dispatchId = null;
+      const firstStopId = stopIds[0]!;
+      const { data: probe } = await supabase
+        .from('stops')
+        .select('routes!inner(zone_id, date)')
+        .eq('id', firstStopId)
+        .maybeSingle<{ routes: { zone_id: string; date: string } }>();
+      if (!probe?.routes?.zone_id) {
+        return {
+          ok: false,
+          error: 'No pude inferir la zona de la parada seleccionada. Selecciona otra o usa un tiro.',
+        };
+      }
+      zoneId = probe.routes.zone_id;
+      // Sanity check: la ruta origen debe ser de la misma fecha del scope.
+      // Si no, algo raro pasó en el UI (otro día filtrado). Aborto seguro.
+      if (probe.routes.date !== date) {
+        return {
+          ok: false,
+          error: 'La parada seleccionada no es del día actual. Refresca la vista.',
+        };
+      }
+    }
+
+    // Nombre de la ruta: si está en dispatch, "Plan — ruta N+1"; si es
+    // orphan, "Ruta YYYY-MM-DD — N+1" con un counter de orphans del día.
+    let routeName: string;
+    if (dispatchId && dispatchName) {
+      const { count } = await supabase
+        .from('routes')
+        .select('id', { count: 'exact', head: true })
+        .eq('dispatch_id', dispatchId)
+        .neq('status', 'CANCELLED');
+      routeName = `${dispatchName} — ruta ${(count ?? 0) + 1}`;
+    } else {
+      const { count } = await supabase
+        .from('routes')
+        .select('id', { count: 'exact', head: true })
+        .eq('date', date)
+        .is('dispatch_id', null)
+        .neq('status', 'CANCELLED');
+      routeName = `Ruta libre ${date} — ${(count ?? 0) + 1}`;
+    }
+
+    // Crear la ruta vacía. Mismo patrón que addEmptyRouteToDispatchAction
+    // pero con dispatch_id opcional (null para orphan).
+    const { data: route, error: rErr } = await supabase
+      .from('routes')
+      .insert({
+        dispatch_id: dispatchId,
+        name: routeName,
+        date,
+        zone_id: zoneId,
+        vehicle_id: vehicleId,
+        driver_id: driverId,
+        status: 'DRAFT',
+        created_by: profile.id,
+      })
+      .select('id, name')
+      .single();
+    if (rErr || !route) {
+      if (rErr?.code === '23505') {
+        return { ok: false, error: 'Esa camioneta ya tiene una ruta activa este día.' };
+      }
+      return { ok: false, error: `No se pudo crear la ruta: ${rErr?.message ?? 'desconocido'}` };
+    }
+
+    // Mover las paradas seleccionadas a la nueva ruta. Reusamos exactamente
+    // el mismo loop que bulkMoveStopsAction — operación parcial es OK.
+    const newRouteId = route.id as string;
+    const affectedRoutes = new Set<string>([newRouteId]);
+    let moved = 0;
+    const failed: CreateRouteFromSelectionResult['failed'] = [];
+
+    for (const stopId of stopIds) {
+      try {
+        const { data: stopRow } = await supabase
+          .from('stops')
+          .select('route_id')
+          .eq('id', stopId)
+          .maybeSingle();
+        const sourceRouteId = stopRow?.route_id as string | undefined;
+        await moveStopToAnotherRoute(stopId, newRouteId);
+        moved++;
+        if (sourceRouteId) affectedRoutes.add(sourceRouteId);
+      } catch (err) {
+        failed.push({
+          stopId,
+          reason: err instanceof Error ? err.message : 'Error desconocido',
+        });
+      }
+    }
+
+    // Revalidar — mismo patrón que bulkMoveStopsAction.
+    const affectedDispatches = new Set<string>();
+    if (dispatchId) affectedDispatches.add(dispatchId);
+    const { data: routeRows } = await supabase
+      .from('routes')
+      .select('id, dispatch_id')
+      .in('id', Array.from(affectedRoutes));
+    for (const r of routeRows ?? []) {
+      if (r.dispatch_id) affectedDispatches.add(r.dispatch_id as string);
+    }
+    if (scope.type === 'dispatch') revalidatePath(`/dispatches/${scope.dispatchId}`);
+    if (scope.type === 'day') revalidatePath(`/dia/${scope.fecha}`);
+    for (const dId of affectedDispatches) revalidatePath(`/dispatches/${dId}`);
+    revalidatePath('/routes');
+
+    logger.info('dispatches.create_route_from_selection', {
+      scope: scope.type,
+      dispatch_id: dispatchId,
+      fecha: scope.type === 'day' ? scope.fecha : null,
+      new_route_id: newRouteId,
+      vehicle_id: vehicleId,
+      driver_id: driverId,
+      requested: stopIds.length,
+      moved,
+      failed: failed.length,
+    });
+
+    return {
+      ok: true,
+      result: {
+        routeId: newRouteId,
+        routeName: route.name as string,
+        moved,
+        failed,
+      },
+    };
+  } catch (err) {
+    if (err instanceof ValidationError) return { ok: false, error: err.message };
+    return { ok: false, error: err instanceof Error ? err.message : 'Error desconocido' };
+  }
+}
+
+/**
  * Agrega una camioneta al tiro y re-rutea todo. El dispatcher sólo elige
  * cuál vehículo (y opcionalmente chofer) — el split lo hace VROOM.
  *

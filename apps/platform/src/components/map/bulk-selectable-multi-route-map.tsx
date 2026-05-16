@@ -11,8 +11,24 @@
 
 import { useCallback, useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import { Modal, Select, Button } from '@tripdrive/ui';
 import { MultiRouteMap, type BulkAction, type MultiRouteEntry } from './multi-route-map';
-import { bulkMoveStopsAction } from '@/app/(app)/dispatches/actions';
+import {
+  bulkMoveStopsAction,
+  createRouteFromSelectionAction,
+} from '@/app/(app)/dispatches/actions';
+
+interface VehicleOption {
+  id: string;
+  label: string;
+  zoneId: string;
+}
+
+interface DriverOption {
+  id: string;
+  fullName: string;
+  zoneId: string;
+}
 
 interface Props {
   routes: MultiRouteEntry[];
@@ -28,6 +44,10 @@ interface Props {
   scope:
     | { type: 'dispatch'; dispatchId: string }
     | { type: 'day'; fecha: string };
+  /** ADR-123: vehículos para "Nueva ruta desde selección". Vacío → botón disabled con tooltip. */
+  availableVehiclesForNewRoute: VehicleOption[];
+  /** Choferes opcionales asignables al crear ruta nueva. */
+  availableDriversForNewRoute: DriverOption[];
 }
 
 interface PostMoveBanner {
@@ -41,12 +61,27 @@ interface PostMoveBanner {
   targetRouteName: string;
 }
 
-export function BulkSelectableMultiRouteMap({ routes, mapboxToken, scope }: Props) {
+export function BulkSelectableMultiRouteMap({
+  routes,
+  mapboxToken,
+  scope,
+  availableVehiclesForNewRoute,
+  availableDriversForNewRoute,
+}: Props) {
   const router = useRouter();
   const [banner, setBanner] = useState<PostMoveBanner | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [refreshing, startTransition] = useTransition();
   const [processingLabel, setProcessingLabel] = useState<string | null>(null);
+  // ADR-123: state del modal "Nueva ruta desde selección".
+  // Guardamos los stopIds en momento del click para que la modal pueda llamar
+  // a la action aunque el user limpie selección desde la toolbar.
+  const [newRouteModal, setNewRouteModal] = useState<{
+    stopIds: string[];
+  } | null>(null);
+  const [newRouteVehicleId, setNewRouteVehicleId] = useState('');
+  const [newRouteDriverId, setNewRouteDriverId] = useState('');
+  const [newRouteSubmitting, setNewRouteSubmitting] = useState(false);
 
   // Limpiar el label cuando el refresh del server termina + un pequeño
   // delay para que el user alcance a ver el último estado "Actualizando vista…".
@@ -102,10 +137,19 @@ export function BulkSelectableMultiRouteMap({ routes, mapboxToken, scope }: Prop
       }
 
       if (action.type === 'create_new_route') {
-        // Phase 4 — pendiente. Por ahora mostramos error legible.
-        setErrorMsg(
-          'Crear nueva ruta desde selección: viene en el próximo iteración. Por ahora, mueve los stops a una ruta existente.',
-        );
+        // ADR-123: abrir modal para que el user elija camión + chofer opcional.
+        // No tomamos decisión silenciosa de qué vehículo asignar — siempre el
+        // dispatcher tiene la última palabra sobre qué camión hace qué ruta.
+        if (availableVehiclesForNewRoute.length === 0) {
+          setErrorMsg(
+            'No hay camionetas disponibles para crear una ruta nueva en esta zona. ' +
+              'Asigna vehículos en /settings/vehicles primero.',
+          );
+          return;
+        }
+        setNewRouteVehicleId('');
+        setNewRouteDriverId('');
+        setNewRouteModal({ stopIds: [...stopIds] });
         return;
       }
 
@@ -117,8 +161,46 @@ export function BulkSelectableMultiRouteMap({ routes, mapboxToken, scope }: Prop
         return;
       }
     },
-    [routes, scope, router],
+    [routes, scope, router, availableVehiclesForNewRoute.length],
   );
+
+  // ADR-123: submit del modal de nueva ruta. Llama a la action con vehicle +
+  // driver + scope + stopIds y muestra el banner verde reusando el mismo
+  // PostMoveBanner que para move (route destino == nueva ruta).
+  const submitNewRoute = useCallback(async () => {
+    if (!newRouteModal) return;
+    if (!newRouteVehicleId) {
+      setErrorMsg('Selecciona una camioneta para la ruta nueva.');
+      return;
+    }
+    setNewRouteSubmitting(true);
+    setProcessingLabel(
+      `Creando ruta con ${newRouteModal.stopIds.length} ${newRouteModal.stopIds.length === 1 ? 'parada' : 'paradas'}…`,
+    );
+    try {
+      const res = await createRouteFromSelectionAction(
+        newRouteModal.stopIds,
+        newRouteVehicleId,
+        newRouteDriverId === '' ? null : newRouteDriverId,
+        scope,
+      );
+      if (!res.ok || !res.result) {
+        setErrorMsg(res.error ?? 'No se pudo crear la ruta.');
+        return;
+      }
+      setBanner({
+        moved: res.result.moved,
+        failed: res.result.failed,
+        targetRouteId: res.result.routeId,
+        targetRouteName: res.result.routeName,
+      });
+      setNewRouteModal(null);
+      setProcessingLabel('Actualizando vista…');
+      startTransition(() => router.refresh());
+    } finally {
+      setNewRouteSubmitting(false);
+    }
+  }, [newRouteModal, newRouteVehicleId, newRouteDriverId, scope, router]);
 
   return (
     <div className="space-y-3">
@@ -225,6 +307,80 @@ export function BulkSelectableMultiRouteMap({ routes, mapboxToken, scope }: Prop
           </div>
         )}
       </div>
+
+      {/* ADR-123: modal "Nueva ruta desde selección" — 1 click, 2 campos.
+          Resuelve la fricción previa de "+ Agregar camioneta" vacía y luego
+          mover paradas. */}
+      <Modal
+        open={newRouteModal !== null}
+        onClose={() => !newRouteSubmitting && setNewRouteModal(null)}
+        title="Crear ruta nueva con las paradas seleccionadas"
+        description={
+          newRouteModal
+            ? `Se creará una ruta nueva en estado DRAFT con las ${newRouteModal.stopIds.length} paradas seleccionadas, asignada a la camioneta que elijas. Las paradas saldrán de sus rutas actuales.`
+            : ''
+        }
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              onClick={() => setNewRouteModal(null)}
+              disabled={newRouteSubmitting}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="primary"
+              onClick={() => void submitNewRoute()}
+              isLoading={newRouteSubmitting}
+              disabled={!newRouteVehicleId}
+            >
+              Crear ruta y mover paradas
+            </Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3 text-sm">
+          <div className="flex flex-col gap-1">
+            <label className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+              Camión
+            </label>
+            <Select
+              value={newRouteVehicleId}
+              onChange={(e) => setNewRouteVehicleId(e.target.value)}
+              disabled={newRouteSubmitting}
+            >
+              <option value="">— Selecciona una camioneta —</option>
+              {availableVehiclesForNewRoute.map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+              Chofer (opcional)
+            </label>
+            <Select
+              value={newRouteDriverId}
+              onChange={(e) => setNewRouteDriverId(e.target.value)}
+              disabled={newRouteSubmitting}
+            >
+              <option value="">— Sin asignar —</option>
+              {availableDriversForNewRoute.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.fullName}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <p className="text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+            Las paradas se agregan en el orden actual. Para optimizar la secuencia con
+            tráfico real, usa el botón "Re-optimizar" desde el detalle de la ruta tras crearla.
+          </p>
+        </div>
+      </Modal>
     </div>
   );
 }
