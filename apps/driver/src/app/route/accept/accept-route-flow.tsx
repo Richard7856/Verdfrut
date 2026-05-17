@@ -124,9 +124,15 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
     });
 
     mapRef.current = map;
-    map.on('load', () => {
-      setMapReady(true);
-    });
+    // ADR-125 fix v2: cubrir el caso donde el style ya cargó antes de
+    // registrar el listener (race condition raro pero posible si Mapbox
+    // cachea styles). `map.loaded()` devuelve true si ya está listo.
+    const handleMapLoaded = () => setMapReady(true);
+    if (map.loaded()) {
+      handleMapLoaded();
+    } else {
+      map.on('load', handleMapLoaded);
+    }
 
     return () => {
       // Cleanup markers explícitos antes de remover el map.
