@@ -149,23 +149,46 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
       [maxLng, maxLat],
     ];
 
+    // ADR-127 fix v4: NO bounds en el constructor — usar setCenter/setZoom
+    // en map.on('load') para evitar conflicto con el fitBounds del init.
     const map = new mapboxgl.Map({
       container: containerRef.current,
       style: 'mapbox://styles/mapbox/streets-v12',
-      bounds: computedBounds,
-      fitBoundsOptions: { padding: 60, maxZoom: 14 },
+      // Centro inicial = centro de los puntos (se ajusta de nuevo en load).
+      center: [(minLng + maxLng) / 2, (minLat + maxLat) / 2],
+      zoom: 11,
       attributionControl: false,
     });
 
     mapRef.current = map;
-    // ADR-125 fix v2: cubrir el caso donde el style ya cargó antes de
-    // registrar el listener (race condition raro pero posible si Mapbox
-    // cachea styles). `map.loaded()` devuelve true si ya está listo.
+    // ADR-125 fix v4: bypass fitBounds, usar setCenter + setZoom directo.
+    // fitBounds tiene comportamiento sospechoso (pines aparecían 0.37° al sur).
+    // Calculamos manualmente el centro de los puntos y un zoom razonable.
+    const centerLng = (minLng + maxLng) / 2;
+    const centerLat = (minLat + maxLat) / 2;
+    // Zoom basado en spread: spread chico (1-5km) = zoom 13-14, mayor = zoom 12.
+    const spreadKm = Math.max(
+      (maxLng - minLng) * 111 * Math.cos((centerLat * Math.PI) / 180),
+      (maxLat - minLat) * 111,
+    );
+    const targetZoom = spreadKm < 2 ? 14 : spreadKm < 5 ? 13 : spreadKm < 15 ? 12 : 11;
+
+    // DIAGNÓSTICO ADR-127: log de lo que vamos a aplicar a Mapbox.
+    // eslint-disable-next-line no-console
+    console.log('[accept-route] map config:', {
+      computedBounds,
+      centerLng,
+      centerLat,
+      spreadKm,
+      targetZoom,
+    });
+
     const handleMapLoaded = () => {
-      // ADR-127 fix: re-fitBounds explícito tras load. El constructor a veces
-      // ignora bounds si el contenedor aún no tenía dimensiones reales (ej.
-      // safe-area todavía calculándose). fitBounds aquí garantiza el view.
-      map.fitBounds(computedBounds, { padding: 60, maxZoom: 14, animate: false });
+      // Aplicar centro + zoom explícito en lugar de fitBounds.
+      map.setCenter([centerLng, centerLat]);
+      map.setZoom(targetZoom);
+      // eslint-disable-next-line no-console
+      console.log('[accept-route] map ready, center=', map.getCenter(), 'zoom=', map.getZoom());
       setMapReady(true);
     };
     if (map.loaded()) {
@@ -203,16 +226,19 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
     stopMarkersRef.current.clear();
 
     // Depot solo se monta una vez (no depende del mode).
-    // ADR-127: Number() defensivo en lat/lng — ver explicación en el useEffect
-    // de init. Si algún coord es NaN saltamos el marker para no spammear errors.
+    // ADR-127 v4: usar mapboxgl.LngLat() explícito en vez de array — más
+    // determinista (algunos paths del SDK aceptan array pero interpretan
+    // [lng, lat] vs [lat, lng] inconsistentemente entre versiones).
     if (depot && !depotMarkerRef.current) {
       const depotLng = Number(depot.lng);
       const depotLat = Number(depot.lat);
       if (Number.isFinite(depotLng) && Number.isFinite(depotLat)) {
         const depotEl = createDepotMarkerElement(depot);
         depotMarkerRef.current = new mapboxgl.Marker({ element: depotEl, anchor: 'bottom' })
-          .setLngLat([depotLng, depotLat])
+          .setLngLat(new mapboxgl.LngLat(depotLng, depotLat))
           .addTo(map);
+        // eslint-disable-next-line no-console
+        console.log('[accept-route] depot marker @', depotLng, depotLat);
       }
     }
 
@@ -227,9 +253,11 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
         el.addEventListener('click', () => handleTapStop(stop.stopId));
       }
       const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
-        .setLngLat([stopLng, stopLat])
+        .setLngLat(new mapboxgl.LngLat(stopLng, stopLat))
         .addTo(map);
       stopMarkersRef.current.set(stop.stopId, marker);
+      // eslint-disable-next-line no-console
+      console.log('[accept-route] stop marker', stop.storeCode, '@', stopLng, stopLat);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, mode, customOrder]);
@@ -312,7 +340,7 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
       {/* DIAGNÓSTICO ADR-127: strip visible con coords reales. Quitar cuando
           el bug esté confirmado resuelto en producción. */}
       <div className="border-b border-amber-400 bg-amber-50 px-3 py-1.5 text-[10px] leading-tight text-amber-900 font-mono">
-        <div>build: v3 (5b4eed9+)</div>
+        <div>build: v4 (setCenter+LngLat explícito)</div>
         <div>
           stops: {stops.map((s) => `${s.storeCode}(${s.lat},${s.lng})`).join(' | ')}
         </div>
