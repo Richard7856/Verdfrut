@@ -17,6 +17,15 @@
 // porque Postgres numeric llega como string y eso seguiría siendo bug
 // si alguien quita la coerción.
 //
+// ADR-128 (fix 2026-05-17, segunda iteración): tras importar la CSS, el
+// mapa quedó EN BLANCO. Root cause: `.mapboxgl-map { position: relative }`
+// de la CSS (no-layered) gana contra `.absolute` de Tailwind v4 (en
+// @layer utilities). El contenedor pasaba de absolute → relative, y los
+// `inset-0` no aplicaban → 0×0 → sin viewport → sin tiles. Fix: cambiar
+// `absolute inset-0` a `h-full w-full` para que el sizing no dependa del
+// position. Las reglas de cascada en CSS layers son sutiles — utilities
+// de Tailwind tienen MENOS prioridad que CSS de terceros sin layer.
+//
 // Pantalla full-screen con mapa Mapbox + barra inferior de acciones. El chofer:
 //
 //   1. Ve el mapa con todas las paradas marcadas con números (orden sugerido)
@@ -297,9 +306,16 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
         </p>
       </header>
 
-      {/* Mapa fullscreen */}
+      {/* Mapa fullscreen.
+          ADR-128 (fix 2): el contenedor del mapa NO puede depender de
+          `absolute inset-0` para su sizing — al importar mapbox-gl.css
+          la regla `.mapboxgl-map { position: relative }` (no-layered) gana
+          contra `.absolute` de Tailwind v4 (en @layer utilities, menor
+          prioridad). Sin `position: absolute` los `inset-0` no aplican y
+          el contenedor queda 0×0 → Mapbox no renderea tiles. Solución:
+          `h-full w-full` para que el tamaño no dependa del position. */}
       <div className="relative flex-1 min-h-0">
-        <div ref={containerRef} className="absolute inset-0" />
+        <div ref={containerRef} className="h-full w-full" />
 
         {/* Hint del modo en la esquina superior */}
         {mode === 'custom' && (
