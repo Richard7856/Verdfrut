@@ -24,9 +24,9 @@ const TYPE_LABEL: Record<'entrega' | 'tienda_cerrada' | 'bascula', string> = {
 };
 
 export default async function IncidentsPage() {
-  // V2: lista de incidencias = vista de supervisión, solo admin/dispatcher.
-  // El zone_manager va directo a /incidents/active-chat (su único rol).
-  await requireRole('admin', 'dispatcher');
+  // ADR-124: zone_manager también puede ver el listado de incidencias
+  // (antes solo admin/dispatcher; ahora supervisor también).
+  await requireRole('admin', 'dispatcher', 'zone_manager');
   const incidents = await listOpenIncidents();
 
   return (

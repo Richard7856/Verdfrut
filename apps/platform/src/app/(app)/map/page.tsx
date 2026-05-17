@@ -28,8 +28,8 @@ export const dynamic = 'force-dynamic';
 const TZ = process.env.NEXT_PUBLIC_TENANT_TIMEZONE ?? 'America/Mexico_City';
 
 export default async function MapPage() {
-  // V2: solo admin/dispatcher. zone_manager redirige a /incidents/active-chat.
-  const profile = await requireRole('admin', 'dispatcher');
+  // ADR-124: zone_manager también puede ver el mapa live (read-only).
+  const profile = await requireRole('admin', 'dispatcher', 'zone_manager');
   const today = todayInZone(TZ);
 
   const [routesData, drivers, vehicles, stores, zones] = await Promise.all([

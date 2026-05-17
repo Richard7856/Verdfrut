@@ -69,11 +69,21 @@ export async function generateMetadata({ params }: Props) {
 }
 
 export default async function DiaDetailPage({ params, searchParams }: Props) {
-  await requireRole('admin', 'dispatcher');
+  // ADR-124: zone_manager también puede ver el día (read-only). Si su
+  // profile tiene zoneId, forzamos el filtro a esa zona; si no, ve todas.
+  const profile = await requireRole('admin', 'dispatcher', 'zone_manager');
   const { fecha } = await params;
   const { zone: zoneParam, status: statusParam } = await searchParams;
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) notFound();
+
+  // Si es zone_manager con zoneId asignado, fuerza el filtro a su zona.
+  // Para admin/dispatcher y zone_manager customer-wide, respeta el ?zone= del URL.
+  const effectiveZoneParam =
+    profile.role === 'zone_manager' && profile.zoneId
+      ? profile.zoneId
+      : zoneParam;
+  const operatorCanWrite = profile.role !== 'zone_manager';
 
   // ADR-121 Fase 1: flags de features que afectan UI de esta página.
   const { features: planFeatures } = await getCallerFeatures();
@@ -96,7 +106,7 @@ export default async function DiaDetailPage({ params, searchParams }: Props) {
   const [allRoutesRes, zones, vehicles, zoneDrivers, zoneUsers] = await Promise.all([
     listRoutes({
       date: fecha,
-      zoneId: zoneParam || undefined,
+      zoneId: effectiveZoneParam || undefined,
       limit: 200,
     }),
     listZones(),
@@ -198,50 +208,53 @@ export default async function DiaDetailPage({ params, searchParams }: Props) {
         title={`Día ${fecha}`}
         description="Todas las rutas del día en un solo mapa. Selecciona paradas con Shift+drag o Cmd+A para moverlas entre camionetas, incluso entre planes distintos."
         action={
-          <div className="flex flex-wrap items-center gap-2">
-            <OptimizeDayButton
-              fecha={fecha}
-              optimizableRoutes={allRoutes
-                .filter((r) => r.status === 'DRAFT' || r.status === 'OPTIMIZED')
-                .map((r) => {
-                  const vehicle = vehiclesById.get(r.vehicleId);
-                  return {
-                    name: vehicle?.alias ?? vehicle?.plate ?? r.name,
-                    stopCount: stopCounts.get(r.id)?.total ?? 0,
-                  };
-                })}
-            />
-            <Link
-              href={`/dispatches/new/visual?date=${fecha}`}
-              className="rounded-md border border-emerald-700 bg-emerald-950/30 px-3 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-950/50"
-              title="Armar un plan del día desde el mapa: selecciona tiendas y asígnalas a camionetas visualmente"
-            >
-              🗺️ Armar día visual
-            </Link>
-            {/* ADR-119 / UX-Fase 3: ruta huérfana sin tiro previo. */}
-            <QuickRouteButton
-              fecha={fecha}
-              vehicles={vehicles
-                .filter((v) => v.isActive)
-                .map((v) => ({
-                  id: v.id,
-                  alias: v.alias,
-                  plate: v.plate,
-                  zoneId: v.zoneId,
-                }))}
-              drivers={zoneDrivers
-                .filter((d) => d.isActive)
-                .map((d) => {
-                  const userId = driverUserIds.get(d.id);
-                  const fullName = userId ? userById.get(userId)?.fullName ?? '(sin nombre)' : '(sin nombre)';
-                  return { id: d.id, fullName, zoneId: d.zoneId };
-                })}
-              zones={zones
-                .filter((z) => z.isActive)
-                .map((z) => ({ id: z.id, code: z.code, name: z.name }))}
-              defaultZoneId={zoneParam || null}
-            />
-          </div>
+          /* ADR-124: barra de operación oculta para zone_manager (vista read-only). */
+          operatorCanWrite ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <OptimizeDayButton
+                fecha={fecha}
+                optimizableRoutes={allRoutes
+                  .filter((r) => r.status === 'DRAFT' || r.status === 'OPTIMIZED')
+                  .map((r) => {
+                    const vehicle = vehiclesById.get(r.vehicleId);
+                    return {
+                      name: vehicle?.alias ?? vehicle?.plate ?? r.name,
+                      stopCount: stopCounts.get(r.id)?.total ?? 0,
+                    };
+                  })}
+              />
+              <Link
+                href={`/dispatches/new/visual?date=${fecha}`}
+                className="rounded-md border border-emerald-700 bg-emerald-950/30 px-3 py-2 text-sm font-medium text-emerald-300 hover:bg-emerald-950/50"
+                title="Armar un plan del día desde el mapa: selecciona tiendas y asígnalas a camionetas visualmente"
+              >
+                🗺️ Armar día visual
+              </Link>
+              {/* ADR-119 / UX-Fase 3: ruta huérfana sin tiro previo. */}
+              <QuickRouteButton
+                fecha={fecha}
+                vehicles={vehicles
+                  .filter((v) => v.isActive)
+                  .map((v) => ({
+                    id: v.id,
+                    alias: v.alias,
+                    plate: v.plate,
+                    zoneId: v.zoneId,
+                  }))}
+                drivers={zoneDrivers
+                  .filter((d) => d.isActive)
+                  .map((d) => {
+                    const userId = driverUserIds.get(d.id);
+                    const fullName = userId ? userById.get(userId)?.fullName ?? '(sin nombre)' : '(sin nombre)';
+                    return { id: d.id, fullName, zoneId: d.zoneId };
+                  })}
+                zones={zones
+                  .filter((z) => z.isActive)
+                  .map((z) => ({ id: z.id, code: z.code, name: z.name }))}
+                defaultZoneId={zoneParam || null}
+              />
+            </div>
+          ) : undefined
         }
       />
 
@@ -281,14 +294,18 @@ export default async function DiaDetailPage({ params, searchParams }: Props) {
             routes={mapRoutes}
             mapboxToken={mapboxToken}
             // ADR-121 Fase 1: scope solo si el plan permite drag/lasso bulk.
-            // Sin scope, el mapa se renderiza read-only (sin "Modo Selección").
-            scope={planFeatures.dragEditMap ? { type: 'day', fecha } : undefined}
+            // ADR-124: además solo si el rol opera (zone_manager ve read-only).
+            scope={
+              planFeatures.dragEditMap && operatorCanWrite
+                ? { type: 'day', fecha }
+                : undefined
+            }
             // ADR-123: pool de camiones+choferes para "Nueva ruta desde selección".
             availableVehiclesForNewRoute={
-              planFeatures.dragEditMap ? availableVehiclesForNewRoute : undefined
+              planFeatures.dragEditMap && operatorCanWrite ? availableVehiclesForNewRoute : undefined
             }
             availableDriversForNewRoute={
-              planFeatures.dragEditMap ? availableDriversForNewRoute : undefined
+              planFeatures.dragEditMap && operatorCanWrite ? availableDriversForNewRoute : undefined
             }
           />
         </div>

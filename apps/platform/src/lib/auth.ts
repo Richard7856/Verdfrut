@@ -60,13 +60,48 @@ export async function requireRole(...allowed: UserRole[]): Promise<UserProfile> 
  * Usar en páginas de supervisión global: /map, /dashboard, /incidents (lista),
  * /routes, /dispatches, /settings, etc. — todo lo que NO sea el chat directo.
  *
- * Modelo de roles V2 (post-clarificación cliente):
- * - admin / dispatcher: ven todo, supervisan, operan.
- * - zone_manager: SOLO chat. Recibe push del chofer y responde. No ve mapa,
- *   no ve dashboard, no ve listas. Su única página es /incidents/active-chat.
+ * Modelo de roles V3 (ADR-124, 2026-05-16):
+ * - admin / dispatcher: operadores. Ven todo, operan todo. Son seats facturables.
+ * - zone_manager: supervisor read-only + chat + incidencias. NO es seat.
+ *   - zone_id = null → customer-wide (ve todas las zonas del customer).
+ *     Caso de uso: encargado de un cliente que supervisa CDMX + Toluca.
+ *   - zone_id = X → zone-scoped (ve solo su zona). Caso de uso: jefe de
+ *     región / coordinador local.
+ * - driver: solo driver app.
  */
 export async function requireAdminOrDispatcher(): Promise<UserProfile> {
   return requireRole('admin', 'dispatcher');
+}
+
+/**
+ * True para roles que pueden ejecutar writes (crear, modificar, publicar,
+ * cancelar, optimizar, mover paradas, etc.). zone_manager NO opera —
+ * solo ve y usa chat de incidencias.
+ *
+ * Server actions de write hacen `requireRole('admin', 'dispatcher')` por
+ * su lado (defense-in-depth). Esta helper sirve para esconder los botones
+ * en UI de forma centralizada — usar como `if (!isOperator(profile)) return null;`
+ * o `<Show when={isOperator(profile)}>...</Show>`.
+ */
+export function isOperator(profile: Pick<UserProfile, 'role'>): boolean {
+  return profile.role === 'admin' || profile.role === 'dispatcher';
+}
+
+/**
+ * True si el profile puede ver datos de TODO el customer (todas las zonas)
+ * vs estar restringido a una zona específica. admin y dispatcher siempre
+ * customer-wide. zone_manager customer-wide solo si zoneId === null.
+ *
+ * Use case: páginas que renderean "ver todas las zonas" vs filter forced
+ * a la zona del user. El filtro de zona en /dia, /dashboard, etc. se
+ * muestra solo si esta helper devuelve true.
+ */
+export function canViewAllZones(
+  profile: Pick<UserProfile, 'role' | 'zoneId'>,
+): boolean {
+  if (profile.role === 'admin' || profile.role === 'dispatcher') return true;
+  if (profile.role === 'zone_manager' && !profile.zoneId) return true;
+  return false;
 }
 
 /**
@@ -79,9 +114,11 @@ export function homeForRole(role: UserRole): string {
     case 'dispatcher':
       return '/routes';
     case 'zone_manager':
-      // Zone manager solo entra a su chat activo. Si no tiene chats abiertos,
-      // la página /incidents/active-chat muestra estado "sin chats hoy".
-      return '/incidents/active-chat';
+      // ADR-124 (V3 de roles): zone_manager se vuelve supervisor read-only.
+      // Su home natural es /dia/[hoy] — el mapa con todas las rutas del día.
+      // /incidents/active-chat sigue accesible por sidebar para gestionar
+      // problemas reportados por choferes.
+      return `/dia/${new Date().toISOString().slice(0, 10)}`;
     case 'driver':
       // El driver no debería entrar al platform — su home es la driver app.
       return '/login';

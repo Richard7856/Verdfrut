@@ -55,8 +55,8 @@ function defaultRange(timezone: string): { from: string; to: string } {
 }
 
 export default async function StoreDetailPage({ params, searchParams }: Props) {
-  // V2: solo admin/dispatcher.
-  await requireRole('admin', 'dispatcher');
+  // ADR-124: zone_manager también ve detalle de tienda (read-only).
+  await requireRole('admin', 'dispatcher', 'zone_manager');
   const { id } = await params;
   const sp = await searchParams;
   const timezone = process.env.NEXT_PUBLIC_TENANT_TIMEZONE ?? DEFAULT_TZ;

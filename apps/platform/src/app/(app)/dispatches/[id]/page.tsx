@@ -45,10 +45,17 @@ const DISPATCH_STATUS_LABEL: Record<DispatchStatus, { text: string; tone: 'neutr
 };
 
 export default async function DispatchDetailPage({ params }: Props) {
-  await requireRole('admin', 'dispatcher');
+  // ADR-124: zone_manager también ve detalle (read-only). Si tiene zoneId
+  // y no coincide con la zona del tiro, 404 — no debería ver tiros de
+  // zonas ajenas.
+  const profile = await requireRole('admin', 'dispatcher', 'zone_manager');
   const { id } = await params;
   const dispatch = await getDispatch(id);
   if (!dispatch) notFound();
+  if (profile.role === 'zone_manager' && profile.zoneId && dispatch.zoneId !== profile.zoneId) {
+    notFound();
+  }
+  const operatorCanWrite = profile.role !== 'zone_manager';
 
   // ADR-121 Fase 1: flags de features que afectan UI de esta página. Las
   // server actions también gatean por seguridad — esto solo controla qué
@@ -163,15 +170,19 @@ export default async function DispatchDetailPage({ params }: Props) {
                 🧪 Sandbox
               </Badge>
             )}
-            <ShareDispatchButton
-              dispatchId={dispatch.id}
-              currentToken={dispatch.publicShareToken}
-            />
-            <WorkbenchCloneButton
-              dispatchId={dispatch.id}
-              sourceIsSandbox={dispatch.isSandbox}
-            />
-            <DispatchActions dispatch={dispatch} />
+            {operatorCanWrite && (
+              <>
+                <ShareDispatchButton
+                  dispatchId={dispatch.id}
+                  currentToken={dispatch.publicShareToken}
+                />
+                <WorkbenchCloneButton
+                  dispatchId={dispatch.id}
+                  sourceIsSandbox={dispatch.isSandbox}
+                />
+                <DispatchActions dispatch={dispatch} />
+              </>
+            )}
           </div>
         }
       />
@@ -196,12 +207,19 @@ export default async function DispatchDetailPage({ params }: Props) {
             routes={routesWithStops}
             mapboxToken={mapboxToken}
             // ADR-121 Fase 1: scope solo cuando el plan permite drag/lasso bulk.
-            // Sin scope, el mapa cae a read-only — el user sigue viendo todo
-            // pero no puede seleccionar paradas para mover en bulk.
-            scope={planFeatures.dragEditMap ? { type: 'dispatch', dispatchId: dispatch.id } : undefined}
+            // ADR-124: zone_manager además ve el mapa SIN modo selección.
+            scope={
+              planFeatures.dragEditMap && operatorCanWrite
+                ? { type: 'dispatch', dispatchId: dispatch.id }
+                : undefined
+            }
             // ADR-123: pool de camiones+choferes para "Nueva ruta desde selección".
-            availableVehiclesForNewRoute={planFeatures.dragEditMap ? availableVehicles : undefined}
-            availableDriversForNewRoute={planFeatures.dragEditMap ? availableDriverOpts : undefined}
+            availableVehiclesForNewRoute={
+              planFeatures.dragEditMap && operatorCanWrite ? availableVehicles : undefined
+            }
+            availableDriversForNewRoute={
+              planFeatures.dragEditMap && operatorCanWrite ? availableDriverOpts : undefined
+            }
           />
         </div>
       )}
@@ -212,39 +230,44 @@ export default async function DispatchDetailPage({ params }: Props) {
             Rutas del tiro
           </h2>
           <div className="flex items-center gap-2">
-            {/* OE-3 (ADR-100): propose es el camino recomendado — 3 alternativas
-                con costo MXN comparables side-by-side. Promovido a primary tras
-                ADR-109 (optimize_dispatch tool del LLM deprecado en favor de
-                propose+apply). El botón Optimizar de abajo sigue para flujos
-                rápidos donde no se necesitan alternativas. */}
-            {canOptimizeDispatch && (
-              <Link href={`/dispatches/${dispatch.id}/propose`}>
-                <Button type="button" variant="primary" size="sm">
-                  💰 Ver propuestas con costo
-                </Button>
-              </Link>
+            {/* ADR-124: toda la barra de operación se esconde para zone_manager. */}
+            {operatorCanWrite && (
+              <>
+                {/* OE-3 (ADR-100): propose es el camino recomendado — 3 alternativas
+                    con costo MXN comparables side-by-side. Promovido a primary tras
+                    ADR-109 (optimize_dispatch tool del LLM deprecado en favor de
+                    propose+apply). El botón Optimizar de abajo sigue para flujos
+                    rápidos donde no se necesitan alternativas. */}
+                {canOptimizeDispatch && (
+                  <Link href={`/dispatches/${dispatch.id}/propose`}>
+                    <Button type="button" variant="primary" size="sm">
+                      💰 Ver propuestas con costo
+                    </Button>
+                  </Link>
+                )}
+                {/* Optimizar tiro completo (modo across o within). Secundario porque
+                    no muestra alternativas — útil solo para re-ordenar in-place. */}
+                <OptimizeDispatchButton
+                  dispatchId={dispatch.id}
+                  canOptimize={canOptimizeDispatch}
+                  hasPostPublishRoutes={hasPostPublishRoutes}
+                  hasManualReorders={hasManualReorders}
+                />
+                {/* ADR-048: agregar camioneta = re-rutea todo el tiro automáticamente. */}
+                <AddVehicleButton
+                  dispatchId={dispatch.id}
+                  availableVehicles={availableVehicles}
+                  availableDrivers={availableDriverOpts}
+                  hasManualReorders={hasManualReorders}
+                />
+                {/* Botón legacy: crear ruta nueva manualmente (sin redistribuir). */}
+                <Link href={`/routes/new?dispatchId=${dispatch.id}`}>
+                  <Button type="button" variant="ghost" size="sm">
+                    + Ruta manual
+                  </Button>
+                </Link>
+              </>
             )}
-            {/* Optimizar tiro completo (modo across o within). Secundario porque
-                no muestra alternativas — útil solo para re-ordenar in-place. */}
-            <OptimizeDispatchButton
-              dispatchId={dispatch.id}
-              canOptimize={canOptimizeDispatch}
-              hasPostPublishRoutes={hasPostPublishRoutes}
-              hasManualReorders={hasManualReorders}
-            />
-            {/* ADR-048: agregar camioneta = re-rutea todo el tiro automáticamente. */}
-            <AddVehicleButton
-              dispatchId={dispatch.id}
-              availableVehicles={availableVehicles}
-              availableDrivers={availableDriverOpts}
-              hasManualReorders={hasManualReorders}
-            />
-            {/* Botón legacy: crear ruta nueva manualmente (sin redistribuir). */}
-            <Link href={`/routes/new?dispatchId=${dispatch.id}`}>
-              <Button type="button" variant="ghost" size="sm">
-                + Ruta manual
-              </Button>
-            </Link>
           </div>
         </header>
 
@@ -307,6 +330,7 @@ export default async function DispatchDetailPage({ params }: Props) {
                     availableStoresToAdd={availableStoresForRoute}
                     dispatchHasManualReorders={hasManualReorders}
                     canReoptLive={planFeatures.liveReOpt}
+                    canWrite={operatorCanWrite}
                   />
                 </li>
               );

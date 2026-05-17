@@ -80,20 +80,21 @@ function defaultRange(timezone: string): { from: string; to: string } {
 }
 
 export default async function DriversDashboardPage({ searchParams }: Props) {
-  // V2: solo admin/dispatcher.
-  const profile = await requireRole('admin', 'dispatcher');
+  // ADR-124: zone_manager read-only puede ver dashboard de choferes.
+  const profile = await requireRole('admin', 'dispatcher', 'zone_manager');
   const params = await searchParams;
   const timezone = process.env.NEXT_PUBLIC_TENANT_TIMEZONE ?? DEFAULT_TZ;
 
   const range = defaultRange(timezone);
   const from = params.from || range.from;
   const to = params.to || range.to;
-  const zoneId =
-    profile.role === 'zone_manager' ? profile.zoneId ?? null : params.zone || null;
+  const isScopedSupervisor =
+    profile.role === 'zone_manager' && profile.zoneId !== null;
+  const zoneId = isScopedSupervisor ? profile.zoneId : params.zone || null;
 
   const [drivers, zones] = await Promise.all([
     getDashboardTopDrivers({ from, to, zoneId, limit: 1000 }),
-    profile.role === 'zone_manager' ? Promise.resolve([]) : listZones(),
+    isScopedSupervisor ? Promise.resolve([]) : listZones(),
   ]);
 
   return (
@@ -110,7 +111,7 @@ export default async function DriversDashboardPage({ searchParams }: Props) {
 
       <DashboardFilters
         zones={zones.map((z) => ({ id: z.id, name: z.name }))}
-        showZoneSelector={profile.role !== 'zone_manager'}
+        showZoneSelector={!isScopedSupervisor}
       />
 
       <Card>

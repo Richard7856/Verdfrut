@@ -85,7 +85,10 @@ export function InviteUserButton({
   const linkInputRef = useRef<HTMLInputElement>(null);
 
   const activeZones = zones.filter((z) => z.isActive);
-  const requiresZone = role === 'zone_manager' || role === 'driver';
+  // ADR-124: zone_manager hace la zona OPCIONAL. Sin zona = supervisor
+  // customer-wide. Con zona = supervisor regional.
+  const requiresZone = role === 'driver';
+  const optionalZone = role === 'zone_manager';
   const showLicense = role === 'driver';
 
   function reset() {
@@ -215,9 +218,20 @@ export function InviteUserButton({
             label={requiresZone ? 'Zona' : 'Zona (opcional)'}
             htmlFor="zone_id"
             required={requiresZone}
+            hint={
+              optionalZone
+                ? 'Sin zona = ve TODAS las zonas del cliente (supervisor general). Con zona = ve solo esa zona.'
+                : undefined
+            }
           >
             <Select id="zone_id" name="zone_id" required={requiresZone} disabled={pending}>
-              <option value="">{requiresZone ? 'Selecciona zona…' : 'Sin zona específica'}</option>
+              <option value="">
+                {requiresZone
+                  ? 'Selecciona zona…'
+                  : optionalZone
+                    ? '— Todas las zonas (supervisor general) —'
+                    : 'Sin zona específica'}
+              </option>
               {activeZones.map((z) => (
                 <option key={z.id} value={z.id}>
                   {z.code} — {z.name}

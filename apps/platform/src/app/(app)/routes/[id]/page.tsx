@@ -74,12 +74,17 @@ export async function generateMetadata({ params }: PageProps) {
 }
 
 export default async function RouteDetailPage({ params }: PageProps) {
-  // V2: solo admin/dispatcher.
-  await requireRole('admin', 'dispatcher');
+  // ADR-124: zone_manager también ve detalle de ruta (read-only). Si tiene
+  // zoneId asignado, sólo ve rutas de su zona.
+  const profile = await requireRole('admin', 'dispatcher', 'zone_manager');
   const { id } = await params;
 
   const route = await getRoute(id);
   if (!route) notFound();
+  if (profile.role === 'zone_manager' && profile.zoneId && route.zoneId !== profile.zoneId) {
+    notFound();
+  }
+  const operatorCanWrite = profile.role !== 'zone_manager';
 
   const stops = await listStopsForRoute(id);
   const [stores, vehicles, zones, allZoneStores] = await Promise.all([
@@ -251,7 +256,7 @@ export default async function RouteDetailPage({ params }: PageProps) {
             </Link>
           </span>
         }
-        action={<RouteActions route={route} />}
+        action={operatorCanWrite ? <RouteActions route={route} /> : undefined}
       />
 
       <EtaModeBanner show={isEtaModeDemo()} />
@@ -325,13 +330,17 @@ export default async function RouteDetailPage({ params }: PageProps) {
                 // ADR-035: reorder permitido también en PUBLISHED/IN_PROGRESS,
                 // pero con restricciones (solo paradas pending). El componente
                 // recibe `postPublish` para diferenciar el comportamiento.
-                reorderable={[
-                  'DRAFT',
-                  'OPTIMIZED',
-                  'APPROVED',
-                  'PUBLISHED',
-                  'IN_PROGRESS',
-                ].includes(route.status)}
+                // ADR-124: zone_manager nunca reordena — reorderable forzado a false.
+                reorderable={
+                  operatorCanWrite &&
+                  [
+                    'DRAFT',
+                    'OPTIMIZED',
+                    'APPROVED',
+                    'PUBLISHED',
+                    'IN_PROGRESS',
+                  ].includes(route.status)
+                }
                 postPublish={['PUBLISHED', 'IN_PROGRESS'].includes(route.status)}
                 timezone={TENANT_TZ}
                 initialStops={stops.map((s) => {
@@ -345,7 +354,7 @@ export default async function RouteDetailPage({ params }: PageProps) {
                 })}
               />
             )}
-            {canAddStops && availableStoresToAdd.length > 0 && (
+            {operatorCanWrite && canAddStops && availableStoresToAdd.length > 0 && (
               <div className="border-t p-4" style={{ borderColor: 'var(--vf-line)' }}>
                 <AddStopButton
                   routeId={route.id}
@@ -392,19 +401,30 @@ export default async function RouteDetailPage({ params }: PageProps) {
             <CardHeader title="Asignación" />
             <dl className="space-y-2.5 text-sm">
               <Metric label="Camión">{vehicle ? vehicle.alias ?? vehicle.plate : '—'}</Metric>
-              {/* Selector inline de chofer — editable solo en pre-publicación. */}
-              <DriverAssignment
-                route={route}
-                currentDriver={currentDriver}
-                availableDrivers={availableDrivers}
-              />
+              {/* Selector inline de chofer — editable solo en pre-publicación.
+                  ADR-124: para zone_manager mostramos solo el display read-only. */}
+              {operatorCanWrite ? (
+                <DriverAssignment
+                  route={route}
+                  currentDriver={currentDriver}
+                  availableDrivers={availableDrivers}
+                />
+              ) : (
+                <Metric label="Chofer">{currentDriver?.profile.fullName ?? '— sin asignar —'}</Metric>
+              )}
               {/* ADR-047: selector inline de CEDIS de salida — override del depot del vehículo. */}
-              <DepotAssignment
-                route={route}
-                effectiveDepot={effectiveDepot}
-                isOverride={isDepotOverride}
-                availableDepots={availableDepots}
-              />
+              {operatorCanWrite ? (
+                <DepotAssignment
+                  route={route}
+                  effectiveDepot={effectiveDepot}
+                  isOverride={isDepotOverride}
+                  availableDepots={availableDepots}
+                />
+              ) : (
+                <Metric label="CEDIS salida">
+                  {effectiveDepot ? `${effectiveDepot.code} · ${effectiveDepot.name}` : '—'}
+                </Metric>
+              )}
               <Metric label="Zona">{zone?.code ?? '—'}</Metric>
               <Metric label="Fecha operativa">
                 <span className="font-mono">{route.date}</span>

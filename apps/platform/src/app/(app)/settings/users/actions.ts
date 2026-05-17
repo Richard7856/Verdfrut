@@ -64,8 +64,12 @@ export async function inviteUserAction(formData: FormData): Promise<InviteAction
     const zoneIdRaw = formData.get('zone_id');
     const zoneId = zoneIdRaw && zoneIdRaw !== '' ? String(zoneIdRaw) : null;
 
-    if ((role === 'zone_manager' || role === 'driver') && !zoneId) {
-      throw new Error(`Rol ${role} requiere asignar una zona`);
+    // ADR-124 (V3 de roles): zone_manager ya NO requiere zona.
+    //   - Sin zona = supervisor customer-wide (ve todas las zonas del cliente).
+    //   - Con zona = supervisor regional (ve solo esa zona).
+    // driver sí sigue requiriendo zona — sin zona no podría recibir rutas.
+    if (role === 'driver' && !zoneId) {
+      throw new Error('Rol driver requiere asignar una zona');
     }
 
     const licenseNumber = optionalString(formData.get('license_number'), { maxLength: 60 });

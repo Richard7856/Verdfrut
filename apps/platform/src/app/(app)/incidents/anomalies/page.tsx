@@ -31,8 +31,8 @@ const KIND_DESC: Record<AnomalyKind, string> = {
 };
 
 export default async function AnomaliesPage() {
-  // V2: solo admin/dispatcher.
-  await requireRole('admin', 'dispatcher');
+  // ADR-124: zone_manager también puede ver anomalías (read-only).
+  await requireRole('admin', 'dispatcher', 'zone_manager');
   const anomalies = await listActiveAnomalies();
 
   // Agrupar por tipo para el render

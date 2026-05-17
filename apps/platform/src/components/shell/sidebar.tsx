@@ -21,18 +21,17 @@ interface NavItem {
   badge?: string | number;
 }
 
-// Modelo de roles V2 (post-clarificación cliente — ADR-031+):
-// - admin/dispatcher: supervisan + operan. Ven todo.
-// - zone_manager: SOLO chat activo. Su única navegación es "/incidents/active-chat"
-//   que lo redirige al chat más reciente abierto. No ve dashboard, mapa, listas, etc.
-//   Su sidebar muestra exclusivamente "Mi chat" — sin distractores.
+// Modelo de roles V3 (ADR-124, 2026-05-16):
+// - admin/dispatcher: supervisan + OPERAN. Ven todo, ejecutan writes.
+// - zone_manager: supervisor read-only + chat + incidencias. NO opera.
+//   - Customer-wide si zone_id=null (encargado del cliente).
+//   - Regional si zone_id=X (jefe de zona).
+//   En ambos casos: ve Día, Dashboard, Mapa, Choferes, Incidencias, Reportes.
+//   NO ve: Tiendas, Flotilla, CEDIS, Workbench, Asistente AI, Settings, Billing.
 const NAV_ITEMS: NavItem[] = [
-  // Zone manager — solo 1 entry, su único trabajo
-  { href: '/incidents/active-chat', label: 'Mi chat', roles: ['zone_manager'], group: 'GENERAL' },
-
-  // Admin / dispatcher — supervisión global
-  { href: '/dashboard', label: 'Overview', roles: ['admin', 'dispatcher'], group: 'GENERAL' },
-  { href: '/map', label: 'Mapa en vivo', roles: ['admin', 'dispatcher'], group: 'GENERAL' },
+  // GENERAL — supervisión
+  { href: '/dashboard', label: 'Overview', roles: ['admin', 'dispatcher', 'zone_manager'], group: 'GENERAL' },
+  { href: '/map', label: 'Mapa en vivo', roles: ['admin', 'dispatcher', 'zone_manager'], group: 'GENERAL' },
   { href: '/orchestrator', label: 'Asistente AI', roles: ['admin', 'dispatcher'], group: 'GENERAL', badge: 'Beta' },
 
   // CLIENTES — shell del feature multi-cliente (en desarrollo). Mientras es
@@ -40,24 +39,28 @@ const NAV_ITEMS: NavItem[] = [
   // mostrar la visión del feature en la presentación.
   { href: '/customers', label: 'Clientes', roles: ['admin', 'dispatcher'], group: 'CLIENTES' },
 
-  { href: '/dia', label: '📅 Día', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
+  // OPERACIÓN — vista del día + listas
+  { href: '/dia', label: '📅 Día', roles: ['admin', 'dispatcher', 'zone_manager'], group: 'OPERACIÓN' },
   { href: '/routes', label: 'Rutas', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
   // /dispatches removido del sidebar 2026-05-15: el concepto "tiro = contenedor
   // de rutas" confundía a customers nuevos (esperaban ver "operación del día",
   // no un contenedor abstracto). El URL /dispatches/[id] sigue accesible como
   // drill-down desde /dia (chips de tiros agrupados al pie del listado), y la
-  // página /dispatches redirige a /dia. Fase 2: edición directa cross-dispatch
-  // en /dia hará que el concepto desaparezca también del modelo de URLs.
+  // página /dispatches redirige a /dia.
   { href: '/settings/vehicles', label: 'Flotilla', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
   { href: '/settings/depots', label: 'CEDIS / Hubs', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
-  { href: '/incidents', label: 'Incidencias', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
-  { href: '/incidents/anomalies', label: '🔴 Anomalías', roles: ['admin', 'dispatcher'], group: 'OPERACIÓN' },
+  { href: '/incidents', label: 'Incidencias', roles: ['admin', 'dispatcher', 'zone_manager'], group: 'OPERACIÓN' },
+  { href: '/incidents/active-chat', label: '💬 Mi chat', roles: ['zone_manager'], group: 'OPERACIÓN' },
+  { href: '/incidents/anomalies', label: '🔴 Anomalías', roles: ['admin', 'dispatcher', 'zone_manager'], group: 'OPERACIÓN' },
 
+  // CATÁLOGO — choferes visible al supervisor; tiendas/inventario son catálogo
+  // operativo (writes) → solo admin/dispatcher.
   { href: '/settings/stores', label: 'Tiendas', roles: ['admin', 'dispatcher'], group: 'CATÁLOGO' },
-  { href: '/drivers', label: 'Choferes', roles: ['admin', 'dispatcher'], group: 'CATÁLOGO' },
+  { href: '/drivers', label: 'Choferes', roles: ['admin', 'dispatcher', 'zone_manager'], group: 'CATÁLOGO' },
   { href: '/inventory', label: 'Inventario', roles: ['admin', 'dispatcher'], group: 'CATÁLOGO' },
 
-  { href: '/reports', label: 'Reportes', roles: ['admin', 'dispatcher'], group: 'SISTEMA' },
+  // SISTEMA — reportes para todos, audit/configuración para admin/dispatcher.
+  { href: '/reports', label: 'Reportes', roles: ['admin', 'dispatcher', 'zone_manager'], group: 'SISTEMA' },
   { href: '/audit/chat-failures', label: 'Auditoría · chat', roles: ['admin'], group: 'SISTEMA' },
   { href: '/settings/zones', label: 'Zonas', roles: ['admin'], group: 'SISTEMA' },
   { href: '/settings/users', label: 'Usuarios', roles: ['admin'], group: 'SISTEMA' },

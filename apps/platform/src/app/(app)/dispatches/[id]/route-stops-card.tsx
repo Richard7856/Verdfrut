@@ -79,6 +79,10 @@ interface Props {
    *  el botón "🚦 Re-optimizar con tráfico actual" (post-publish). El server
    *  action también gatea (defense-in-depth). */
   canReoptLive?: boolean;
+  /** ADR-124: si false (zone_manager), esconde TODOS los controles de write:
+   *  re-calc ETAs, re-optimizar, mover, depot select, driver reassign, agregar
+   *  parada, etc. La card queda como vista read-only. */
+  canWrite?: boolean;
 }
 
 const EDITABLE_STATUSES = new Set<RouteStatus>(['DRAFT', 'OPTIMIZED', 'APPROVED']);
@@ -112,6 +116,7 @@ export function RouteStopsCard({
   availableStoresToAdd = [],
   dispatchHasManualReorders = false,
   canReoptLive = true,
+  canWrite = true,
 }: Props) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -124,8 +129,10 @@ export function RouteStopsCard({
   const editableSiblings = siblings.filter(
     (s) => s.id !== route.id && EDITABLE_STATUSES.has(s.status),
   );
-  const canMove = EDITABLE_STATUSES.has(route.status) && editableSiblings.length > 0;
-  const canReorder = REORDERABLE_STATUSES.has(route.status);
+  // ADR-124: si !canWrite (zone_manager), TODOS los gates de write quedan en
+  // false — la card se renderea como vista read-only sin importar el status.
+  const canMove = canWrite && EDITABLE_STATUSES.has(route.status) && editableSiblings.length > 0;
+  const canReorder = canWrite && REORDERABLE_STATUSES.has(route.status);
   const isPostPublish = route.status === 'PUBLISHED' || route.status === 'IN_PROGRESS';
 
   // ADR-043: total kg + completados/omitidos
@@ -396,7 +403,7 @@ export function RouteStopsCard({
             <RoutingModeBadge route={route} compact />
           </div>
           {/* Optimizar/re-optimizar UNA ruta — solo DRAFT/OPTIMIZED y con paradas. */}
-          {(route.status === 'DRAFT' || route.status === 'OPTIMIZED') && items.length > 0 && (
+          {canWrite && (route.status === 'DRAFT' || route.status === 'OPTIMIZED') && items.length > 0 && (
             <Button
               type="button"
               variant="secondary"
@@ -410,7 +417,7 @@ export function RouteStopsCard({
             </Button>
           )}
           {/* ADR-048: quitar camioneta — solo en pre-publicación. */}
-          {EDITABLE_STATUSES.has(route.status) && (
+          {canWrite && EDITABLE_STATUSES.has(route.status) && (
             <RemoveVehicleButton
               routeId={route.id}
               dispatchId={dispatchId}
@@ -437,7 +444,7 @@ export function RouteStopsCard({
           que ya no se cumplirán. ADR-035 decidió NO recalcular automáticamente
           para no romper confianza con el chofer. El banner avisa al dispatcher
           para que tome decisión (re-optimizar si todavía hay margen). */}
-      {isPostPublish && route.version > 1 && (
+      {canWrite && isPostPublish && route.version > 1 && (
         <div
           className="mt-2 flex items-center justify-between gap-2 rounded border border-[var(--color-warning-border)] bg-[var(--color-warning-bg)] px-2 py-1.5 text-xs text-[var(--color-warning-fg)]"
           role="status"
@@ -462,8 +469,9 @@ export function RouteStopsCard({
       {/* Stream C O1 — Re-optimizar con tráfico actual. Solo en post-publish
           porque pre-publish ya usa el reoptimize regular más barato (Mapbox).
           Aquí necesitamos Google Routes con tráfico real porque hay un chofer
-          que ya está en ruta. ADR-121: gateado por feature `liveReOpt`. */}
-      {canReoptLive && isPostPublish && stops.some((s) => s.status === 'pending') && (
+          que ya está en ruta. ADR-121: gateado por feature `liveReOpt`.
+          ADR-124: además gateado por rol — zone_manager no opera. */}
+      {canWrite && canReoptLive && isPostPublish && stops.some((s) => s.status === 'pending') && (
         <div className="mt-2 flex items-center justify-between gap-2 rounded border border-[var(--color-border)] bg-[var(--vf-surface-2)] px-2 py-1.5 text-xs">
           <span style={{ color: 'var(--vf-text-mute)' }}>
             ¿Atraso por tráfico o cambio?
@@ -487,7 +495,8 @@ export function RouteStopsCard({
       {availableDepots.length > 0 && (
         <div className="mt-2 flex items-center gap-2 rounded border border-[var(--color-border)] bg-[var(--vf-surface-2)] px-2 py-1.5 text-xs">
           <span className="shrink-0 text-[var(--color-text-muted)]">CEDIS salida:</span>
-          {EDITABLE_STATUSES.has(route.status) ? (
+          {/* ADR-124: zone_manager ve depot display read-only. */}
+          {canWrite && EDITABLE_STATUSES.has(route.status) ? (
             <>
               <Select
                 value={isDepotOverride ? (effectiveDepot?.id ?? '') : ''}
@@ -570,7 +579,7 @@ export function RouteStopsCard({
           Reusa el mismo componente que /routes/[id] para mantener un único
           flow: agrega la parada al final, marca métricas como obsoletas, y el
           dispatcher decide si re-optimizar o dejar el orden manual. */}
-      {EDITABLE_STATUSES.has(route.status) && availableStoresToAdd.length > 0 && (
+      {canWrite && EDITABLE_STATUSES.has(route.status) && availableStoresToAdd.length > 0 && (
         <div className="mt-3 border-t pt-3" style={{ borderColor: 'var(--vf-line)' }}>
           <AddStopButton routeId={route.id} availableStores={availableStoresToAdd} />
         </div>

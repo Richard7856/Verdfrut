@@ -56,8 +56,11 @@ interface Props {
 }
 
 export default async function DashboardPage({ searchParams }: Props) {
-  // V2: solo admin/dispatcher. zone_manager se queda solo con su chat activo.
-  const profile = await requireRole('admin', 'dispatcher');
+  // ADR-124 (V3): zone_manager también ve dashboard read-only. Si tiene
+  // zoneId asignado, las queries ya filtran por su zona (lógica existente
+  // `profile.role === 'zone_manager' ? profile.zoneId : params.zone`). Si
+  // es customer-wide (zoneId null), pasa params.zone como cualquier otro.
+  const profile = await requireRole('admin', 'dispatcher', 'zone_manager');
   const params = await searchParams;
   const timezone = process.env.NEXT_PUBLIC_TENANT_TIMEZONE ?? DEFAULT_TZ;
   // ADR-121 Fase 1: el banner de push solo aparece si el plan lo incluye.
@@ -68,22 +71,22 @@ export default async function DashboardPage({ searchParams }: Props) {
   const from = params.from || range.from;
   const to = params.to || range.to;
 
-  // zone_manager: forzamos su zona; ignoramos lo que venga en query (defensa profunda — RLS también filtra)
-  // admin/dispatcher: respetamos el filtro opcional
-  const zoneId =
-    profile.role === 'zone_manager'
-      ? profile.zoneId ?? null
-      : params.zone || null;
+  // ADR-124: zone_manager SCOPED (con zoneId) forzamos su zona. zone_manager
+  // CUSTOMER-WIDE (zoneId null) y admin/dispatcher respetan el filtro opcional.
+  const isScopedSupervisor =
+    profile.role === 'zone_manager' && profile.zoneId !== null;
+  const zoneId = isScopedSupervisor ? profile.zoneId : params.zone || null;
 
   const filters = { from, to, zoneId };
 
-  // Cargar todo en paralelo: 4 queries independientes
+  // Cargar todo en paralelo: 4 queries independientes. Solo el supervisor
+  // scoped salta el fetch de zones porque no necesita el selector.
   const [overview, dailySeries, topStores, topDrivers, zones] = await Promise.all([
     getDashboardOverview(filters),
     getDashboardDailySeries(filters),
     getDashboardTopStores({ ...filters, limit: 10 }),
     getDashboardTopDrivers({ ...filters, limit: 10 }),
-    profile.role === 'zone_manager' ? Promise.resolve([]) : listZones(),
+    isScopedSupervisor ? Promise.resolve([]) : listZones(),
   ]);
 
   return (
@@ -101,7 +104,7 @@ export default async function DashboardPage({ searchParams }: Props) {
 
       <DashboardFilters
         zones={zones.map((z) => ({ id: z.id, name: z.name }))}
-        showZoneSelector={profile.role !== 'zone_manager'}
+        showZoneSelector={!isScopedSupervisor}
       />
 
       <KpiGrid overview={overview} />
