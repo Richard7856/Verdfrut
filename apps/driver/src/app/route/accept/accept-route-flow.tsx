@@ -307,15 +307,19 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
       </header>
 
       {/* Mapa fullscreen.
-          ADR-128 (fix 2): el contenedor del mapa NO puede depender de
-          `absolute inset-0` para su sizing — al importar mapbox-gl.css
-          la regla `.mapboxgl-map { position: relative }` (no-layered) gana
-          contra `.absolute` de Tailwind v4 (en @layer utilities, menor
-          prioridad). Sin `position: absolute` los `inset-0` no aplican y
-          el contenedor queda 0×0 → Mapbox no renderea tiles. Solución:
-          `h-full w-full` para que el tamaño no dependa del position. */}
+          ADR-128 (fix 3): inline `style` para garantizar dimensiones
+          contra CUALQUIER CSS de Mapbox o Tailwind. El patrón anterior
+          (h-full w-full) depende de que el padre tenga height resuelto
+          via flex — funciona en la mayoría de browsers pero hay edge
+          cases con `flex-1 min-h-0` donde `height: 100%` resuelve a 0.
+          Inline style tiene specificity más alta que cualquier class CSS
+          (excepto !important), así que esto es a prueba de cualquier
+          override de mapbox-gl.css. */}
       <div className="relative flex-1 min-h-0">
-        <div ref={containerRef} className="h-full w-full" />
+        <div
+          ref={containerRef}
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }}
+        />
 
         {/* Hint del modo en la esquina superior */}
         {mode === 'custom' && (
