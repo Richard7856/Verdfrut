@@ -309,6 +309,20 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
         </p>
       </header>
 
+      {/* DIAGNÓSTICO ADR-127: strip visible con coords reales. Quitar cuando
+          el bug esté confirmado resuelto en producción. */}
+      <div className="border-b border-amber-400 bg-amber-50 px-3 py-1.5 text-[10px] leading-tight text-amber-900 font-mono">
+        <div>build: v3 (5b4eed9+)</div>
+        <div>
+          stops: {stops.map((s) => `${s.storeCode}(${s.lat},${s.lng})`).join(' | ')}
+        </div>
+        {depot && (
+          <div>
+            depot: {depot.code}({depot.lat},{depot.lng})
+          </div>
+        )}
+      </div>
+
       {/* Mapa fullscreen */}
       <div className="relative flex-1 min-h-0">
         <div ref={containerRef} className="absolute inset-0" />
