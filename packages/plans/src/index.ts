@@ -21,6 +21,10 @@ export type CustomerStatus = 'active' | 'demo' | 'paused' | 'churned';
 export interface PlanFeatures {
   /** Asistente AI conversacional (orquestador con 19 tools). */
   ai: boolean;
+  /** ADR-126: máximo de sesiones AI por mes. Infinity = ilimitado. */
+  maxAiSessionsPerMonth: number;
+  /** ADR-126: máximo de tool calls write (mutantes) por mes. Infinity = ilimitado. */
+  maxAiWritesPerMonth: number;
   /** Máximo de "cuentas operativas" (child customers logical units). */
   maxAccounts: number;
   /** Máximo de tiendas por cuenta operativa. */
@@ -52,6 +56,8 @@ export type FeatureKey = keyof PlanFeatures;
 export const PLAN_FEATURES: Record<CustomerTier, PlanFeatures> = {
   starter: {
     ai: false,
+    maxAiSessionsPerMonth: 0,
+    maxAiWritesPerMonth: 0,
     maxAccounts: 1,
     maxStoresPerAccount: 150,
     customDomain: false,
@@ -63,6 +69,11 @@ export const PLAN_FEATURES: Record<CustomerTier, PlanFeatures> = {
   },
   pro: {
     ai: true,
+    // ADR-126: cuota mensual alineada con copy de landing ("300 sesiones/mes").
+    // 500 writes/mes cubre uso típico (~17/día) y deja espacio antes del cap.
+    // Cuando llegue telemetría real, ajustar al p75 del consumo observado.
+    maxAiSessionsPerMonth: 300,
+    maxAiWritesPerMonth: 500,
     maxAccounts: 3,
     maxStoresPerAccount: 600,
     customDomain: false,
@@ -74,6 +85,8 @@ export const PLAN_FEATURES: Record<CustomerTier, PlanFeatures> = {
   },
   enterprise: {
     ai: true,
+    maxAiSessionsPerMonth: Number.POSITIVE_INFINITY,
+    maxAiWritesPerMonth: Number.POSITIVE_INFINITY,
     maxAccounts: Number.POSITIVE_INFINITY,
     maxStoresPerAccount: Number.POSITIVE_INFINITY,
     customDomain: true,
@@ -123,6 +136,8 @@ export const PLAN_PRICING_MXN: Record<
  */
 export const KNOWN_FEATURE_KEYS: ReadonlySet<FeatureKey> = new Set([
   'ai',
+  'maxAiSessionsPerMonth',
+  'maxAiWritesPerMonth',
   'maxAccounts',
   'maxStoresPerAccount',
   'customDomain',
@@ -160,15 +175,21 @@ export function sanitizeFeatureOverrides(
   const input = raw as Record<string, unknown>;
   const out: Partial<PlanFeatures> = {};
 
+  const NUMERIC_KEYS = new Set<FeatureKey>([
+    'maxAccounts',
+    'maxStoresPerAccount',
+    'maxAiSessionsPerMonth',
+    'maxAiWritesPerMonth',
+  ]);
   for (const key of KNOWN_FEATURE_KEYS) {
     if (!(key in input)) continue;
     const v = input[key];
-    if (key === 'maxAccounts' || key === 'maxStoresPerAccount') {
+    if (NUMERIC_KEYS.has(key)) {
       // Aceptamos number o 'unlimited' como string especial.
       if (typeof v === 'number' && Number.isFinite(v) && v >= 0) {
-        out[key] = v;
+        (out as Record<string, unknown>)[key] = v;
       } else if (v === 'unlimited' || v === Infinity) {
-        out[key] = Number.POSITIVE_INFINITY;
+        (out as Record<string, unknown>)[key] = Number.POSITIVE_INFINITY;
       }
     } else {
       if (typeof v === 'boolean') {
@@ -205,6 +226,8 @@ export function getEffectiveFeatures(c: CustomerForFeatures): PlanFeatures {
   if (c.status === 'churned' || c.status === 'paused') {
     return {
       ai: false,
+      maxAiSessionsPerMonth: 0,
+      maxAiWritesPerMonth: 0,
       maxAccounts: 0,
       maxStoresPerAccount: 0,
       customDomain: false,

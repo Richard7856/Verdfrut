@@ -51,6 +51,8 @@ const TIER_OPTIONS: Array<{ value: CustomerTier; label: string }> = [
 
 const FEATURE_LABELS: Record<FeatureKey, string> = {
   ai: 'Asistente AI (orquestador con 19 herramientas)',
+  maxAiSessionsPerMonth: 'Sesiones AI por mes (numeric)',
+  maxAiWritesPerMonth: 'Acciones AI write por mes (numeric)',
   maxAccounts: 'Cuentas operativas (numeric)',
   maxStoresPerAccount: 'Tiendas por cuenta (numeric)',
   customDomain: 'Dominio propio del cliente (app.empresa.com)',

@@ -194,6 +194,11 @@ export type Database = {
           last_synced_admin_seats: number | null
           last_synced_driver_seats: number | null
           last_seats_synced_at: string | null
+          /** ADR-126: contadores de cuota AI mensual. */
+          ai_sessions_used_month: number
+          ai_writes_used_month: number
+          ai_quota_period_starts_at: string
+          ai_quota_overrides: Json | null
           created_at: string
           updated_at: string
         }
@@ -227,6 +232,10 @@ export type Database = {
           last_synced_admin_seats?: number | null
           last_synced_driver_seats?: number | null
           last_seats_synced_at?: string | null
+          ai_sessions_used_month?: number
+          ai_writes_used_month?: number
+          ai_quota_period_starts_at?: string
+          ai_quota_overrides?: Json | null
           created_at?: string
           updated_at?: string
         }
@@ -260,6 +269,10 @@ export type Database = {
           last_synced_admin_seats?: number | null
           last_synced_driver_seats?: number | null
           last_seats_synced_at?: string | null
+          ai_sessions_used_month?: number
+          ai_writes_used_month?: number
+          ai_quota_period_starts_at?: string
+          ai_quota_overrides?: Json | null
           created_at?: string
           updated_at?: string
         }
@@ -1289,6 +1302,16 @@ export type Database = {
     Functions: {
       current_user_role: { Args: never; Returns: Database["public"]["Enums"]["user_role"] }
       current_user_zone: { Args: never; Returns: string }
+      /** ADR-126: incrementa atomicamente la cuota AI (sessions o writes). */
+      consume_ai_quota: {
+        Args: { p_customer_id: string; p_kind: string }
+        Returns: { used: number; period_starts_at: string }[]
+      }
+      /** ADR-126: resetea contadores AI mensuales para todos los customers. */
+      reset_ai_quotas_for_period: {
+        Args: never
+        Returns: number
+      }
       get_active_anomalies: {
         Args: { zone_id_filter?: string | null }
         Returns: {

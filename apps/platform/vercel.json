@@ -8,6 +8,10 @@
     {
       "path": "/api/cron/sync-stripe-seats",
       "schedule": "0 10 * * *"
+    },
+    {
+      "path": "/api/cron/reset-ai-quotas",
+      "schedule": "5 0 1 * *"
     }
   ]
 }

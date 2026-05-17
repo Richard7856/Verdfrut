@@ -8,9 +8,11 @@
 // Toast handling: si la URL trae ?success=1 o ?canceled=1 (de los return URLs
 // del checkout), mostramos un toast informativo via el componente cliente.
 
+import Link from 'next/link';
 import { PageHeader, Card, Badge } from '@tripdrive/ui';
 import { requireRole } from '@/lib/auth';
 import { createServiceRoleClient } from '@tripdrive/supabase/server';
+import { getEffectiveFeatures } from '@tripdrive/plans';
 import {
   getStripe,
   getPriceIdsForTier,
@@ -20,6 +22,7 @@ import {
   type CustomerTier,
 } from '@/lib/stripe/client';
 import { BillingActions } from './billing-actions';
+import { UsageCard } from './usage-cards';
 
 export const metadata = { title: 'Suscripción y facturación' };
 export const dynamic = 'force-dynamic';
@@ -68,11 +71,15 @@ export default async function BillingPage({ searchParams }: Props) {
     );
   }
 
-  const [{ data: customer }, adminSeats, driverSeats] = await Promise.all([
+  // ADR-126: incluimos en la query los campos de cuota AI + status del
+  // customer para que `getEffectiveFeatures` resuelva los caps reales (vs
+  // tier base, considerando overrides). Y contamos tiendas para el card de
+  // consumo de catálogo.
+  const [{ data: customer }, adminSeats, driverSeats, storeCount] = await Promise.all([
     admin
       .from('customers')
       .select(
-        'id, name, tier, stripe_subscription_id, subscription_status, subscription_current_period_end, last_synced_admin_seats, last_synced_driver_seats, last_seats_synced_at',
+        'id, name, tier, status, feature_overrides, stripe_subscription_id, subscription_status, subscription_current_period_end, last_synced_admin_seats, last_synced_driver_seats, last_seats_synced_at, ai_sessions_used_month, ai_writes_used_month, ai_quota_period_starts_at',
       )
       .eq('id', customerId)
       .maybeSingle(),
@@ -87,10 +94,38 @@ export default async function BillingPage({ searchParams }: Props) {
       .select('id', { count: 'exact', head: true })
       .eq('customer_id', customerId)
       .eq('is_active', true),
+    admin
+      .from('stores')
+      .select('id', { count: 'exact', head: true })
+      .eq('customer_id', customerId)
+      .eq('is_active', true)
+      .eq('is_sandbox', false),
   ]);
 
   const adminCount = adminSeats.count ?? 0;
   const driverCount = driverSeats.count ?? 0;
+  const storesCount = storeCount.count ?? 0;
+
+  // ADR-126: resolver features efectivos para conocer caps reales.
+  const features = customer
+    ? getEffectiveFeatures({
+        tier: customer.tier as CustomerTier,
+        status: (customer.status ?? 'active') as 'active' | 'demo' | 'paused' | 'churned',
+        feature_overrides: customer.feature_overrides,
+      })
+    : null;
+
+  // Próximo reset: 1ro del mes siguiente al período actual.
+  const aiPeriodStart = customer?.ai_quota_period_starts_at
+    ? new Date(customer.ai_quota_period_starts_at as string)
+    : new Date();
+  const aiResetsAt = new Date(
+    Date.UTC(aiPeriodStart.getUTCFullYear(), aiPeriodStart.getUTCMonth() + 1, 1),
+  );
+  const resetLabel = aiResetsAt.toLocaleDateString('es-MX', {
+    day: 'numeric',
+    month: 'long',
+  });
 
   // Stripe configurado = SDK + al menos un tier completo (3 price IDs).
   const customerTier = (customer?.tier as CustomerTier | null) ?? 'pro';
@@ -222,6 +257,128 @@ export default async function BillingPage({ searchParams }: Props) {
           </Card>
         );
       })()}
+
+      {/* ADR-126: tu consumo este mes — AI sessions + writes + tiendas vs cap. */}
+      {features && (
+        <Card className="mb-4 border-[var(--color-border)] bg-[var(--vf-surface-2)] p-4">
+          <div className="flex items-baseline justify-between">
+            <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
+              Tu consumo este mes
+            </p>
+            <p className="text-[11px] text-[var(--color-text-muted)]">
+              Renueva el {resetLabel}
+            </p>
+          </div>
+
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+            {/* AI sessions: solo si el plan incluye AI. Para Starter mostramos
+                un card "bloqueado" con CTA upgrade. */}
+            {features.ai ? (
+              <UsageCard
+                title="Sesiones AI"
+                used={Number(customer?.ai_sessions_used_month ?? 0)}
+                limit={features.maxAiSessionsPerMonth}
+                unitLabel="sesiones"
+                footnote={
+                  Number.isFinite(features.maxAiSessionsPerMonth)
+                    ? `Renueva el ${resetLabel}`
+                    : undefined
+                }
+                upgradeUrl="/settings/billing"
+              />
+            ) : (
+              <div
+                className="flex flex-col justify-center rounded-md border p-3 text-center"
+                style={{
+                  background: 'var(--vf-surface-1)',
+                  borderColor: 'var(--color-border)',
+                }}
+              >
+                <p className="text-[11px] uppercase tracking-wide" style={{ color: 'var(--color-text-muted)' }}>
+                  Sesiones AI
+                </p>
+                <p className="mt-1.5 text-base font-semibold" style={{ color: 'var(--color-text-muted)' }}>
+                  🔒 No incluido en tu plan
+                </p>
+                <p className="mt-1 text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+                  Sube a Pro para 300 sesiones/mes o a Enterprise para ilimitado.
+                </p>
+              </div>
+            )}
+
+            {features.ai && (
+              <UsageCard
+                title="Acciones AI (creates/updates)"
+                used={Number(customer?.ai_writes_used_month ?? 0)}
+                limit={features.maxAiWritesPerMonth}
+                unitLabel="acciones"
+                footnote={
+                  Number.isFinite(features.maxAiWritesPerMonth)
+                    ? 'Cada vez que el agente crea/modifica algo'
+                    : 'Sin tope · ideal para operación pesada'
+                }
+                upgradeUrl="/settings/billing"
+              />
+            )}
+
+            <UsageCard
+              title="Tiendas activas"
+              used={storesCount}
+              limit={features.maxStoresPerAccount}
+              unitLabel="tiendas"
+              footnote={
+                Number.isFinite(features.maxStoresPerAccount)
+                  ? 'Cap por cuenta operativa'
+                  : 'Sin tope en tu plan'
+              }
+              upgradeUrl="/settings/billing"
+            />
+          </div>
+        </Card>
+      )}
+
+      {/* Gestión rápida: links a las páginas existentes de admins/choferes. No
+          duplicamos UI de gestión aquí — el admin entra a las páginas
+          dedicadas para invitar, desactivar, ver detalles. */}
+      <Card className="mb-4 border-[var(--color-border)] bg-[var(--vf-surface-2)] p-4">
+        <p className="text-xs uppercase tracking-wide text-[var(--color-text-muted)]">
+          Gestionar equipo
+        </p>
+        <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+          Cada cambio de seat (alta o baja) se cobra/acredita automáticamente con proration en
+          tu próxima factura.
+        </p>
+        <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-2">
+          <Link
+            href="/settings/users"
+            className="flex items-center justify-between rounded-md border border-[var(--color-border)] bg-[var(--vf-surface-1)] p-3 text-sm hover:bg-[var(--vf-surface-2)]"
+          >
+            <div>
+              <p className="font-medium text-[var(--color-text)]">
+                👥 Admins y dispatchers
+              </p>
+              <p className="text-[11px] text-[var(--color-text-muted)]">
+                {adminCount} activo{adminCount === 1 ? '' : 's'} · invitar / desactivar
+              </p>
+            </div>
+            <span className="text-[var(--color-text-muted)]">→</span>
+          </Link>
+          <Link
+            href="/drivers"
+            className="flex items-center justify-between rounded-md border border-[var(--color-border)] bg-[var(--vf-surface-1)] p-3 text-sm hover:bg-[var(--vf-surface-2)]"
+          >
+            <div>
+              <p className="font-medium text-[var(--color-text)]">
+                🚐 Choferes
+              </p>
+              <p className="text-[11px] text-[var(--color-text-muted)]">
+                {driverCount} activo{driverCount === 1 ? '' : 's'} · alta / baja
+              </p>
+            </div>
+            <span className="text-[var(--color-text-muted)]">→</span>
+          </Link>
+        </div>
+      </Card>
     </>
   );
 }

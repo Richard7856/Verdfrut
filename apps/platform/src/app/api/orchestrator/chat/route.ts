@@ -19,6 +19,7 @@ import {
   type AnthropicMessageParam,
 } from '@tripdrive/orchestrator';
 import { hasFeature, PLAN_LABELS } from '@tripdrive/plans';
+import { consumeAiQuota, QuotaExceededError } from '@/lib/ai-quota';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -151,6 +152,28 @@ export async function POST(req: Request) {
   // Resolver / crear sesión.
   let sessionId = payload.sessionId;
   if (!sessionId) {
+    // ADR-126 Fase 2: consumir 1 cuota de sesión ANTES de crear el row. Si
+    // el customer (Pro) ya pegó al cap mensual, abortamos con 429 sin tocar
+    // la BD. Enterprise (Infinity) siempre pasa.
+    try {
+      await consumeAiQuota('sessions');
+    } catch (err) {
+      if (err instanceof QuotaExceededError) {
+        return Response.json(
+          {
+            error: err.message,
+            code: 'quota_exceeded',
+            kind: err.kind,
+            used: err.used,
+            limit: err.limit,
+            tier: err.tier,
+          },
+          { status: 429 },
+        );
+      }
+      throw err;
+    }
+
     const { data: newSession, error: insErr } = await sessionClient
       .from('orchestrator_sessions')
       .insert({
@@ -222,9 +245,58 @@ export async function POST(req: Request) {
 
   // SSE encoder.
   const encoder = new TextEncoder();
+  // ADR-126: lista de tools mutantes que consumen cuota `writes`. Sincronizada
+  // con la usada en floating-chat para auto-refresh (ADR-120) y con el conteo
+  // del banner en /settings/billing. Si llegan tools nuevas mutantes, agregar
+  // acá y allá. Defensa-in-depth: el RPC consume_ai_quota acepta cualquier
+  // valor positivo, solo el caller decide cuándo llamarlo.
+  const QUOTA_WRITE_TOOLS = new Set<string>([
+    'create_dispatch',
+    'add_route_to_dispatch',
+    'add_stop_to_route',
+    'move_stop',
+    'remove_stop',
+    'publish_dispatch',
+    'cancel_dispatch',
+    'reassign_driver',
+    'bulk_create_stores',
+    'create_store',
+    'update_store',
+    'archive_store',
+    'update_driver',
+    'update_vehicle',
+    'create_zone',
+    'update_zone',
+    'apply_route_plan',
+  ]);
+
   const stream = new ReadableStream({
     async start(controller) {
+      // Tracking de tool_name por tool_use_id para poder decidir si el
+      // tool_use_result corresponde a un WRITE_TOOL (consume cuota).
+      const toolNameByUseId = new Map<string, string>();
+
       const emit = async (event: RunnerEvent) => {
+        // ADR-126: interceptar tool_use_start para recordar el nombre y
+        // tool_use_result para consumir cuota si fue write exitoso.
+        if (event.type === 'tool_use_start') {
+          toolNameByUseId.set(event.tool_use_id, event.tool_name);
+        } else if (event.type === 'tool_use_result') {
+          const toolName = toolNameByUseId.get(event.tool_use_id);
+          const wasOk = event.result?.ok === true;
+          if (toolName && wasOk && QUOTA_WRITE_TOOLS.has(toolName)) {
+            // Consumir 1 write. No bloqueamos el flow si excede — el banner
+            // en /settings/billing avisará al admin. La sesión sigue funcional
+            // para reads. Soft cap = no romper UX en pleno turno del agente.
+            try {
+              await consumeAiQuota('writes');
+            } catch {
+              // Si excede: log silencioso. Decidimos NO interrumpir el SSE
+              // stream porque ya pasó la mutación en BD. Para hard-cap real
+              // habría que checkear ANTES del tool.handler — diferido.
+            }
+          }
+        }
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
       };
 

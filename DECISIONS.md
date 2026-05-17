@@ -6859,6 +6859,65 @@ Adicional: introduce la **"Frecuencia"** como concepto operativo visible, antici
 - apps/platform/src/app/(app)/settings/workbench/workbench-manager.tsx — discovery final.
 
 
+## [2026-05-16] ADR-126: Fase 2 — Cuota AI mensual + billing UX enriquecido
+**Contexto:** La landing promete "300 sesiones/mes" en Pro vs ilimitado en Enterprise (ADR-122 / commits previos), pero el código tenía AI binario (`ai: true/false`) sin contadores. Sin enforcement, un Pro power-user quema margen de la operación sin tope: Sonnet 4.6 cuesta ~MXN $5-15 por sesión típica, 500 sesiones/mes = MXN $2,500-7,500 quemados vs $9,350 base de Pro.
+
+**Decisión:** Implementar cuota mensual de AI con dos métricas distintas (sessions y writes) + UI de consumo visible en `/settings/billing`.
+
+**Schema (migración 055):**
+- `customers.ai_sessions_used_month INTEGER NOT NULL DEFAULT 0` — # sesiones AI iniciadas (1 por chat con ≥1 mensaje).
+- `customers.ai_writes_used_month INTEGER NOT NULL DEFAULT 0` — # WRITE_TOOLS exitosos (los 17 mutantes: create_dispatch, publish_dispatch, etc.). Reads no cuentan.
+- `customers.ai_quota_period_starts_at TIMESTAMPTZ NOT NULL DEFAULT date_trunc('month', now())` — inicio del período actual.
+- `customers.ai_quota_overrides JSONB NULL` — regalos puntuales `{sessions?, writes?}` sin tocar el contrato base (mismo patrón que feature_overrides de ADR-095).
+- RPC `consume_ai_quota(p_customer_id, p_kind)` — incrementa atómicamente vía UPDATE...RETURNING (anti-race entre sesiones concurrentes). SECURITY DEFINER, granted a authenticated + service_role.
+- RPC `reset_ai_quotas_for_period()` — pone ai_*_used_month=0 + avanza periodo al primer del mes. SECURITY DEFINER, solo service_role.
+
+**Tabla de cuotas (`packages/plans`):**
+
+| Tier | Sessions/mes | Writes/mes | Notas |
+|---|---|---|---|
+| Starter | 0 | 0 | AI bloqueado en gate |
+| Pro | 300 | 500 | Cap soft con warning al 80% |
+| Enterprise | ∞ | ∞ | Sin tope |
+
+**Integración:**
+- `lib/ai-quota.ts`: helpers `checkAiQuota(kind)` / `checkAiQuotaBoth()` / `consumeAiQuota(kind)` + `QuotaExceededError`.
+- `/api/orchestrator/chat`: al crear sesión nueva, `consumeAiQuota('sessions')`. Si excede, responde 429 con `{code:'quota_exceeded', kind, used, limit, tier}`. UI muestra mensaje legible.
+- Para writes: wrappers de `emit()` en chat route intercepta eventos `tool_use_result`, mapea por `tool_use_id` al `tool_name` capturado en `tool_use_start`, y si está en `QUOTA_WRITE_TOOLS` set + `result.ok`, llama `consumeAiQuota('writes')`. **Soft-cap:** si excede, log silencioso pero NO interrumpe el stream — la mutación ya pasó en BD, romper el SSE sería peor UX que dejar pasar el último write. Hard-cap real requiere check ANTES del tool.handler (diferido).
+- Cron `/api/cron/reset-ai-quotas` con schedule `5 0 1 * *` (00:05 UTC día 1 cada mes). Auth dual Bearer + x-cron-token igual que cron sync-stripe-seats.
+
+**Billing UX (`/settings/billing`):**
+- Nueva sección "Tu consumo este mes" con 3 cards (`UsageCard` reusable):
+  - Sesiones AI: barra de progreso (verde<60%, ámbar 60-85%, rojo>85%) + footnote "Renueva el X jun" + CTA "Considera Enterprise" si ≥80%.
+  - Acciones AI: igual patrón.
+  - Tiendas activas: vs `maxStoresPerAccount`.
+- Starter ve un card bloqueado "🔒 No incluido en tu plan · Sube a Pro para 300 sesiones/mes".
+- Enterprise (Infinity) ve "♾️ Ilimitado · sin tope mensual" sin barra.
+- Nueva sección "Gestionar equipo" con 2 links a páginas existentes (`/settings/users`, `/drivers`) en lugar de duplicar UI de gestión.
+
+**Alternativas consideradas:**
+1. **Una sola métrica (tokens reales)**: el más justo al costo de Anthropic, pero opaco al user ("¿qué carajos son tokens?"). Descartado por vendibilidad.
+2. **Hard-cap en writes (bloquear el tool antes de ejecutar)**: requiere wrappear cada tool.handler con un check, más invasivo. Soft-cap V1 con monitoring durante 1-2 meses, hard-cap si veo abuso.
+3. **Sin override jsonb**: requeriría editar tier o monthly_fee_mxn para regalar cuota puntual. Override es más flexible (mismo patrón que feature_overrides).
+4. **Cron diario en lugar de mensual**: overkill — la cuota es mensual por contrato, basta resetear el 1ro.
+5. **Tabla separada `ai_quota_usage` con histórico**: util para reportería pero V1 con counters en `customers` row es suficiente. Migrar a tabla cuando necesitemos history (analytics).
+
+**Riesgos/Limitaciones:**
+- Sessions counter incrementa al crear sesión nueva (sin sessionId en payload). Si el client reusa sessionId activo, no se cuenta. Esperado — refresh del browser con misma sesión no debería pagar de nuevo.
+- Race condition: 2 sesiones concurrentes desde mismo customer dispararían 2 UPDATE...RETURNING. Postgres serializa la fila, sin race real. Pero el check de cuota ocurre DESPUÉS del UPDATE, así que ambas pueden pasar si están al borde del cap. Soft-cap: ambas se procesan, cap se excede por 1-2. Aceptable.
+- Writes soft-cap dejaría pasar el último write incluso si excede. Mitigable con hard-cap (diferido).
+- `consume_ai_quota` usa `createServiceRoleClient` desde `ai-quota.ts` porque el caller del chat es admin/dispatcher pero el RPC necesita escribir en `customers` (RLS lo bloquearía con sesión normal). Aceptable — el RPC valida internamente p_customer_id; el caller no puede inyectar customer ajeno porque `readCallerCustomerQuota` resuelve via auth.uid().
+- Si RPC `consume_ai_quota` falla (Supabase 5xx), NO bloqueamos al user — over-deliver vs tirar el chat por un error de telemetría. Log silencioso.
+- Si admin entra a `/settings/billing` justo cuando otro admin del mismo customer crea sesión, los contadores leídos pueden estar atrasados 1-2s. Tolerable.
+
+**Improvement opportunities:**
+- Página `/settings/billing/ai-history`: lista últimas 100 sesiones con timestamp, # turns, # writes, costo MXN estimado. Útil cuando el cliente reclame consumo.
+- Hard-cap en writes: agregar `await checkAiQuota('writes')` antes de `tool.handler` en `runner.ts`. Si excede, devolver `{ok:false, error:'cuota agotada'}` como tool_result.
+- Telemetría: tag Sentry `feature_cap_hit` con tier + kind cuando un user pega al 80% / 100%. Útil para ajustar caps con data real.
+- Banner UI en floating-chat cuando consumo ≥80% (no solo en /settings/billing).
+- Email semanal al admin con resumen de consumo + advertencia si va al 70% antes de día 20 del mes.
+- Telemetría por modelo (Sonnet vs Opus si entra Enterprise con Workbench AI predictivo en futuro).
+
 ## [2026-05-16] ADR-125: Chofer customiza orden tappeando en mapa + km ocultos
 **Contexto:** Cliente NETO pidió 2 cambios en la app de chofer: (1) al abrir una ruta nueva, el chofer debe ver el mapa con paradas y poder tappear los pines en el orden que prefiera, pero también ver el orden sugerido por el optimizer por si lo quiere aceptar tal cual; (2) ocultar todos los km del display del chofer — trabajan por paradas y tiempo, no kilometraje.
 

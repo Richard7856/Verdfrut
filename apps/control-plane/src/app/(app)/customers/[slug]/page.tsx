@@ -53,6 +53,8 @@ const TIER_LABEL: Record<CustomerTier, string> = PLAN_LABELS;
 
 const FEATURE_LABEL_SHORT: Record<FeatureKey, string> = {
   ai: 'Asistente AI',
+  maxAiSessionsPerMonth: 'Sesiones AI/mes',
+  maxAiWritesPerMonth: 'Acciones AI/mes',
   maxAccounts: 'Cuentas operativas',
   maxStoresPerAccount: 'Tiendas por cuenta',
   customDomain: 'Dominio propio',
