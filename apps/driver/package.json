@@ -14,6 +14,7 @@
     "@sentry/nextjs": "^8.55.2",
     "@tripdrive/ai": "workspace:*",
     "@tripdrive/maps": "workspace:*",
+    "mapbox-gl": "^3.7.0",
     "@tripdrive/observability": "workspace:*",
     "@tripdrive/supabase": "workspace:*",
     "@tripdrive/types": "workspace:*",

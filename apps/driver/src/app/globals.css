@@ -1,5 +1,12 @@
 @import '@tripdrive/ui/tokens.css';
 @import 'tailwindcss';
+/* ADR-127 (2026-05-17): mapbox-gl.css es OBLIGATORIO para que la proyección
+   lng/lat→pixel funcione. Sin esto, los markers caen ~0.8° al sur (offset
+   del canvas mal dimensionado) y la consola advierte "missing CSS
+   declarations for Mapbox GL JS". El platform app ya lo tenía; el driver
+   no — bug visible en /route/accept como pines en Guerrero/Morelos
+   cuando los stops son CDMX. */
+@import 'mapbox-gl/dist/mapbox-gl.css';
 /* Tailwind v4 detecta clases solo en el paquete actual por default. Sin esto,
    las clases arbitrarias usadas en @tripdrive/ui (ej. bg-[var(--color-primary-600)])
    no generan CSS y los botones primary quedan transparentes. */

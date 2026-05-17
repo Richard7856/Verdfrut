@@ -7105,3 +7105,65 @@ Forzar la creación de un tiro antes de cada ruta crea fricción: el dispatcher 
 
 
 
+
+---
+
+## [2026-05-17] ADR-127: Driver app — endurecer flow de aceptación de orden
+
+**Contexto:** Después de publicar ADR-125 (pantalla `/route/accept`), el primer chofer real reportó que los pines del mapa desaparecían tras un re-render y, en algunos casos, aparecían fuera del bbox visible. Investigación reveló dos bugs reales: (1) el código intentaba reemplazar el elemento DOM del marker via `element.replaceWith(newEl)`, lo cual borraba el `transform: translate(...)` que Mapbox aplica para posicionar el pin — el marker quedaba en (0,0) o sin renderear. (2) Postgres `numeric` (lat/lng) llegaba como **string** a través de supabase-js, y aunque TypeScript decía `number`, `mapboxgl.setLngLat([str, str])` no proyectaba bien — los pines quedaban fuera del viewport.
+
+**Decisión:** Dos fixes acoplados:
+1. **Marker re-creation total** en lugar de mutar el DOM: cada cambio de `mode` o `customOrder` destruye los markers viejos (`marker.remove()`) y crea nuevos desde cero. O(N) por render pero N ≤ 30 stops, costo trivial.
+2. **`Number()` defensivo** en TODAS las capas donde recibimos lat/lng: server page (`lat: Number(row.store.lat)`), client bbox calc, y antes de `setLngLat`. Más `Number.isFinite()` filter para saltar puntos corruptos en vez de reventar el bbox.
+
+Bonus: cuando no hay paradas la pantalla muestra mensaje en lugar de quedar en blanco, y cuando todas las coords son inválidas seteamos error explícito.
+
+**Alternativas consideradas:**
+- *Mutar el `Marker` existente con `setLngLat` y cambiar solo el contenido del elemento DOM*: descartado porque el contenido cambia de estructura (badge con número vs sin número, color, cursor pointer/default), y mantener una API "diff DOM" agregaba complejidad sin ganancia perceptible.
+- *Tipear `Store.lat`/`Store.lng` como `string | number` y propagar en toda la cadena*: rechazado. Lying en TypeScript era el problema; arreglarlo en la frontera (querie/server boundary) con `Number()` es más limpio que envenenar todos los call sites con coerción defensiva.
+- *Migrar columnas a `double precision`*: opción real a largo plazo, pero migrar lat/lng en una BD viva con RLS + triggers es riesgoso y no soluciona el patrón general (todas las columnas numeric tienen el mismo problema).
+
+**Riesgos / Limitaciones:**
+- Re-crear N markers en cada cambio de mode podría volverse caro a N=200+; hoy no aplica (rutas típicas 5-30 stops).
+- `Number()` silencioso: si lat/lng llega como `"abc"`, `Number("abc")` = `NaN` y el filtro lo descarta. El stop queda invisible en el mapa pero NO emitimos error visible — habría que loguear a Sentry si descartamos algún punto. Pendiente.
+
+**Oportunidades de mejora:**
+- Mover el `Number()` coerción al mapper `toStore()` en `lib/queries/route.ts` (y a `toRoute`, `toDispatch` para depot_lat/lng) — un solo lugar, no propagar.
+- Sentry warn si descartamos un stop por NaN.
+
+**Refs:**
+- ADR-125 — pantalla original `/route/accept`.
+- apps/driver/src/app/route/accept/accept-route-flow.tsx — marker re-creation.
+- apps/driver/src/app/route/accept/page.tsx — `Number()` server-side.
+
+---
+
+## [2026-05-17] ADR-128: Driver app — importar mapbox-gl.css en globals (root cause del "pines en Morelos")
+
+**Contexto:** Tras ADR-127, el chofer real reportaba que los pines aparecían visualmente en Guerrero/Morelos (~lat 18.4) cuando las coords reales eran CDMX/Tláhuac (~lat 19.3). Console del navegador confirmaba que `Number()` aplicaba, que `setLngLat()` recibía floats correctos, que `map.getCenter()` retornaba el centro esperado y que `map.getZoom()` retornaba 12. PERO los tiles renderizados mostraban Iguala/Sierra de Huautla/Copalillo y los markers caían encima de eso. Pasamos por 4 iteraciones (`fitBounds` → `setCenter+setZoom` → `mapboxgl.LngLat()` explícito → `map.resize()`) sin resolver, hasta que el screenshot del usuario reveló un warning del DevTools: **"This page appears to be missing CSS declarations for Mapbox GL JS, which may cause the map to display incorrectly."**
+
+Root cause: el driver app NO importaba `mapbox-gl/dist/mapbox-gl.css`. El platform app sí lo hacía (en su `globals.css`), pero al crear el driver app nadie portó la importación. Sin la CSS, `.mapboxgl-canvas` no recibe el sizing absoluto correcto, el contenedor calcula una proyección rota, y los markers se posicionan con un offset sistemático (~0.8° latitud en este caso, suficiente para mover CDMX → Morelos).
+
+**Decisión:** Importar `'mapbox-gl/dist/mapbox-gl.css'` en `apps/driver/src/app/globals.css`, y agregar `mapbox-gl: "^3.7.0"` como dep directa de `apps/driver/package.json` para que la resolución pnpm con `node-linker=isolated` funcione robustamente (no depender de hoisting accidental). Versión coincide con la del wrapper `@tripdrive/maps`.
+
+**Alternativas consideradas:**
+- *Importar la CSS dentro del wrapper `@tripdrive/maps`*: rechazado porque mezclar JS+CSS en un package que se importa con `import { mapboxgl } from '@tripdrive/maps'` complica los build pipelines (Next.js/Tailwind v4) y obliga a las apps a procesar CSS de un paquete que típicamente solo expone JS. Cada app importa sus propias CSS en `globals.css` — patrón estándar en este monorepo.
+- *Bundlear la CSS via `@import` desde el wrapper*: equivalente al anterior, mismo problema.
+- *Inline-injectar la CSS via JS en `setMapboxToken`*: hack feo, costo de runtime, no funciona bien con SSR.
+- *Detectar la ausencia de CSS en runtime y warn*: Mapbox YA lo hace (es el warning que nos rescató). Suficiente.
+
+**Riesgos / Limitaciones:**
+- Cualquier app NUEVA del monorepo que use mapas debe acordarse de importar la CSS. Hoy son 2 apps (platform + driver). Si crece, vale la pena un eslint custom rule o un check en CI.
+- Si Mapbox v4 cambia la API de la CSS (renombra el archivo, cambia el path), la importación se rompe silenciosamente y los pines vuelven a caer mal. Mitigación: fijar major en `^3.7.0` y revisar al upgrade.
+- 4 commits de diagnóstico (`5b4eed9`, `d3e29f9`, `fec8755`, `e45158f`, `53a48c7`) quedaron en main. No reverteamos para preservar la trazabilidad de cómo llegamos al diagnóstico — útil si vuelve a pasar.
+
+**Oportunidades de mejora:**
+- Smoke test E2E (Playwright) que abra `/route/accept` con una ruta seed conocida y verifique que `map.getBounds()` cubre las coords esperadas dentro de tolerancia. Detectaría regresiones de proyección automáticamente.
+- Lint rule custom (`@tripdrive/eslint-plugin/require-mapbox-css`): si el archivo importa `from '@tripdrive/maps'` y el `globals.css` del app no contiene `'mapbox-gl/dist/mapbox-gl.css'`, error.
+- Documentar en `packages/maps/README.md` el requisito de CSS para futuros consumers.
+
+**Refs:**
+- apps/driver/src/app/globals.css — fix (línea de @import).
+- apps/driver/package.json — mapbox-gl como dep directa.
+- apps/platform/src/app/globals.css — patrón original (ya lo hacía).
+- Mapbox docs: https://docs.mapbox.com/mapbox-gl-js/guides/install/

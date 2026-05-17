@@ -8,6 +8,15 @@
 // cada vez que cambia mode o customOrder. Además agregamos el depot
 // (CEDIS) como pin verde sin número.
 //
+// ADR-128 (fix 2026-05-17): el bug visible era pines ~0.8° al sur de
+// su coord real (CDMX rendereado en Morelos). Root cause: faltaba
+// `mapbox-gl/dist/mapbox-gl.css` en globals.css del driver app — sin
+// la CSS, el canvas no toma el tamaño correcto y la proyección
+// lng/lat→pixel queda corrida. Fix permanente en globals.css + dep
+// directa de mapbox-gl en package.json. Conservamos `Number()` defensivo
+// porque Postgres numeric llega como string y eso seguiría siendo bug
+// si alguien quita la coerción.
+//
 // Pantalla full-screen con mapa Mapbox + barra inferior de acciones. El chofer:
 //
 //   1. Ve el mapa con todas las paradas marcadas con números (orden sugerido)
@@ -72,9 +81,6 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
   const [customOrder, setCustomOrder] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  // DIAGNÓSTICO v5: estado live del mapa, se muestra en la franja amber.
-  // Update on moveend/zoomend para ver qué Mapbox REALMENTE está mostrando.
-  const [mapDiag, setMapDiag] = useState<string>('init…');
 
   // Stops pending vs no-pending. El flow solo permite re-ordenar pending —
   // las completadas/arrived/skipped mantienen su orden histórico.
@@ -88,26 +94,6 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
       return;
     }
     setMapboxToken(mapboxToken);
-
-    // DIAGNÓSTICO ADR-127: logs para confirmar qué coords llegan al client.
-    // Si user reporta pines fuera de lugar, abrir DevTools Console y revisar.
-    // Quitar estos logs cuando el bug esté confirmado resuelto.
-    // eslint-disable-next-line no-console
-    console.log('[accept-route] stops recibidos:', stops.map((s) => ({
-      code: s.storeCode,
-      lat: s.lat,
-      lng: s.lng,
-      latType: typeof s.lat,
-      lngType: typeof s.lng,
-    })));
-    // eslint-disable-next-line no-console
-    console.log('[accept-route] depot recibido:', depot ? {
-      code: depot.code,
-      lat: depot.lat,
-      lng: depot.lng,
-      latType: typeof depot.lat,
-      lngType: typeof depot.lng,
-    } : null);
 
     // Compute bounds incluyendo paradas + depot. Si solo hay 1 punto o están
     // todos en la misma coord, expandimos artificialmente para evitar zoom 22.
@@ -145,75 +131,29 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
       minLat = center - 0.005;
       maxLat = center + 0.005;
     }
-    // Guardamos el bbox para refit después de map.on('load') — el constructor
-    // bounds a veces se ignora si el contenedor cambió de tamaño antes del 'load'.
+    // bounds [SW, NE] para el fitBounds inicial — agrupa stops + depot.
     const computedBounds: [[number, number], [number, number]] = [
       [minLng, minLat],
       [maxLng, maxLat],
     ];
 
-    // ADR-127 fix v4: NO bounds en el constructor — usar setCenter/setZoom
-    // en map.on('load') para evitar conflicto con el fitBounds del init.
     const map = new mapboxgl.Map({
       container: containerRef.current,
       style: 'mapbox://styles/mapbox/streets-v12',
-      // Centro inicial = centro de los puntos (se ajusta de nuevo en load).
-      center: [(minLng + maxLng) / 2, (minLat + maxLat) / 2],
-      zoom: 11,
+      bounds: computedBounds,
+      fitBoundsOptions: { padding: 60 },
       attributionControl: false,
     });
 
     mapRef.current = map;
-    // ADR-125 fix v4: bypass fitBounds, usar setCenter + setZoom directo.
-    // fitBounds tiene comportamiento sospechoso (pines aparecían 0.37° al sur).
-    // Calculamos manualmente el centro de los puntos y un zoom razonable.
-    const centerLng = (minLng + maxLng) / 2;
-    const centerLat = (minLat + maxLat) / 2;
-    // Zoom basado en spread: spread chico (1-5km) = zoom 13-14, mayor = zoom 12.
-    const spreadKm = Math.max(
-      (maxLng - minLng) * 111 * Math.cos((centerLat * Math.PI) / 180),
-      (maxLat - minLat) * 111,
-    );
-    const targetZoom = spreadKm < 2 ? 14 : spreadKm < 5 ? 13 : spreadKm < 15 ? 12 : 11;
-
-    // DIAGNÓSTICO ADR-127: log de lo que vamos a aplicar a Mapbox.
-    // eslint-disable-next-line no-console
-    console.log('[accept-route] map config:', {
-      computedBounds,
-      centerLng,
-      centerLat,
-      spreadKm,
-      targetZoom,
-    });
-
-    // v5: helper para volcar estado live del mapa a la franja diagnóstica.
-    // Si Mapbox dice "estoy en CDMX" pero los tiles muestran Guerrero,
-    // este texto lo va a evidenciar sin necesidad de DevTools.
-    const dumpDiag = (label: string) => {
-      const c = map.getCenter();
-      const z = map.getZoom();
-      const b = map.getBounds();
-      const sw = b?.getSouthWest();
-      const ne = b?.getNorthEast();
-      setMapDiag(
-        `${label} center=(${c.lat.toFixed(4)},${c.lng.toFixed(4)}) z=${z.toFixed(2)} ` +
-        `bbox SW(${sw?.lat.toFixed(3)},${sw?.lng.toFixed(3)}) NE(${ne?.lat.toFixed(3)},${ne?.lng.toFixed(3)})`,
-      );
-    };
 
     const handleMapLoaded = () => {
-      // v5 fix: resize() obliga a Mapbox a recomputar la proyección con el
-      // tamaño REAL del contenedor. Si el contenedor era 0×0 al construir
-      // (flex aún sin computar), la proyección quedaba podrida y setCenter/
-      // setZoom se interpretaban contra ese viewport fantasma.
+      // resize() defensivo: si el contenedor cambió de tamaño entre construct
+      // y load (flex recomputando), forzamos recálculo de la proyección.
       map.resize();
-      map.setCenter([centerLng, centerLat]);
-      map.setZoom(targetZoom);
-      dumpDiag('LOAD');
-      // v5: cualquier move/zoom posterior actualiza la franja — si algo
-      // pisa setCenter después, lo vemos en vivo.
-      map.on('moveend', () => dumpDiag('MOVE'));
-      map.on('zoomend', () => dumpDiag('ZOOM'));
+      // Re-fit bounds en load para asegurar que el padding aplique con el
+      // tamaño REAL del contenedor (no el inicial que pudo ser 0×0).
+      map.fitBounds(computedBounds, { padding: 60, animate: false });
       setMapReady(true);
     };
     if (map.loaded()) {
@@ -221,18 +161,6 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
     } else {
       map.on('load', handleMapLoaded);
     }
-
-    // v5: marker rojo de REFERENCIA en el Zócalo CDMX (19.4326, -99.1332).
-    // Es una coord conocida, hard-coded. Si en pantalla cae sobre el Zócalo
-    // de verdad → Mapbox proyecta bien → bug en nuestros datos. Si cae sobre
-    // Guerrero o cualquier otro lado → bug de proyección/contenedor.
-    const refEl = document.createElement('div');
-    refEl.style.cssText =
-      'width:24px;height:24px;border-radius:50%;background:#dc2626;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,.4);';
-    refEl.title = 'REF: Zócalo CDMX (19.4326,-99.1332)';
-    new mapboxgl.Marker({ element: refEl, anchor: 'center' })
-      .setLngLat(new mapboxgl.LngLat(-99.1332, 19.4326))
-      .addTo(map);
 
     return () => {
       // Cleanup markers explícitos antes de remover el map.
@@ -263,19 +191,16 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
     stopMarkersRef.current.clear();
 
     // Depot solo se monta una vez (no depende del mode).
-    // ADR-127 v4: usar mapboxgl.LngLat() explícito en vez de array — más
-    // determinista (algunos paths del SDK aceptan array pero interpretan
-    // [lng, lat] vs [lat, lng] inconsistentemente entre versiones).
+    // Number() defensivo: Postgres numeric llega como string en supabase-js
+    // (ADR-127). Sin coerción, mapbox no proyecta y los pines salen del bbox.
     if (depot && !depotMarkerRef.current) {
       const depotLng = Number(depot.lng);
       const depotLat = Number(depot.lat);
       if (Number.isFinite(depotLng) && Number.isFinite(depotLat)) {
         const depotEl = createDepotMarkerElement(depot);
         depotMarkerRef.current = new mapboxgl.Marker({ element: depotEl, anchor: 'bottom' })
-          .setLngLat(new mapboxgl.LngLat(depotLng, depotLat))
+          .setLngLat([depotLng, depotLat])
           .addTo(map);
-        // eslint-disable-next-line no-console
-        console.log('[accept-route] depot marker @', depotLng, depotLat);
       }
     }
 
@@ -290,11 +215,9 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
         el.addEventListener('click', () => handleTapStop(stop.stopId));
       }
       const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
-        .setLngLat(new mapboxgl.LngLat(stopLng, stopLat))
+        .setLngLat([stopLng, stopLat])
         .addTo(map);
       stopMarkersRef.current.set(stop.stopId, marker);
-      // eslint-disable-next-line no-console
-      console.log('[accept-route] stop marker', stop.storeCode, '@', stopLng, stopLat);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, mode, customOrder]);
@@ -373,22 +296,6 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
             : `tappeaste ${tappedCount} de ${totalPending}`}
         </p>
       </header>
-
-      {/* DIAGNÓSTICO ADR-127: strip visible con coords reales. Quitar cuando
-          el bug esté confirmado resuelto en producción. */}
-      <div className="border-b border-amber-400 bg-amber-50 px-3 py-1.5 text-[10px] leading-tight text-amber-900 font-mono">
-        <div>build: v5 (resize+ref+bbox visible)</div>
-        <div>
-          stops: {stops.map((s) => `${s.storeCode}(${s.lat},${s.lng})`).join(' | ')}
-        </div>
-        {depot && (
-          <div>
-            depot: {depot.code}({depot.lat},{depot.lng})
-          </div>
-        )}
-        <div>map: {mapDiag}</div>
-        <div>🔴 REF rojo = Zócalo CDMX (19.4326,-99.1332)</div>
-      </div>
 
       {/* Mapa fullscreen */}
       <div className="relative flex-1 min-h-0">
