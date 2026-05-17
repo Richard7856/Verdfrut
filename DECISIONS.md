@@ -7202,3 +7202,38 @@ Razón de poner el PRIMER tap arriba: cuando el chofer se equivoca al ordenar, c
 - ADR-125 — pantalla original `/route/accept`.
 - ADR-127, ADR-128 — fixes previos en el mismo componente.
 - apps/driver/src/app/route/accept/accept-route-flow.tsx — implementación.
+
+---
+
+## [2026-05-17] ADR-130: Driver app — pines locked con feedback explícito en /route/accept
+
+**Contexto:** Tras ADR-129 (z-index), el chofer reportó que "la primera parada no se deja modificar". Inspección del screenshot reveló que NO era un problema de z-index — había 3 pines visibles: 2 verdes tappeados (sus 2 paradas pendientes) y 1 GRIS con número "1" (una parada con status `arrived`/`completed`/`skipped` arrastrada de un test previo). El chofer tappeaba el pin gris pensando que era "la primera parada" porque mostraba "1" prominentemente. El pin no respondía porque el código solo conectaba click handler a paradas `pending`, sin feedback al chofer de POR QUÉ no respondía.
+
+Causa raíz dual: (a) el `/route/accept` flow no debería mostrar paradas non-pending — si ya hay paradas iniciadas el chofer ya pasó este flow, pero la página no filtra; (b) aunque hubiera paradas non-pending, el chofer merece feedback visual claro de "locked".
+
+**Decisión:** Dos cambios coordinados:
+1. **Visual**: pin no-pending ahora muestra 🔒 (candado) con fondo más oscuro (slate-500) y opacidad 0.7. Antes era slate-400 con el número de `suggestedSequence`, indistinguible de un pin "pending sin tappear" para chofer ojo no entrenado.
+2. **Interacción**: click en pin no-pending dispara `setError("La parada X ya está {status}. No se puede mover.")`. El mensaje aparece en la barra inferior junto al botón Guardar. Cursor cambia a `not-allowed`. `title` HTML para tooltip en desktop.
+
+Adicionalmente, agregamos `e.stopPropagation()` en TODOS los click handlers de pines (pending y locked) como defensa preventiva — evita que Mapbox interprete el tap como pan/drag del mapa cuando el handler tarda en ejecutar.
+
+**Alternativas consideradas:**
+- *Filtrar non-pending del mapa entirely en `/route/accept`*: tentador (los non-pending no deberían existir en este flow), pero esconde contexto útil — si el chofer está modificando una ruta que YA inició, ver el progreso es informativo. Más importante: defensa en profundidad, mejor manejar el caso que pretender que no existe.
+- *Redirect a `/route` si DETECTA stops non-pending*: cambia silenciosamente el flow del chofer. Riesgo de loop si los datos son inconsistentes. Descartado.
+- *Permitir reordenar non-pending*: rompe la semántica del producto. Un stop ya completado no puede "moverse" en el orden — ya pasó.
+- *Solo el icono sin mensaje de error*: el chofer puede no entender el candado. Mensaje explícito es importante para la primera vez.
+
+**Riesgos / Limitaciones:**
+- El `setError` se acumula con otros errores que pudiera tener el chofer (ej: falta tappear paradas). Solo el último persiste. Aceptable.
+- El emoji 🔒 puede renderearse distinto en algunos OS/browsers — Apple vs Material vs Twitter design. No crítico, todos se entienden.
+- Si una ruta tiene MUCHAS paradas non-pending mezcladas con pending, el mapa puede saturarse de candados. UX visualmente cargada. Mitigación futura: filtrar non-pending si son >2 del total, o agruparlas en una lista lateral.
+
+**Oportunidades de mejora:**
+- En `/route/accept/page.tsx`, hacer `stops.filter(s => s.status === 'pending')` antes de pasar al client component. Más limpio que renderizar locked en un flow que no debería incluirlos.
+- Animación shake del pin cuando se intenta tappear locked, para reforzar el "no" visualmente.
+- Pasar el chat-action button como CTA del error: "¿Necesitas reordenar una parada en proceso? Reporta a tu encargado."
+
+**Refs:**
+- ADR-125 — `/route/accept` original.
+- ADR-127, ADR-128, ADR-129 — fixes previos en el mismo componente.
+- apps/driver/src/app/route/accept/accept-route-flow.tsx — implementación.

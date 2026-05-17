@@ -218,22 +218,17 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
     // Stops: crear marker fresh con el elemento del mode actual.
     //
     // ADR-129 (2026-05-17): z-index explícito para resolver "no puedo
-    // tappear el pin debajo cuando se traslapan". Mapbox apila markers
-    // según orden DOM (last-added on top). Cuando 2 paradas están a
-    // <1km de distancia, sus pines se traslapan a zoom 12-14 y el de
-    // arriba captura todos los clicks. El reporte concreto fue
-    // "no puedo modificar pin 1, solo los que siguen" — pin 1 era el
-    // PRIMERO tappeado y quedaba debajo del segundo tap, sin poder
-    // deseleccionar para corregir el orden.
+    // tappear el pin debajo cuando se traslapan". Heurística: primer-tap
+    // arriba, taps siguientes bajan en z, untapped al fondo (encima del
+    // depot). El primer-tap arriba porque la queja típica es "me equivoqué
+    // en mi primera decisión".
     //
-    // Heurística: el primer-tappeado va arriba, taps siguientes bajan
-    // en z. Razón: cuando el chofer se da cuenta que se equivocó, casi
-    // siempre quiere corregir su PRIMERA decisión (el resto fluyó de
-    // ahí). Los untapped quedan al fondo, encima del depot.
-    //
-    // Long-term fix sería spread-on-overlap (offset visual + leader
-    // lines), pero requiere bastante UX y no aplica para el caso típico
-    // de N≤30 stops donde traslapes son raros.
+    // ADR-130 (2026-05-17): pines no-pending (arrived/completed/skipped)
+    // ahora muestran un candado y dan feedback al tappear ("ya está en
+    // proceso, no se puede reordenar"). Antes eran clickeables silenciosos
+    // — el chofer veía un pin con número "1" gris y no entendía por qué
+    // no respondía. stopPropagation en todos los handlers para que Mapbox
+    // no interprete el tap como pan/drag.
     for (const stop of stops) {
       const stopLng = Number(stop.lng);
       const stopLat = Number(stop.lat);
@@ -244,12 +239,33 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
         // Tappeado: el primer tap (idx 0) tiene el z más alto.
         el.style.zIndex = String(1000 - tapIdx);
       } else {
-        // Untapped pending: encima del depot (50) pero debajo de cualquier tapped.
+        // Untapped pending y no-pending: encima del depot, debajo de tappeados.
         el.style.zIndex = '100';
       }
       if (mode === 'custom' && stop.status === 'pending') {
         el.style.cursor = 'pointer';
-        el.addEventListener('click', () => handleTapStop(stop.stopId));
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          handleTapStop(stop.stopId);
+        });
+      } else if (mode === 'custom' && stop.status !== 'pending') {
+        // Pin locked — explicar por qué no se puede mover. Sin esto el
+        // chofer tappea y no pasa nada, sin entender la razón.
+        el.style.cursor = 'not-allowed';
+        const statusLabel =
+          stop.status === 'completed'
+            ? 'completada'
+            : stop.status === 'arrived'
+              ? 'en proceso'
+              : 'saltada';
+        el.title = `Esta parada ya está ${statusLabel}. No se puede reordenar.`;
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setError(
+            `La parada "${stop.storeCode}" ya está ${statusLabel} y no se puede mover. ` +
+              `Solo puedes reordenar las paradas que están pendientes.`,
+          );
+        });
       }
       const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
         .setLngLat([stopLng, stopLat])
@@ -487,10 +503,16 @@ function createStopMarkerElement(
   `;
   el.title = `${stop.storeCode} · ${stop.storeName}`;
 
-  // No-pending: gris siempre con sequence original (no se puede mover).
+  // No-pending: gris siempre con sequence original + candado overlay.
+  // ADR-130: el candado distingue visualmente del pin gris untapped que
+  // podría existir en suggested mode (aunque ese case no aplica realmente).
+  // Más importante: comunica "esta parada está locked, no es interactiva".
+  // El número se mantiene chico abajo del candado para preservar contexto.
   if (stop.status !== 'pending') {
-    el.style.background = '#94a3b8';
-    el.textContent = String(stop.suggestedSequence);
+    el.style.background = '#64748b'; // slate-500, más oscuro = "muerto"
+    el.style.opacity = '0.7';
+    el.textContent = '🔒';
+    el.style.fontSize = '16px';
     return el;
   }
 
