@@ -52,22 +52,30 @@ export function StopHeader({ stop, store }: Props) {
         </div>
       </div>
       <div className="flex flex-wrap gap-2 px-4 pb-3 text-xs">
-        <a
-          href={mapsUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="rounded-[var(--radius-md)] bg-[var(--vf-surface-2)] px-3 py-1.5 text-[var(--color-text)]"
-        >
-          🗺 Maps
-        </a>
-        <a
-          href={wazeUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="rounded-[var(--radius-md)] bg-[var(--vf-surface-2)] px-3 py-1.5 text-[var(--color-text)]"
-        >
-          🚗 Waze
-        </a>
+        {/* ADR-127: Maps/Waze solo en pre-llegada (pending). Cuando el chofer
+            ya marcó 'arrived' o terminó (completed/skipped), navegación deja
+            de ser relevante y solo confunde. Reportar problema sigue accesible
+            siempre — puede pasar algo durante la entrega. */}
+        {stop.status === 'pending' && (
+          <>
+            <a
+              href={mapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-[var(--radius-md)] bg-[var(--vf-surface-2)] px-3 py-1.5 text-[var(--color-text)]"
+            >
+              🗺 Maps
+            </a>
+            <a
+              href={wazeUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded-[var(--radius-md)] bg-[var(--vf-surface-2)] px-3 py-1.5 text-[var(--color-text)]"
+            >
+              🚗 Waze
+            </a>
+          </>
+        )}
         <Link
           href={`/route/stop/${stop.id}/chat`}
           className="rounded-[var(--radius-md)] bg-[var(--color-warning-bg)] px-3 py-1.5 text-[var(--color-warning-fg)] font-medium"

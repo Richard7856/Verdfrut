@@ -1,6 +1,9 @@
 'use client';
 
-// Step — Foto del mueble una vez acomodado el producto. DOS fotos.
+// Step — Foto del mueble una vez acomodado el producto.
+// ADR-127 (2026-05-17): basta UNA foto para avanzar. La segunda es opcional.
+// Mismo criterio que arrival-exhibit — los choferes pierden ~30s extra por
+// parada cuando se les pide 2 fotos a fuerzas.
 
 import { useState } from 'react';
 import { StepShell } from '../step-shell';
@@ -13,12 +16,13 @@ export function ProductArrangedStep(props: StepProps) {
     () => new Set(Object.keys(report.evidence)),
   );
 
-  const ready = savedKeys.has('product_arranged') && savedKeys.has('product_arranged_2');
+  // ADR-127: ready con UNA foto. La segunda queda como opt-in.
+  const ready = savedKeys.has('product_arranged');
 
   return (
     <StepShell
       title="Producto acomodado"
-      description="Sube dos fotos del mueble después de acomodar el producto."
+      description="Sube una foto del mueble con el producto acomodado. Puedes agregar otra si quieres documentar más detalle."
       onContinue={() => advanceTo(nextOf({}))}
       continueDisabled={!ready}
       pending={pending}
@@ -33,7 +37,7 @@ export function ProductArrangedStep(props: StepProps) {
           slot="product_arranged"
           userId={userId}
           existingUrl={report.evidence['product_arranged'] ?? null}
-          label="Foto frontal"
+          label="Foto del producto acomodado"
           onQueued={() => setSavedKeys((s) => new Set(s).add('product_arranged'))}
         />
         <PhotoInput
@@ -44,7 +48,7 @@ export function ProductArrangedStep(props: StepProps) {
           slot="product_arranged_2"
           userId={userId}
           existingUrl={report.evidence['product_arranged_2'] ?? null}
-          label="Foto general"
+          label="Foto adicional (opcional)"
           onQueued={() => setSavedKeys((s) => new Set(s).add('product_arranged_2'))}
         />
       </div>

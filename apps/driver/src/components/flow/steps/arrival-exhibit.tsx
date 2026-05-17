@@ -1,7 +1,9 @@
 'use client';
 
 // Step 1 — Foto del mueble/exhibidor a la llegada.
-// Pide DOS fotos (vista frontal y lateral/general) — convención del prototipo Verdefrut.
+// ADR-127 (2026-05-17): basta UNA foto del exhibidor para avanzar. La segunda
+// es opcional (algunos clientes la quieren — la dejamos pero no bloquea).
+// Antes pedía 2 obligatorias y eso retrasaba al chofer en cada parada.
 
 import { useState } from 'react';
 import { StepShell } from '../step-shell';
@@ -16,12 +18,13 @@ export function ArrivalExhibitStep(props: StepProps) {
     () => new Set(Object.keys(report.evidence)),
   );
 
-  const ready = savedKeys.has('arrival_exhibit') && savedKeys.has('arrival_exhibit_2');
+  // ADR-127: ready con UNA foto. La segunda queda como opt-in opcional.
+  const ready = savedKeys.has('arrival_exhibit');
 
   return (
     <StepShell
       title="Foto del exhibidor"
-      description="Sube dos fotos del mueble como lo encontraste al llegar (frontal + general)."
+      description="Sube una foto del mueble como lo encontraste al llegar. Puedes agregar una segunda si quieres documentar otro ángulo."
       onContinue={() => advanceTo(nextOf({}))}
       continueDisabled={!ready}
       pending={pending}
@@ -36,7 +39,7 @@ export function ArrivalExhibitStep(props: StepProps) {
           slot="arrival_exhibit"
           userId={userId}
           existingUrl={report.evidence['arrival_exhibit'] ?? null}
-          label="Foto frontal"
+          label="Foto del exhibidor"
           onQueued={() => setSavedKeys((s) => new Set(s).add('arrival_exhibit'))}
         />
         <PhotoInput
@@ -47,7 +50,7 @@ export function ArrivalExhibitStep(props: StepProps) {
           slot="arrival_exhibit_2"
           userId={userId}
           existingUrl={report.evidence['arrival_exhibit_2'] ?? null}
-          label="Foto general"
+          label="Foto adicional (opcional)"
           onQueued={() => setSavedKeys((s) => new Set(s).add('arrival_exhibit_2'))}
         />
       </div>

@@ -78,7 +78,7 @@ export default async function RoutePage() {
   const reportProblemStopId = nextStopId ?? stops[0]?.stop.id ?? null;
 
   return (
-    <main className="min-h-dvh bg-[var(--vf-bg)] safe-top safe-bottom">
+    <main className="min-h-dvh overflow-x-hidden bg-[var(--vf-bg)] safe-top safe-bottom">
       <header className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
         <div className="flex items-center gap-2.5">
           <Image

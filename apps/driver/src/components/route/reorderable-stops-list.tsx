@@ -135,11 +135,15 @@ export function ReorderableStopsList({ initialStops, nextStopId, timezone }: Pro
             items[index + 1]?.stop.status === 'pending';
 
           return (
-            <li key={item.stop.id} className="relative">
+            <li key={item.stop.id} className="relative min-w-0">
               {editing ? (
                 // En modo edición, el card NO es clickable (no link). Mostramos
                 // versión "fría" del card con flechas.
-                <div className="flex items-stretch gap-2">
+                // ADR-125 fix: min-w-0 en el contenedor flex y en el wrapper del
+                // card para que `truncate` pueda recortar direcciones largas en
+                // pantallas chicas (sin esto el flex-1 mantiene el ancho del
+                // contenido y la dirección se sale del viewport).
+                <div className="flex min-w-0 items-stretch gap-2">
                   <div className="flex flex-col justify-center gap-1">
                     <button
                       type="button"
@@ -160,7 +164,7 @@ export function ReorderableStopsList({ initialStops, nextStopId, timezone }: Pro
                       ▼
                     </button>
                   </div>
-                  <div className="flex-1 pointer-events-none opacity-90">
+                  <div className="min-w-0 flex-1 pointer-events-none opacity-90">
                     <StopCard item={item} isNext={false} timezone={timezone} />
                   </div>
                 </div>
