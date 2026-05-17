@@ -88,14 +88,25 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
 
     // Compute bounds incluyendo paradas + depot. Si solo hay 1 punto o están
     // todos en la misma coord, expandimos artificialmente para evitar zoom 22.
-    const allPoints: Array<{ lat: number; lng: number }> = [...stops];
-    if (depot) allPoints.push(depot);
-    if (allPoints.length === 0) {
-      setError('Esta ruta no tiene paradas para mostrar en mapa.');
+    // ADR-127: Number() defensivo aquí también — Supabase numeric llega como
+    // string en algunos casos y `bounds`/`setLngLat` de mapbox-gl no proyectan
+    // bien con strings (los pines salían fuera del viewport).
+    const allPoints: Array<{ lat: number; lng: number }> = stops.map((s) => ({
+      lat: Number(s.lat),
+      lng: Number(s.lng),
+    }));
+    if (depot) allPoints.push({ lat: Number(depot.lat), lng: Number(depot.lng) });
+    // Filtrar puntos con NaN — si algún coord viene corrupto, mejor saltarlo
+    // que reventar el bbox.
+    const validPoints = allPoints.filter(
+      (p) => Number.isFinite(p.lat) && Number.isFinite(p.lng),
+    );
+    if (validPoints.length === 0) {
+      setError('No hay coordenadas válidas para mostrar en el mapa.');
       return;
     }
-    const lats = allPoints.map((p) => p.lat);
-    const lngs = allPoints.map((p) => p.lng);
+    const lats = validPoints.map((p) => p.lat);
+    const lngs = validPoints.map((p) => p.lng);
     let minLng = Math.min(...lngs);
     let maxLng = Math.max(...lngs);
     let minLat = Math.min(...lats);
@@ -111,14 +122,17 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
       minLat = center - 0.005;
       maxLat = center + 0.005;
     }
+    // Guardamos el bbox para refit después de map.on('load') — el constructor
+    // bounds a veces se ignora si el contenedor cambió de tamaño antes del 'load'.
+    const computedBounds: [[number, number], [number, number]] = [
+      [minLng, minLat],
+      [maxLng, maxLat],
+    ];
 
     const map = new mapboxgl.Map({
       container: containerRef.current,
       style: 'mapbox://styles/mapbox/streets-v12',
-      bounds: [
-        [minLng, minLat],
-        [maxLng, maxLat],
-      ],
+      bounds: computedBounds,
       fitBoundsOptions: { padding: 60, maxZoom: 14 },
       attributionControl: false,
     });
@@ -127,7 +141,13 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
     // ADR-125 fix v2: cubrir el caso donde el style ya cargó antes de
     // registrar el listener (race condition raro pero posible si Mapbox
     // cachea styles). `map.loaded()` devuelve true si ya está listo.
-    const handleMapLoaded = () => setMapReady(true);
+    const handleMapLoaded = () => {
+      // ADR-127 fix: re-fitBounds explícito tras load. El constructor a veces
+      // ignora bounds si el contenedor aún no tenía dimensiones reales (ej.
+      // safe-area todavía calculándose). fitBounds aquí garantiza el view.
+      map.fitBounds(computedBounds, { padding: 60, maxZoom: 14, animate: false });
+      setMapReady(true);
+    };
     if (map.loaded()) {
       handleMapLoaded();
     } else {
@@ -163,22 +183,31 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
     stopMarkersRef.current.clear();
 
     // Depot solo se monta una vez (no depende del mode).
+    // ADR-127: Number() defensivo en lat/lng — ver explicación en el useEffect
+    // de init. Si algún coord es NaN saltamos el marker para no spammear errors.
     if (depot && !depotMarkerRef.current) {
-      const depotEl = createDepotMarkerElement(depot);
-      depotMarkerRef.current = new mapboxgl.Marker({ element: depotEl, anchor: 'bottom' })
-        .setLngLat([depot.lng, depot.lat])
-        .addTo(map);
+      const depotLng = Number(depot.lng);
+      const depotLat = Number(depot.lat);
+      if (Number.isFinite(depotLng) && Number.isFinite(depotLat)) {
+        const depotEl = createDepotMarkerElement(depot);
+        depotMarkerRef.current = new mapboxgl.Marker({ element: depotEl, anchor: 'bottom' })
+          .setLngLat([depotLng, depotLat])
+          .addTo(map);
+      }
     }
 
     // Stops: crear marker fresh con el elemento del mode actual.
     for (const stop of stops) {
+      const stopLng = Number(stop.lng);
+      const stopLat = Number(stop.lat);
+      if (!Number.isFinite(stopLng) || !Number.isFinite(stopLat)) continue;
       const el = createStopMarkerElement(stop, mode, customOrder);
       if (mode === 'custom' && stop.status === 'pending') {
         el.style.cursor = 'pointer';
         el.addEventListener('click', () => handleTapStop(stop.stopId));
       }
       const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
-        .setLngLat([stop.lng, stop.lat])
+        .setLngLat([stopLng, stopLat])
         .addTo(map);
       stopMarkersRef.current.set(stop.stopId, marker);
     }

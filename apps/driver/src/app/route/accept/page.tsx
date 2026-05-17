@@ -61,6 +61,11 @@ export default async function AcceptRoutePage() {
   //   2. vehicles.depot_id (default del vehículo asignado)
   // Si no encuentra ninguno, fallback a vehicles.depot_lat/lng (legacy).
   // Se renderea como pin verde 🏭 sin número en el mapa.
+  //
+  // ADR-127: Postgres NUMERIC viene como STRING en supabase-js. Forzamos
+  // `Number()` en lat/lng aquí para que el client reciba números reales.
+  // Sin esto, Mapbox `setLngLat([str, str])` no proyectaba bien y los pines
+  // aparecían fuera del bbox visible.
   const supabase = await createServerClient();
   let depot: { code: string; name: string; lat: number; lng: number } | null = null;
   if (route.depotOverrideId) {
@@ -69,7 +74,15 @@ export default async function AcceptRoutePage() {
       .select('code, name, lat, lng')
       .eq('id', route.depotOverrideId)
       .maybeSingle();
-    if (data) depot = data as { code: string; name: string; lat: number; lng: number };
+    if (data) {
+      const row = data as { code: string; name: string; lat: number | string; lng: number | string };
+      depot = {
+        code: row.code,
+        name: row.name,
+        lat: Number(row.lat),
+        lng: Number(row.lng),
+      };
+    }
   }
   if (!depot && route.vehicleId) {
     const { data: vehicleRow } = await supabase
@@ -83,13 +96,21 @@ export default async function AcceptRoutePage() {
         .select('code, name, lat, lng')
         .eq('id', vehicleRow.depot_id)
         .maybeSingle();
-      if (depotRow) depot = depotRow as { code: string; name: string; lat: number; lng: number };
+      if (depotRow) {
+        const row = depotRow as { code: string; name: string; lat: number | string; lng: number | string };
+        depot = {
+          code: row.code,
+          name: row.name,
+          lat: Number(row.lat),
+          lng: Number(row.lng),
+        };
+      }
     } else if (vehicleRow?.depot_lat && vehicleRow?.depot_lng) {
       depot = {
         code: (vehicleRow.plate as string) ?? 'CEDIS',
         name: `Salida de ${(vehicleRow.alias as string) ?? (vehicleRow.plate as string) ?? 'tu camioneta'}`,
-        lat: vehicleRow.depot_lat as number,
-        lng: vehicleRow.depot_lng as number,
+        lat: Number(vehicleRow.depot_lat),
+        lng: Number(vehicleRow.depot_lng),
       };
     }
   }
@@ -98,12 +119,13 @@ export default async function AcceptRoutePage() {
   // de la tienda y la sequence sugerida (lo que el optimizer/admin propuso).
   // Si suggested_sequence está null (legacy), fall back al sequence operativo
   // — para una ruta recién publicada deberían coincidir tras ADR-125.
+  // ADR-127: Number() forzado por la misma razón que el depot.
   const stopsForMap = stops.map((row) => ({
     stopId: row.stop.id,
     storeCode: row.store.code,
     storeName: row.store.name,
-    lat: row.store.lat,
-    lng: row.store.lng,
+    lat: Number(row.store.lat),
+    lng: Number(row.store.lng),
     suggestedSequence: row.stop.suggestedSequence ?? row.stop.sequence,
     currentSequence: row.stop.sequence,
     status: row.stop.status,
