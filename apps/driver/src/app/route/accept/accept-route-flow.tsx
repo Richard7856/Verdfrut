@@ -86,6 +86,26 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
     }
     setMapboxToken(mapboxToken);
 
+    // DIAGNÓSTICO ADR-127: logs para confirmar qué coords llegan al client.
+    // Si user reporta pines fuera de lugar, abrir DevTools Console y revisar.
+    // Quitar estos logs cuando el bug esté confirmado resuelto.
+    // eslint-disable-next-line no-console
+    console.log('[accept-route] stops recibidos:', stops.map((s) => ({
+      code: s.storeCode,
+      lat: s.lat,
+      lng: s.lng,
+      latType: typeof s.lat,
+      lngType: typeof s.lng,
+    })));
+    // eslint-disable-next-line no-console
+    console.log('[accept-route] depot recibido:', depot ? {
+      code: depot.code,
+      lat: depot.lat,
+      lng: depot.lng,
+      latType: typeof depot.lat,
+      lngType: typeof depot.lng,
+    } : null);
+
     // Compute bounds incluyendo paradas + depot. Si solo hay 1 punto o están
     // todos en la misma coord, expandimos artificialmente para evitar zoom 22.
     // ADR-127: Number() defensivo aquí también — Supabase numeric llega como
