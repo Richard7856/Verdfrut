@@ -134,7 +134,10 @@ function formatDistance(meters: number | null): string | null {
   if (meters == null) return null;
   if (meters < 50) return 'aquí';
   if (meters < 1000) return `${Math.round(meters)} m`;
-  return `${(meters / 1000).toFixed(1)} km`;
+  // ADR-125: el chofer NO ve km. Para distancias >= 1km mostramos ETA en su
+  // lugar (la propiedad etaLabel del card sí se rendea). Devolver null acá
+  // hace que el label de distancia desaparezca y solo quede el ETA en tiempo.
+  return null;
 }
 
 function formatEta(meters: number | null): string | null {

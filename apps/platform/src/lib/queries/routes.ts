@@ -33,13 +33,16 @@ interface RouteRow {
   dispatch_id: string | null;
   depot_override_id: string | null;
   optimization_skipped: boolean | null;
+  /** ADR-125: timestamp cuando el chofer confirmó el orden la 1ra vez. */
+  driver_order_confirmed_at: string | null;
 }
 
 const ROUTE_COLS = `
   id, name, date, vehicle_id, driver_id, zone_id, status, version,
   total_distance_meters, total_duration_seconds, estimated_start_at, estimated_end_at,
   actual_start_at, actual_end_at, published_at, published_by, approved_at, approved_by,
-  created_by, created_at, updated_at, dispatch_id, depot_override_id, optimization_skipped
+  created_by, created_at, updated_at, dispatch_id, depot_override_id, optimization_skipped,
+  driver_order_confirmed_at
 `;
 
 function toRoute(row: RouteRow): Route {
@@ -68,6 +71,7 @@ function toRoute(row: RouteRow): Route {
     dispatchId: row.dispatch_id,
     depotOverrideId: row.depot_override_id,
     optimizationSkipped: row.optimization_skipped ?? false,
+    driverOrderConfirmedAt: row.driver_order_confirmed_at,
   };
 }
 
@@ -266,6 +270,11 @@ export async function approveRoute(
 
 /**
  * APPROVED → PUBLISHED. La notificación push al chofer se dispara aparte (después).
+ *
+ * ADR-125: al publicar, snapshoteamos el orden actual de las paradas pending
+ * a `stops.suggested_sequence`. Esto es lo que el chofer verá como "orden
+ * sugerido" en la app y puede aceptar tal cual o customizar tappeando los
+ * pines en otro orden.
  */
 export async function publishRoute(id: string, publishedBy: string): Promise<void> {
   const supabase = await createServerClient();
@@ -280,6 +289,28 @@ export async function publishRoute(id: string, publishedBy: string): Promise<voi
     .eq('status', 'APPROVED');
 
   if (error) throw new Error(`[routes.publish] ${error.message}`);
+
+  // ADR-125: snapshot del orden sugerido. Fetch pending stops + bulk update
+  // 1-by-1 (≤30 stops típico, Postgres serializa, sin race porque la ruta
+  // acaba de publicarse). Idempotente: si suggested_sequence ya tenía valor
+  // (re-publish post-cancel), lo sobrescribimos con el orden actual, que es
+  // la intención más reciente del optimizer/admin.
+  // Completadas/skipped NO se tocan — su sequence histórico es fact.
+  // Si falla: la ruta ya está PUBLISHED, no abortamos — el chofer simplemente
+  // no verá el "orden sugerido" pero puede operar normal. Loggeable arriba.
+  const { data: pendingStops } = await supabase
+    .from('stops')
+    .select('id, sequence')
+    .eq('route_id', id)
+    .eq('status', 'pending');
+  if (pendingStops && pendingStops.length > 0) {
+    for (const s of pendingStops) {
+      await supabase
+        .from('stops')
+        .update({ suggested_sequence: s.sequence as number })
+        .eq('id', s.id);
+    }
+  }
 }
 
 /**

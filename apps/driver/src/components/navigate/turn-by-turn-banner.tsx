@@ -46,7 +46,11 @@ function formatDist(m: number | null): string {
   if (m == null) return '';
   if (m < 50) return 'ya';
   if (m < 1000) return `${Math.round(m / 10) * 10} m`;
-  return `${(m / 1000).toFixed(1)} km`;
+  // ADR-125: el chofer NO ve km. Hasta 1500m mostramos en metros redondeados
+  // (útil para anticipar la próxima maniobra). Más lejos devolvemos string
+  // vacío — el chofer simplemente sigue derecho hasta que se acerque.
+  if (m < 1500) return `${Math.round(m / 100) * 100} m`;
+  return '';
 }
 
 export function TurnByTurnBanner({ step, distanceToManeuver, offRoute }: Props) {
@@ -84,7 +88,9 @@ export function TurnByTurnBanner({ step, distanceToManeuver, offRoute }: Props) 
         <p className="truncate text-base font-semibold text-[var(--color-text)]">
           {step.instruction}
         </p>
-        {distanceToManeuver != null && (
+        {/* ADR-125: si la distancia es > 1500m, formatDist devuelve '' y
+            no renderemos el prefijo "En" — el chofer no necesita ese ruido. */}
+        {distanceToManeuver != null && formatDist(distanceToManeuver) && (
           <p className="font-mono text-sm text-[var(--color-text-muted)]">
             En {formatDist(distanceToManeuver)}
           </p>

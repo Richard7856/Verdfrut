@@ -103,13 +103,16 @@ export async function arriveAtStop(
   const distance = haversineMeters(coords.lat, coords.lng, ctx.store.lat, ctx.store.lng);
   const threshold = ARRIVAL_RADIUS_METERS[type];
   if (distance > threshold) {
+    // ADR-125: el chofer no ve km. Convertimos la distancia a metros
+    // en el mensaje de error para mantener consistencia con el resto de la
+    // app. La distancia exacta sigue en `distanceMeters` para logs/audit.
     return {
       ok: false,
       rejection: {
         reason: 'too_far',
         distanceMeters: Math.round(distance),
         thresholdMeters: threshold,
-        message: `Estás a ${(distance / 1000).toFixed(2)} km de la tienda. Acércate (máx. ${threshold} m).`,
+        message: `Estás a ${Math.round(distance)} m de la tienda. Acércate (máx. ${threshold} m).`,
       },
     };
   }

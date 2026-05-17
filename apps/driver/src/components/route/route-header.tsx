@@ -1,5 +1,8 @@
 // Banner superior de la pantalla de ruta del chofer.
-// Muestra: nombre, fecha, status, ETA estimada, distancia total, contador de paradas completadas.
+// Muestra: nombre, fecha, status, ETA estimada, contador de paradas completadas.
+// ADR-125 (2026-05-16): el chofer NO ve distancia en km — pedido del cliente.
+// Los km siguen calculándose internamente para el optimizer y reportes admin,
+// pero el chofer trabaja en términos de paradas y tiempo, no kilometraje.
 
 import type { Route } from '@tripdrive/types';
 import { formatDateTimeInZone, formatDuration } from '@tripdrive/utils';
@@ -27,10 +30,7 @@ const STATUS_LABEL: Record<Route['status'], { text: string; tone: BadgeTone }> =
 
 export function RouteHeader({ route, totalStops, completedStops, timezone }: Props) {
   const status = STATUS_LABEL[route.status];
-  const distanceKm =
-    route.totalDistanceMeters != null
-      ? new Intl.NumberFormat('es-MX', { maximumFractionDigits: 1 }).format(route.totalDistanceMeters / 1000)
-      : null;
+  // ADR-125: km calculados pero NO mostrados al chofer.
   const duration = route.totalDurationSeconds != null ? formatDuration(route.totalDurationSeconds) : null;
   const startEta = route.estimatedStartAt ? formatDateTimeInZone(route.estimatedStartAt, timezone) : null;
   const endEta = route.estimatedEndAt ? formatDateTimeInZone(route.estimatedEndAt, timezone) : null;
@@ -49,11 +49,7 @@ export function RouteHeader({ route, totalStops, completedStops, timezone }: Pro
         <span>
           <strong className="text-[var(--color-text)]">{completedStops}/{totalStops}</strong> paradas
         </span>
-        {distanceKm && (
-          <span>
-            <strong className="text-[var(--color-text)]">{distanceKm} km</strong>
-          </span>
-        )}
+        {/* ADR-125: km ocultos en app de chofer. */}
         {duration && (
           <span>
             <strong className="text-[var(--color-text)]">{duration}</strong> estimado
@@ -68,9 +64,8 @@ export function RouteHeader({ route, totalStops, completedStops, timezone }: Pro
 
       {route.optimizationSkipped && (
         // UXR-2 / ADR-110: la ruta no pasó por el optimizer — el dispatcher
-        // publicó el orden manual. El chofer debería saberlo porque la
-        // secuencia puede no ser la más corta y los km estimados son
-        // haversine (subestiman tráfico real). Si ve algo raro, debe avisar.
+        // publicó el orden manual. El chofer debe saberlo porque la
+        // secuencia puede no ser la más corta. Si ve algo raro, debe avisar.
         <div
           role="status"
           className="mt-3 flex items-start gap-2 rounded-md border px-3 py-2 text-xs"

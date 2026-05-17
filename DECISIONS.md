@@ -6859,6 +6859,58 @@ Adicional: introduce la **"Frecuencia"** como concepto operativo visible, antici
 - apps/platform/src/app/(app)/settings/workbench/workbench-manager.tsx — discovery final.
 
 
+## [2026-05-16] ADR-125: Chofer customiza orden tappeando en mapa + km ocultos
+**Contexto:** Cliente NETO pidió 2 cambios en la app de chofer: (1) al abrir una ruta nueva, el chofer debe ver el mapa con paradas y poder tappear los pines en el orden que prefiera, pero también ver el orden sugerido por el optimizer por si lo quiere aceptar tal cual; (2) ocultar todos los km del display del chofer — trabajan por paradas y tiempo, no kilometraje.
+
+**Decisión:**
+
+**Persistencia del orden sugerido (schema):**
+- Migración 054: agrega `stops.suggested_sequence INTEGER NULL` + `routes.driver_order_confirmed_at TIMESTAMPTZ NULL`.
+- Al transitar route a PUBLISHED, `publishRoute()` copia `sequence → suggested_sequence` para cada stop pending. Las completadas/skipped no se tocan (su sequence histórico es fact).
+- `routes.driver_order_confirmed_at` marca cuándo el chofer aceptó el orden (sugerido o customizado) la primera vez. NULL = aún no ha abierto la ruta.
+- Backfill: rutas ya publicadas heredan `suggested_sequence = sequence` y `driver_order_confirmed_at = now() - 1min` para que no entren al nuevo flow retroactivamente.
+
+**Flow UX (driver PWA):**
+- `/route/page.tsx` (server): si la ruta está PUBLISHED y `driverOrderConfirmedAt === null`, redirect a `/route/accept`.
+- `/route/accept/page.tsx`: pantalla full-screen con mapa Mapbox + bottom bar. Renderea pines numerados con `suggested_sequence`.
+- Cliente `AcceptRouteFlow`:
+  - Modo `suggested` (default): pines azules con número del optimizer. Botón "✓ Usar orden sugerido" submitea con orderedStopIds=null.
+  - Modo `custom`: pines pending arrancan con contorno punteado y "?". Tap → asigna el siguiente número (verde). Tap otra vez → quita y re-numera. Botón "✓ Guardar mi orden" submitea con el array tappeado (habilitado solo cuando todos los pending tienen número).
+- Server action `confirmDriverOrderAction(orderedStopIds: string[] | null)`:
+  - Si null: solo setea `driver_order_confirmed_at = now()`.
+  - Si array: valida IDs (UUID + pertenecen a la ruta del chofer + son pending) + reordena via 2-pasos (negativos → finales) + bump_route_version_by_driver + setea timestamp.
+- Tras submit: `router.push('/route')` — entra al flow normal de operación.
+
+**Badge "orden sugerido" en lista:**
+- `stop-card.tsx`: si `stop.suggestedSequence !== stop.sequence`, muestra mini-badge "💡 Orden sugerido: #N" debajo del nombre de la tienda. Útil para que el chofer recuerde la propuesta original si customizó.
+
+**Ocultar km (driver PWA + native):**
+- `route-header.tsx`: eliminado el span "X km" del banner principal. Solo queda contador de paradas + duración estimada + ETAs.
+- `next-stop-card.tsx`: `formatDistance` devuelve null para distancias ≥ 1km (antes "X.X km"). Mantiene "aquí" (<50m) y "X m" (<1km).
+- `turn-by-turn-banner.tsx`: `formatDist` convierte km a metros redondeados a 100 hasta 1500m, después devuelve string vacío (chofer simplemente sigue derecho).
+- `actions.ts` PWA + native: error "Estás a X km" → "Estás a X m" (más cercano al criterio del geofence).
+
+**Alternativas consideradas:**
+1. **No persistir el orden sugerido**: reorder destruía el orden propuesto del optimizer y el chofer no podía regresar. Rechazado: "Usar sugerido" requiere conocer el sugerido en cualquier momento.
+2. **localStorage flag** en lugar de columna `driver_order_confirmed_at`: si chofer cambia de dispositivo o limpia datos, re-entra al flow. Columna en DB es cross-device y persistente.
+3. **DnD drag-and-drop en el mapa** en vez de tap secuencial: gestos drag en mobile son frágiles (conflict con pan del mapa). Tap es mecánico, sin ambigüedad.
+4. **Forzar al chofer a aceptar/customizar antes de poder navegar**: rechazado, el redirect server-side ya lo bloquea naturalmente.
+5. **Eliminar km del optimizer también**: rechazado, el optimizer + reportes admin siguen usando km — solo es la UI del chofer la que cambia.
+
+**Riesgos/Limitaciones:**
+- Si `publishRoute()` falla a la mitad de copiar `suggested_sequence` (raro), la ruta queda PUBLISHED pero algunos stops sin suggested_sequence. El UI fall-back a `currentSequence` los muestra correctamente — daño cero, solo no podrán comparar con "el sugerido original". Aceptable.
+- La copia de suggested es 1 update por stop (no batch). Para rutas de 30 stops son 30 round-trips a Supabase ≈ 1.5s. Aceptable porque publish no es hot path.
+- Driver-native NO tiene `/route/accept` todavía — solo PWA. Si un chofer abre la ruta en native antes de PWA, no se activa el flow. Mitigación V1: NETO usa PWA. Cuando llegue cliente con flota mixta, replicar en native (Stream B extension, ~2h).
+- Re-publish post-cancel: si admin cancela una ruta y la re-publica, `suggested_sequence` se sobrescribe con la sequence actual (que es la última intención del optimizer/admin). Esperado.
+- `formatDist` que devuelve string vacío puede dejar un layout shift sutil en el banner turn-by-turn cuando la distancia cruza el threshold de 1500m. Mitigable cuando aparezca quejas.
+
+**Improvement opportunities:**
+- Validar UNIQUE(route_id, sequence) constraint en stops para garantizar consistencia post-reorder. Hoy 2-pasos (negativos → finales) es defensivo pero sin constraint sería más robusto con un check.
+- Mostrar polyline conectando los pines en el orden custom mientras el chofer tappea — feedback visual del recorrido.
+- Driver-native: replicar flow `/route/accept` cuando se priorice (~2-3h).
+- Banner "el orden que elegiste suma X% más distancia que el sugerido" si el chofer customiza algo claramente subóptimo — solo informativo, no bloqueante.
+- Audit log de quién aceptó (sugerido vs custom) para tracking de adopción del feature.
+
 ## [2026-05-16] ADR-121: Gating real por tier — Fase 1 (cerrar contrato Pro)
 **Contexto:** El registry `@tripdrive/plans` declara 9 feature flags por tier (ai, xlsxImport, dragEditMap, pushNotifications, liveReOpt, customDomain, customBranding, maxAccounts, maxStoresPerAccount) pero solo 2 tenían gate activo en código: `ai` (booleano binario en `/api/orchestrator/chat`) y `maxStoresPerAccount` (vía `requireRoomForStores`). El resto era contrato comercial sin enforcement — un Starter podía importar XLSX, hacer bulk move, usar live re-opt, etc. Riesgo: cobrar Pro/Enterprise sin entregarlo en código.
 

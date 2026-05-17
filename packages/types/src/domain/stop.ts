@@ -11,8 +11,12 @@ export interface Stop {
   id: string;
   routeId: string;
   storeId: string;
-  // Orden de visita en la ruta (1-indexed).
+  // Orden OPERATIVO de visita en la ruta (1-indexed) — lo que el chofer ejecuta.
   sequence: number;
+  // ADR-125: snapshot del orden sugerido por optimizer/admin al momento de
+  // publicar. NULL si la ruta no se ha publicado o es pre-ADR-125. El chofer
+  // puede usarlo para volver al orden propuesto sin perder el suyo.
+  suggestedSequence: number | null;
   status: StopStatus;
   // ETA del optimizador.
   plannedArrivalAt: string | null;

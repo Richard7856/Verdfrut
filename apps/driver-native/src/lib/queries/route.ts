@@ -38,13 +38,16 @@ interface RouteRow {
   dispatch_id: string | null;
   depot_override_id: string | null;
   optimization_skipped: boolean | null;
+  /** ADR-125: timestamp cuando el chofer confirmó el orden la 1ra vez. */
+  driver_order_confirmed_at: string | null;
 }
 
 const ROUTE_COLS = `
   id, name, date, vehicle_id, driver_id, zone_id, status, version,
   total_distance_meters, total_duration_seconds, estimated_start_at, estimated_end_at,
   actual_start_at, actual_end_at, published_at, published_by, approved_at, approved_by,
-  created_by, created_at, updated_at, dispatch_id, depot_override_id, optimization_skipped
+  created_by, created_at, updated_at, dispatch_id, depot_override_id, optimization_skipped,
+  driver_order_confirmed_at
 `;
 
 interface StopRow {
@@ -52,6 +55,8 @@ interface StopRow {
   route_id: string;
   store_id: string;
   sequence: number;
+  /** ADR-125: snapshot del orden sugerido por optimizer/admin al publicar. */
+  suggested_sequence: number | null;
   status: StopStatus;
   planned_arrival_at: string | null;
   planned_departure_at: string | null;
@@ -124,6 +129,7 @@ function toRoute(row: RouteRow): Route {
     dispatchId: row.dispatch_id,
     depotOverrideId: row.depot_override_id,
     optimizationSkipped: row.optimization_skipped ?? false,
+    driverOrderConfirmedAt: row.driver_order_confirmed_at,
   };
 }
 
@@ -133,6 +139,7 @@ function toStop(row: StopRow): Stop {
     routeId: row.route_id,
     storeId: row.store_id,
     sequence: row.sequence,
+    suggestedSequence: row.suggested_sequence,
     status: row.status,
     plannedArrivalAt: row.planned_arrival_at,
     plannedDepartureAt: row.planned_departure_at,
@@ -255,7 +262,7 @@ export async function getRouteStopsWithStores(routeId: string): Promise<StopWith
   const { data: stopsData, error: stopsErr } = await supabase
     .from('stops')
     .select(
-      `id, route_id, store_id, sequence, status,
+      `id, route_id, store_id, sequence, suggested_sequence, status,
        planned_arrival_at, planned_departure_at, actual_arrival_at, actual_departure_at,
        load, notes, created_at`,
     )

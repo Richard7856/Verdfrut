@@ -138,6 +138,8 @@ export async function getStopContext(stopId: string): Promise<StopContext | null
       routeId: stop.route_id,
       storeId: stop.store_id,
       sequence: stop.sequence,
+      suggestedSequence:
+        (stop as { suggested_sequence?: number | null }).suggested_sequence ?? null,
       status: stop.status,
       plannedArrivalAt: stop.planned_arrival_at,
       plannedDepartureAt: stop.planned_departure_at,
@@ -190,6 +192,8 @@ export async function getStopContext(stopId: string): Promise<StopContext | null
       dispatchId: routeRow.dispatch_id,
       depotOverrideId: routeRow.depot_override_id,
       optimizationSkipped: (routeRow as { optimization_skipped?: boolean | null }).optimization_skipped ?? false,
+      driverOrderConfirmedAt:
+        (routeRow as { driver_order_confirmed_at?: string | null }).driver_order_confirmed_at ?? null,
     },
     driverId,
   };

@@ -943,6 +943,8 @@ export type Database = {
           optimization_skipped: boolean
           /** ADR-112: TRUE si la ruta vive en el sandbox de planeación. */
           is_sandbox: boolean
+          /** ADR-125: timestamp cuando el chofer confirmó el orden en la app. */
+          driver_order_confirmed_at: string | null
         }
         Insert: {
           actual_end_at?: string | null
@@ -972,6 +974,7 @@ export type Database = {
           dispatch_id?: string | null
           optimization_skipped?: boolean
           is_sandbox?: boolean
+          driver_order_confirmed_at?: string | null
         }
         Update: {
           actual_end_at?: string | null
@@ -1001,6 +1004,7 @@ export type Database = {
           dispatch_id?: string | null
           optimization_skipped?: boolean
           is_sandbox?: boolean
+          driver_order_confirmed_at?: string | null
         }
         Relationships: []
       }
@@ -1023,6 +1027,8 @@ export type Database = {
           store_id: string
           /** ADR-112: TRUE si la parada vive en una ruta del sandbox. */
           is_sandbox: boolean
+          /** ADR-125: snapshot del orden sugerido por optimizer/admin al publicar. */
+          suggested_sequence: number | null
         }
         Insert: {
           actual_arrival_at?: string | null
@@ -1041,6 +1047,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["stop_status"]
           store_id: string
           is_sandbox?: boolean
+          suggested_sequence?: number | null
         }
         Update: {
           actual_arrival_at?: string | null
@@ -1059,6 +1066,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["stop_status"]
           store_id?: string
           is_sandbox?: boolean
+          suggested_sequence?: number | null
         }
         Relationships: []
       }

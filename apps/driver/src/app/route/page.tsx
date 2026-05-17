@@ -3,6 +3,7 @@
 // Si no hay ruta asignada, muestra estado vacío.
 
 import Image from 'next/image';
+import { redirect } from 'next/navigation';
 import { requireDriverProfile } from '@/lib/auth';
 import { getDriverRouteForDate, getRouteStopsWithStores } from '@/lib/queries/route';
 import { createServerClient } from '@tripdrive/supabase/server';
@@ -29,6 +30,19 @@ export default async function RoutePage() {
   const today = todayInZone(timezone);
 
   const route = await getDriverRouteForDate(today);
+
+  // ADR-125: si la ruta está fresca (PUBLISHED y aún no confirmada por el
+  // chofer), redirigimos al flow de aceptación con mapa. Ahí elige entre
+  // "Usar orden sugerido" o customizar tappeando los pines. Una vez confirma,
+  // `driver_order_confirmed_at` se rellena y futuras aperturas van directo.
+  if (
+    route &&
+    route.status === 'PUBLISHED' &&
+    route.driverOrderConfirmedAt === null
+  ) {
+    redirect('/route/accept');
+  }
+
   const stops = route ? await getRouteStopsWithStores(route.id) : [];
 
   // Resolver driver_id (no user_id) para insertar breadcrumbs y broadcasts.

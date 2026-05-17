@@ -53,6 +53,14 @@ export interface Route {
    * — KPI `% rutas manuales` por mes en /reports (UXR-3, ADR-110).
    */
   optimizationSkipped: boolean;
+  /**
+   * ADR-125: timestamp cuando el chofer confirmó el orden de paradas la
+   * primera vez que abrió la ruta en su app — sea aceptando el orden
+   * sugerido o customizándolo con tap-to-order en el mapa. NULL = aún no
+   * la abrió. La driver app usa este flag para gatillar el flow de
+   * "mapa primero" al abrir una ruta PUBLISHED fresca.
+   */
+  driverOrderConfirmedAt: string | null;
 }
 
 export interface RouteVersion {

@@ -180,3 +180,147 @@ export async function reorderStopsByDriverAction(
     };
   }
 }
+
+/**
+ * ADR-125: el chofer confirma el orden de su ruta la primera vez que la abre.
+ *
+ * Dos modos:
+ *  - `orderedStopIds = null` → "Usar orden sugerido": no se reordena, solo se
+ *    marca `routes.driver_order_confirmed_at = now()` para que el flow de
+ *    aceptación no se repita en próximas aperturas.
+ *  - `orderedStopIds = string[]` → "Orden customizado": reordena las paradas
+ *    pending (mismo loop que `reorderStopsByDriverAction`) Y marca confirmado.
+ *
+ * Validaciones idénticas a `reorderStopsByDriverAction`. Idempotente: si la
+ * ruta ya está confirmada y el chofer vuelve a llamar (caso raro), sobreescribe
+ * el timestamp y aplica reorden si vino.
+ */
+export async function confirmDriverOrderAction(
+  orderedStopIds: string[] | null,
+): Promise<ActionResult> {
+  try {
+    const profile = await requireDriverProfile();
+    const supabase = await createServerClient();
+
+    if (orderedStopIds !== null) {
+      if (!Array.isArray(orderedStopIds) || orderedStopIds.length === 0) {
+        return { ok: false, error: 'Orden inválido.' };
+      }
+      try {
+        assertAllUuids(orderedStopIds, 'orderedStopIds');
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : 'IDs inválidos' };
+      }
+    }
+
+    // Resolver driver + ruta activa.
+    const { data: driverRow, error: drvErr } = await supabase
+      .from('drivers')
+      .select('id')
+      .eq('user_id', profile.id)
+      .maybeSingle();
+    if (drvErr || !driverRow) {
+      return { ok: false, error: 'No se encontró tu registro de chofer.' };
+    }
+
+    const today = todayInZone(TENANT_TZ);
+    const { data: route, error: rtErr } = await supabase
+      .from('routes')
+      .select('id, status')
+      .eq('driver_id', driverRow.id)
+      .eq('date', today)
+      .in('status', ['PUBLISHED', 'IN_PROGRESS'])
+      .maybeSingle();
+    if (rtErr || !route) {
+      return { ok: false, error: 'No tienes una ruta activa hoy para confirmar.' };
+    }
+
+    // Si vienen IDs custom, reordenar primero (misma lógica que la action vieja).
+    if (orderedStopIds !== null) {
+      const { data: currentStops, error: stErr } = await supabase
+        .from('stops')
+        .select('id, status, sequence')
+        .eq('route_id', route.id);
+      if (stErr || !currentStops) {
+        return { ok: false, error: 'No se pudieron leer las paradas.' };
+      }
+
+      const pending = currentStops.filter((s) => s.status === 'pending');
+      const nonPending = [...currentStops]
+        .filter((s) => s.status !== 'pending')
+        .sort((a, b) => a.sequence - b.sequence);
+      const pendingIds = new Set(pending.map((s) => s.id));
+
+      if (orderedStopIds.length !== pending.length) {
+        return {
+          ok: false,
+          error: `Esperábamos ${pending.length} paradas, recibimos ${orderedStopIds.length}. Verifica que tappeaste todas.`,
+        };
+      }
+      const seen = new Set<string>();
+      for (const id of orderedStopIds) {
+        if (!pendingIds.has(id)) {
+          return { ok: false, error: 'Una de las paradas no es pendiente o no es tuya.' };
+        }
+        if (seen.has(id)) {
+          return { ok: false, error: 'Hay paradas duplicadas en el orden enviado.' };
+        }
+        seen.add(id);
+      }
+
+      const finalOrder = [...nonPending.map((s) => s.id), ...orderedStopIds];
+
+      // 2-pasos para evitar UNIQUE conflicts si llegan a existir.
+      for (let i = 0; i < finalOrder.length; i++) {
+        const stopId = finalOrder[i];
+        if (!stopId) continue;
+        const { error } = await supabase
+          .from('stops')
+          .update({ sequence: -1 - i })
+          .eq('id', stopId);
+        if (error) return { ok: false, error: `Error preparando orden: ${error.message}` };
+      }
+      for (let i = 0; i < finalOrder.length; i++) {
+        const stopId = finalOrder[i];
+        if (!stopId) continue;
+        const { error } = await supabase
+          .from('stops')
+          .update({ sequence: i + 1 })
+          .eq('id', stopId);
+        if (error) return { ok: false, error: `Error guardando orden: ${error.message}` };
+      }
+
+      // Bump version con razón específica de "primer confirm" para audit.
+      const { error: bumpErr } = await supabase.rpc('bump_route_version_by_driver', {
+        p_route_id: route.id,
+        p_reason: 'Chofer customizó orden al aceptar la ruta',
+      });
+      if (bumpErr) {
+        await logger.warn('confirmDriverOrder: bump RPC falló (orden persistió igual)', {
+          err: bumpErr,
+          routeId: route.id,
+        });
+      }
+    }
+
+    // Marcar la ruta como confirmada por el chofer — la próxima apertura no
+    // pasa por el flow de aceptación. RLS valida driver ownership.
+    const { error: confErr } = await supabase
+      .from('routes')
+      .update({ driver_order_confirmed_at: new Date().toISOString() })
+      .eq('id', route.id);
+    if (confErr) {
+      return { ok: false, error: `Error marcando confirmación: ${confErr.message}` };
+    }
+
+    revalidatePath('/route');
+    revalidatePath('/route/navigate');
+    revalidatePath('/route/accept');
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Error desconocido al confirmar el orden.',
+    };
+  }
+}

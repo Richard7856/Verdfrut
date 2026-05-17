@@ -133,13 +133,15 @@ export async function markArrived(ctx: StopContext): Promise<ArriveResult> {
     ctx.store.lng,
   );
   if (distance > radiusMeters) {
+    // ADR-125: el chofer no ve km. Mostramos metros en el error para
+    // mantener consistencia con la app PWA y el resto del flow nativo.
     return {
       ok: false,
       rejection: {
         reason: 'too_far',
         distanceMeters: Math.round(distance),
         thresholdMeters: radiusMeters,
-        message: `Estás a ${(distance / 1000).toFixed(2)} km de la tienda. Acércate (máx. ${radiusMeters} m).`,
+        message: `Estás a ${Math.round(distance)} m de la tienda. Acércate (máx. ${radiusMeters} m).`,
       },
     };
   }

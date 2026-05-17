@@ -91,6 +91,10 @@ export async function getStopContext(stopId: string): Promise<StopContext | null
       routeId: stopRow.route_id,
       storeId: stopRow.store_id,
       sequence: stopRow.sequence,
+      // ADR-125: suggested_sequence puede no estar en el select original; si no
+      // viene, defaulteamos a null (ruta pre-publicación o legacy).
+      suggestedSequence:
+        ('suggested_sequence' in stopRow ? (stopRow as { suggested_sequence: number | null }).suggested_sequence : null) ?? null,
       status: stopRow.status,
       plannedArrivalAt: stopRow.planned_arrival_at,
       plannedDepartureAt: stopRow.planned_departure_at,
@@ -143,6 +147,8 @@ export async function getStopContext(stopId: string): Promise<StopContext | null
       dispatchId: routeRes.data.dispatch_id ?? null,
       depotOverrideId: (routeRes.data as { depot_override_id?: string | null }).depot_override_id ?? null,
       optimizationSkipped: (routeRes.data as { optimization_skipped?: boolean | null }).optimization_skipped ?? false,
+      driverOrderConfirmedAt:
+        (routeRes.data as { driver_order_confirmed_at?: string | null }).driver_order_confirmed_at ?? null,
     },
     report: reportRes.data ? mapDeliveryReport(reportRes.data) : null,
     driverId: driverRow.id,

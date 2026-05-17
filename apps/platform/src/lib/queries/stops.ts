@@ -11,6 +11,8 @@ interface StopRow {
   route_id: string;
   store_id: string;
   sequence: number;
+  /** ADR-125: snapshot del orden sugerido por optimizer/admin al publicar. */
+  suggested_sequence: number | null;
   status: StopStatus;
   planned_arrival_at: string | null;
   planned_departure_at: string | null;
@@ -22,7 +24,7 @@ interface StopRow {
 }
 
 const STOP_COLS = `
-  id, route_id, store_id, sequence, status,
+  id, route_id, store_id, sequence, suggested_sequence, status,
   planned_arrival_at, planned_departure_at, actual_arrival_at, actual_departure_at,
   load, notes, created_at
 `;
@@ -33,6 +35,8 @@ function toStop(row: StopRow): Stop {
     routeId: row.route_id,
     storeId: row.store_id,
     sequence: row.sequence,
+    // ADR-125: orden sugerido por optimizer/admin al publicar.
+    suggestedSequence: row.suggested_sequence,
     status: row.status,
     plannedArrivalAt: row.planned_arrival_at,
     plannedDepartureAt: row.planned_departure_at,

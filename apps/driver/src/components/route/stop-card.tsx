@@ -63,6 +63,15 @@ export function StopCard({ item, isNext, timezone }: Props) {
                 <span className="text-[var(--color-text-muted)]">{store.code}</span> · {store.name}
               </p>
               <p className="truncate text-xs text-[var(--color-text-muted)]">{store.address}</p>
+              {/* ADR-125: si el orden actual del chofer difiere del sugerido por
+                  optimizer, mostramos un mini-badge para que sepa cuál era la
+                  propuesta original. Útil si quiere comparar / regresar. */}
+              {stop.suggestedSequence != null &&
+                stop.suggestedSequence !== stop.sequence && (
+                  <p className="mt-0.5 text-[10px] font-medium text-[var(--color-text-muted)]">
+                    💡 Orden sugerido: #{stop.suggestedSequence}
+                  </p>
+                )}
             </div>
             <Badge tone={status.tone}>{status.text}</Badge>
           </div>
