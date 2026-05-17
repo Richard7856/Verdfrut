@@ -72,6 +72,9 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
   const [customOrder, setCustomOrder] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  // DIAGNÓSTICO v5: estado live del mapa, se muestra en la franja amber.
+  // Update on moveend/zoomend para ver qué Mapbox REALMENTE está mostrando.
+  const [mapDiag, setMapDiag] = useState<string>('init…');
 
   // Stops pending vs no-pending. El flow solo permite re-ordenar pending —
   // las completadas/arrived/skipped mantienen su orden histórico.
@@ -183,12 +186,34 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
       targetZoom,
     });
 
+    // v5: helper para volcar estado live del mapa a la franja diagnóstica.
+    // Si Mapbox dice "estoy en CDMX" pero los tiles muestran Guerrero,
+    // este texto lo va a evidenciar sin necesidad de DevTools.
+    const dumpDiag = (label: string) => {
+      const c = map.getCenter();
+      const z = map.getZoom();
+      const b = map.getBounds();
+      const sw = b?.getSouthWest();
+      const ne = b?.getNorthEast();
+      setMapDiag(
+        `${label} center=(${c.lat.toFixed(4)},${c.lng.toFixed(4)}) z=${z.toFixed(2)} ` +
+        `bbox SW(${sw?.lat.toFixed(3)},${sw?.lng.toFixed(3)}) NE(${ne?.lat.toFixed(3)},${ne?.lng.toFixed(3)})`,
+      );
+    };
+
     const handleMapLoaded = () => {
-      // Aplicar centro + zoom explícito en lugar de fitBounds.
+      // v5 fix: resize() obliga a Mapbox a recomputar la proyección con el
+      // tamaño REAL del contenedor. Si el contenedor era 0×0 al construir
+      // (flex aún sin computar), la proyección quedaba podrida y setCenter/
+      // setZoom se interpretaban contra ese viewport fantasma.
+      map.resize();
       map.setCenter([centerLng, centerLat]);
       map.setZoom(targetZoom);
-      // eslint-disable-next-line no-console
-      console.log('[accept-route] map ready, center=', map.getCenter(), 'zoom=', map.getZoom());
+      dumpDiag('LOAD');
+      // v5: cualquier move/zoom posterior actualiza la franja — si algo
+      // pisa setCenter después, lo vemos en vivo.
+      map.on('moveend', () => dumpDiag('MOVE'));
+      map.on('zoomend', () => dumpDiag('ZOOM'));
       setMapReady(true);
     };
     if (map.loaded()) {
@@ -196,6 +221,18 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
     } else {
       map.on('load', handleMapLoaded);
     }
+
+    // v5: marker rojo de REFERENCIA en el Zócalo CDMX (19.4326, -99.1332).
+    // Es una coord conocida, hard-coded. Si en pantalla cae sobre el Zócalo
+    // de verdad → Mapbox proyecta bien → bug en nuestros datos. Si cae sobre
+    // Guerrero o cualquier otro lado → bug de proyección/contenedor.
+    const refEl = document.createElement('div');
+    refEl.style.cssText =
+      'width:24px;height:24px;border-radius:50%;background:#dc2626;border:2px solid white;box-shadow:0 2px 6px rgba(0,0,0,.4);';
+    refEl.title = 'REF: Zócalo CDMX (19.4326,-99.1332)';
+    new mapboxgl.Marker({ element: refEl, anchor: 'center' })
+      .setLngLat(new mapboxgl.LngLat(-99.1332, 19.4326))
+      .addTo(map);
 
     return () => {
       // Cleanup markers explícitos antes de remover el map.
@@ -340,7 +377,7 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
       {/* DIAGNÓSTICO ADR-127: strip visible con coords reales. Quitar cuando
           el bug esté confirmado resuelto en producción. */}
       <div className="border-b border-amber-400 bg-amber-50 px-3 py-1.5 text-[10px] leading-tight text-amber-900 font-mono">
-        <div>build: v4 (setCenter+LngLat explícito)</div>
+        <div>build: v5 (resize+ref+bbox visible)</div>
         <div>
           stops: {stops.map((s) => `${s.storeCode}(${s.lat},${s.lng})`).join(' | ')}
         </div>
@@ -349,6 +386,8 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
             depot: {depot.code}({depot.lat},{depot.lng})
           </div>
         )}
+        <div>map: {mapDiag}</div>
+        <div>🔴 REF rojo = Zócalo CDMX (19.4326,-99.1332)</div>
       </div>
 
       {/* Mapa fullscreen */}
