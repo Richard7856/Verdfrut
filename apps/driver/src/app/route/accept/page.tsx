@@ -15,6 +15,7 @@
 import { redirect } from 'next/navigation';
 import { requireDriverProfile } from '@/lib/auth';
 import { getDriverRouteForDate, getRouteStopsWithStores } from '@/lib/queries/route';
+import { createServerClient } from '@tripdrive/supabase/server';
 import { todayInZone } from '@tripdrive/utils';
 import { AcceptRouteFlow } from './accept-route-flow';
 
@@ -55,6 +56,44 @@ export default async function AcceptRoutePage() {
   // intencionalmente (es URL-restricted en Mapbox dashboard).
   const mapboxToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? '';
 
+  // ADR-125 fix: cargar depot (CEDIS) de la ruta. Prioridad:
+  //   1. routes.depot_override_id (si admin lo cambió, ADR-047)
+  //   2. vehicles.depot_id (default del vehículo asignado)
+  // Si no encuentra ninguno, fallback a vehicles.depot_lat/lng (legacy).
+  // Se renderea como pin verde 🏭 sin número en el mapa.
+  const supabase = await createServerClient();
+  let depot: { code: string; name: string; lat: number; lng: number } | null = null;
+  if (route.depotOverrideId) {
+    const { data } = await supabase
+      .from('depots')
+      .select('code, name, lat, lng')
+      .eq('id', route.depotOverrideId)
+      .maybeSingle();
+    if (data) depot = data as { code: string; name: string; lat: number; lng: number };
+  }
+  if (!depot && route.vehicleId) {
+    const { data: vehicleRow } = await supabase
+      .from('vehicles')
+      .select('plate, alias, depot_id, depot_lat, depot_lng')
+      .eq('id', route.vehicleId)
+      .maybeSingle();
+    if (vehicleRow?.depot_id) {
+      const { data: depotRow } = await supabase
+        .from('depots')
+        .select('code, name, lat, lng')
+        .eq('id', vehicleRow.depot_id)
+        .maybeSingle();
+      if (depotRow) depot = depotRow as { code: string; name: string; lat: number; lng: number };
+    } else if (vehicleRow?.depot_lat && vehicleRow?.depot_lng) {
+      depot = {
+        code: (vehicleRow.plate as string) ?? 'CEDIS',
+        name: `Salida de ${(vehicleRow.alias as string) ?? (vehicleRow.plate as string) ?? 'tu camioneta'}`,
+        lat: vehicleRow.depot_lat as number,
+        lng: vehicleRow.depot_lng as number,
+      };
+    }
+  }
+
   // Estructuramos el payload para el client: cada parada con su id, info
   // de la tienda y la sequence sugerida (lo que el optimizer/admin propuso).
   // Si suggested_sequence está null (legacy), fall back al sequence operativo
@@ -74,6 +113,7 @@ export default async function AcceptRoutePage() {
     <AcceptRouteFlow
       routeName={route.name}
       stops={stopsForMap}
+      depot={depot}
       mapboxToken={mapboxToken}
     />
   );
