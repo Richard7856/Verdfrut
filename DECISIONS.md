@@ -7167,3 +7167,38 @@ Root cause: el driver app NO importaba `mapbox-gl/dist/mapbox-gl.css`. El platfo
 - apps/driver/package.json — mapbox-gl como dep directa.
 - apps/platform/src/app/globals.css — patrón original (ya lo hacía).
 - Mapbox docs: https://docs.mapbox.com/mapbox-gl-js/guides/install/
+
+---
+
+## [2026-05-17] ADR-129: Driver app — z-index por orden de tap para markers traslapados
+
+**Contexto:** Tras ADR-128 (mapa funcionando), el primer chofer real reportó que con 2 paradas a <1km de distancia (Las Calabacitas + La Ciénega en Tláhuac), los pines se traslapaban visualmente a zoom 12 y solo podía interactuar con el pin tappeado MÁS RECIENTE. Su queja exacta: "no puedo modificar el pin 1, solo los que siguen". Pin 1 era el primer tap del custom order; quedaba en el fondo del DOM stack (Mapbox apila markers según orden de creación, último creado on top), y el pin 2 capturaba todos los clicks en la zona de overlap.
+
+**Decisión:** Asignar `z-index` explícito a cada marker, con heurística basada en orden de tap:
+- **Marker tappeado**: `z-index = 1000 - tapIdx`. El PRIMER tap (idx 0) queda arriba; cada tap subsecuente baja un nivel.
+- **Marker pending sin tap**: `z-index = 100`. Encima del depot, debajo de cualquier tappeado.
+- **Depot**: `z-index = 50`. Siempre al fondo — es informativo, no interactivo en este flow.
+
+Razón de poner el PRIMER tap arriba: cuando el chofer se equivoca al ordenar, casi siempre el error fue en su primera decisión (el resto fluyó de ahí). Los taps siguientes son fáciles de cancelar simplemente tappeando el siguiente pin en el orden correcto. Pero el PRIMERO requiere quitarlo explícitamente para reiniciar la cadena.
+
+**Alternativas consideradas:**
+- *Spread-on-overlap (offset visual + leader lines)*: técnica estándar en mapping cuando markers chocan. Detecta colisiones a nivel pixel, separa los pines, dibuja líneas guía al punto original. Descartado por scope — requiere ~100 líneas de algoritmo de detección + animación. Para N≤30 stops típicos en Sprint 1, los traslapes son raros y vale la pena el long-term fix solo si emerge demanda.
+- *Reverse iteration order (`for i = N-1; i--`)*: hacía que el pin con `stops[0]` quedara on top siempre, no respetaba customOrder. Funcionaba para el caso del usuario (donde el primer pin coincidía con stops[0]) pero rompía la heurística general.
+- *z-index dinámico según último tap*: el más reciente arriba. Descartado porque va al revés de la queja típica del usuario (querer corregir la primera decisión, no la última).
+- *Cluster los pines cuando están muy cerca*: misma fricción que spread, agregaba complejidad sin resolver el problema de re-tap.
+- *Aumentar tamaño del marker para reducir overlap*: contraproducente, más overlap.
+
+**Riesgos / Limitaciones:**
+- **Re-tap del LAST-tapped es más difícil cuando overlap es severo**: si el chofer tappeó 3 pines que están exactamente uno encima del otro, deseleccionar el tercero requiere aim preciso a la zona visible. Aceptable porque escenarios con 3+ pines en el mismo pixel son ultra-raros.
+- **No funciona en touch devices con dedo grueso**: el hit target sigue siendo 36px. Si los pines están a <36px de distancia visual, el dedo del chofer puede tappear el pin equivocado independiente del z-index. Mitigación futura: bumpar `width/height` a 44px (Apple HIG mínimo touch target).
+- **El depot siempre debajo**: si por alguna razón el depot ESTÁ en el mismo pixel que un stop (improbable, el CEDIS no debería coincidir con una tienda), no se vería. Aceptable.
+
+**Oportunidades de mejora:**
+- Spread-on-overlap si vemos quejas recurrentes a N>30 stops.
+- Marker hit target a 44px para mobile-friendliness.
+- Animación sutil al tappear (scale up + fade) para confirmar al chofer que su tap registró — útil cuando el feedback visual es ambiguo por overlap.
+
+**Refs:**
+- ADR-125 — pantalla original `/route/accept`.
+- ADR-127, ADR-128 — fixes previos en el mismo componente.
+- apps/driver/src/app/route/accept/accept-route-flow.tsx — implementación.

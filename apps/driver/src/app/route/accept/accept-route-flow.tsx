@@ -202,11 +202,13 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
     // Depot solo se monta una vez (no depende del mode).
     // Number() defensivo: Postgres numeric llega como string en supabase-js
     // (ADR-127). Sin coerción, mapbox no proyecta y los pines salen del bbox.
+    // z-index 50 — el depot queda DEBAJO de cualquier stop pin (ADR-129).
     if (depot && !depotMarkerRef.current) {
       const depotLng = Number(depot.lng);
       const depotLat = Number(depot.lat);
       if (Number.isFinite(depotLng) && Number.isFinite(depotLat)) {
         const depotEl = createDepotMarkerElement(depot);
+        depotEl.style.zIndex = '50';
         depotMarkerRef.current = new mapboxgl.Marker({ element: depotEl, anchor: 'bottom' })
           .setLngLat([depotLng, depotLat])
           .addTo(map);
@@ -214,11 +216,37 @@ export function AcceptRouteFlow({ routeName, stops, depot, mapboxToken }: Props)
     }
 
     // Stops: crear marker fresh con el elemento del mode actual.
+    //
+    // ADR-129 (2026-05-17): z-index explícito para resolver "no puedo
+    // tappear el pin debajo cuando se traslapan". Mapbox apila markers
+    // según orden DOM (last-added on top). Cuando 2 paradas están a
+    // <1km de distancia, sus pines se traslapan a zoom 12-14 y el de
+    // arriba captura todos los clicks. El reporte concreto fue
+    // "no puedo modificar pin 1, solo los que siguen" — pin 1 era el
+    // PRIMERO tappeado y quedaba debajo del segundo tap, sin poder
+    // deseleccionar para corregir el orden.
+    //
+    // Heurística: el primer-tappeado va arriba, taps siguientes bajan
+    // en z. Razón: cuando el chofer se da cuenta que se equivocó, casi
+    // siempre quiere corregir su PRIMERA decisión (el resto fluyó de
+    // ahí). Los untapped quedan al fondo, encima del depot.
+    //
+    // Long-term fix sería spread-on-overlap (offset visual + leader
+    // lines), pero requiere bastante UX y no aplica para el caso típico
+    // de N≤30 stops donde traslapes son raros.
     for (const stop of stops) {
       const stopLng = Number(stop.lng);
       const stopLat = Number(stop.lat);
       if (!Number.isFinite(stopLng) || !Number.isFinite(stopLat)) continue;
       const el = createStopMarkerElement(stop, mode, customOrder);
+      const tapIdx = customOrder.indexOf(stop.stopId);
+      if (tapIdx !== -1) {
+        // Tappeado: el primer tap (idx 0) tiene el z más alto.
+        el.style.zIndex = String(1000 - tapIdx);
+      } else {
+        // Untapped pending: encima del depot (50) pero debajo de cualquier tapped.
+        el.style.zIndex = '100';
+      }
       if (mode === 'custom' && stop.status === 'pending') {
         el.style.cursor = 'pointer';
         el.addEventListener('click', () => handleTapStop(stop.stopId));
